@@ -103,6 +103,14 @@
   - 命令行增加 `-X utf8`
   - 环境变量增加 `PYTHONUTF8=1`、`PYTHONIOENCODING=utf-8`
 
+### 9) 先启动监听、后启动微信
+现象：
+- 先启动监听脚本时微信尚未打开，worker 会报“未找到微信窗口”。
+
+处理：
+- `group_listener_worker.py` 支持 `--load-retry-seconds`，微信未就绪时按间隔持续重试。
+- `sidebar_translate_listener.py` 从 `config/listener.json` 的 `listen.load_retry_seconds` 读取该值（默认 `10.0` 秒）。
+
 ## 推荐运行参数
 
 ### 低干扰稳定方案（推荐）

@@ -4,13 +4,14 @@
     "targets": [
       "ssh 前端进阶交流群3群「禁广告」"
     ],
+    "load_retry_seconds": 10.0,
     "interval_seconds": 1.0,
     "focus_refresh": false
   },
   "translate": {
     "enabled": true,
     "provider": "deeplx",
-    "deeplx_url": "https://api.deeplx.org/<your-key>/translate",
+    "deeplx_url": "",
     "source_lang": "auto",
     "target_lang": "EN",
     "timeout_seconds": 8.0

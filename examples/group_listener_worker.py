@@ -115,6 +115,12 @@ def main():
     parser.add_argument("--probe", action="store_true", help="init and exit for quick diagnostics")
     parser.add_argument("--debug", action="store_true", help="emit debug logs each poll")
     parser.add_argument(
+        "--load-retry-seconds",
+        type=float,
+        default=10.0,
+        help="retry interval when WeChat is not ready at startup",
+    )
+    parser.add_argument(
         "--focus-refresh",
         action="store_true",
         help="force switch focus to WeChat each poll (more stable, but steals focus)",
@@ -129,9 +135,17 @@ def main():
     emit({"type": "log", "value": "boot"})
     try:
         wx = WxAuto()
-        if not wx.load_wechat():
-            emit({"type": "status", "value": "load_wechat failed"})
-            return
+        retry_seconds = max(0.5, float(args.load_retry_seconds))
+        while not wx.load_wechat():
+            emit(
+                {
+                    "type": "status",
+                    "value": f"wechat not ready, retry in {retry_seconds:.1f}s",
+                }
+            )
+            if args.probe:
+                return
+            time.sleep(retry_seconds)
 
         if args.mode in ("chat", "mixed"):
             # chat/mixed 会主动打开目标会话；session 模式不会触发该行为。

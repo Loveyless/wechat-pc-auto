@@ -322,7 +322,12 @@ class SidebarUI:
 
 
 def start_worker_process(
-    target: str, interval: float, mode: str, debug: bool, focus_refresh: bool
+    target: str,
+    interval: float,
+    mode: str,
+    debug: bool,
+    focus_refresh: bool,
+    load_retry_seconds: float,
 ) -> subprocess.Popen:
     # 使用 UTF-8 管道，避免中文在父子进程间错码。
     worker = os.path.join(ROOT_DIR, "examples", "group_listener_worker.py")
@@ -336,6 +341,8 @@ def start_worker_process(
         target,
         "--interval",
         str(interval),
+        "--load-retry-seconds",
+        str(load_retry_seconds),
         "--mode",
         mode,
     ]
@@ -441,6 +448,12 @@ def main():
         action="store_true",
         default=as_bool(listen_cfg.get("focus_refresh"), False),
         help="force worker to switch focus to WeChat each poll",
+    )
+    parser.add_argument(
+        "--load-retry-seconds",
+        type=float,
+        default=as_float(listen_cfg.get("load_retry_seconds"), 10.0),
+        help="retry interval when WeChat is not ready at startup",
     )
     parser.add_argument(
         "--deeplx-url",
@@ -550,7 +563,12 @@ def main():
     emitted = set()
 
     proc = start_worker_process(
-        target_group, args.interval, args.mode, args.worker_debug, args.focus_refresh
+        target_group,
+        args.interval,
+        args.mode,
+        args.worker_debug,
+        args.focus_refresh,
+        args.load_retry_seconds,
     )
     append_log_file(args.log_file, f"worker start pid={proc.pid}")
 

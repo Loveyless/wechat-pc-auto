@@ -8,6 +8,7 @@
     "targets": [
       "ssh 前端进阶交流群3群「禁广告」"
     ],
+    "load_retry_seconds": 10.0,
     "interval_seconds": 1.0,
     "focus_refresh": false
   },
@@ -39,6 +40,7 @@
   - `session`：只监听会话列表预览，不主动打开会话。  
   - `chat` / `mixed`：会尝试切到目标会话（会影响当前微信焦点）。
 - `targets`：监听目标数组。当前版本使用第一个元素作为目标会话名。
+- `load_retry_seconds`：微信未启动/未就绪时的重试间隔（秒），默认 `10.0`。
 - `interval_seconds`：轮询间隔（秒）。越小越实时，但占用更高。
 - `focus_refresh`：是否每轮强制切回微信刷新 UIA。`true` 更稳但会抢焦点。
 

@@ -81,6 +81,7 @@ python examples/sidebar_translate_listener.py --config "D:\code\wechat-pc-auto\c
 - 请确保微信已登录且未被最小化
 - 首次运行可能需要管理员权限（uiautomation 需要）
 - 不支持发送表情包（可发送文本中的emoji）
+- 可在 `config/listener.json` 设置 `listen.load_retry_seconds`，支持“先启动监听，再打开微信”自动重试
 
 ## 项目特点
 

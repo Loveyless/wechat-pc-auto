@@ -29,8 +29,8 @@
 - `wechat_auto/logger.py`：统一日志输出函数。
 
 ### 当前主流程脚本 `examples/`
-- `examples/group_listener_worker.py`：监听 worker 进程；输出 JSON 行事件；当前固定监听群。
-- `examples/sidebar_translate_listener.py`：侧边栏 UI + DeepLX 翻译 + worker 管理；当前固定监听群。
+- `examples/group_listener_worker.py`：监听 worker 进程；输出 JSON 行事件；监听目标由 `config/listener.json` 或 CLI 参数决定。
+- `examples/sidebar_translate_listener.py`：侧边栏 UI + DeepLX 翻译 + worker 管理；读取配置并启动 worker。
 
 ### 历史示例 `examples/legacy/`
 - `examples/legacy/auto_reply.py`：自动回复示例（历史能力，非当前主流程）。
@@ -85,3 +85,4 @@
 ## 维护约束
 - 监听主链路默认只维护 `examples/sidebar_translate_listener.py` + `examples/group_listener_worker.py`。
 - 任何监听相关改动都要同步更新 `docs/wechat-listening-pitfalls.md`。
+- 任何 `config/listener.json` 字段新增/删除/语义变更，必须同步更新 `config/listener.md` 对应说明与示例。
