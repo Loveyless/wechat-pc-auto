@@ -40,6 +40,7 @@
 
 ### 文档与运行产物
 - `docs/wechat-listening-pitfalls.md`：监听架构、坑位、排障与实现契约。
+- `docs/windows-packaging.md`：Windows EXE 打包步骤与排障说明。
 - `logs/`：运行日志目录（例如侧边栏日志）。
 - `dist/`：构建产物目录（wheel/tar.gz）。
 - `wechat_pc_auto.egg-info/`：打包元数据目录（构建产物）。
@@ -55,6 +56,8 @@
 - `config/listener.json`：监听与翻译主配置。
 - `@AutomationLog.txt`：本地调试日志。
 - `docs/wechat-listening-pitfalls.md`：监听与翻译链路踩坑文档。
+- `docs/windows-packaging.md`：EXE 打包文档。
+- `scripts/build_windows_exe.ps1`：Windows 下 PyInstaller 构建脚本。
 - `examples/sidebar_translate_listener.py`：侧边栏 UI、翻译、worker 管理。
 - `examples/group_listener_worker.py`：监听 worker，输出 JSON 事件。
 - `examples/legacy/auto_reply.py`：自动回复历史示例。

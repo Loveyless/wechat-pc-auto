@@ -1,5 +1,7 @@
 # listener.json 配置说明
 
+打包为 EXE 后，默认配置路径为：`<exe目录>\config\listener.json`。
+
 ## 完整配置示例
 ```json
 {

@@ -111,6 +111,14 @@
 - `group_listener_worker.py` 支持 `--load-retry-seconds`，微信未就绪时按间隔持续重试。
 - `sidebar_translate_listener.py` 从 `config/listener.json` 的 `listen.load_retry_seconds` 读取该值（默认 `10.0` 秒）。
 
+### 10) 打包后 worker 路径失效
+现象：
+- 直接把脚本打包为 exe 后，主进程按 `.py` 路径拉起 worker 失败。
+
+处理：
+- `sidebar_translate_listener.py` 在打包模式使用 `--worker-mode` 启动内嵌 worker；
+- 源码模式仍按 `examples/group_listener_worker.py` 运行，保持开发调试体验一致。
+
 ## 推荐运行参数
 
 ### 低干扰稳定方案（推荐）

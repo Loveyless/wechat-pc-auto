@@ -101,7 +101,7 @@ def wait_initial_chat_signature(window, timeout_seconds: float = 4.0):
     return None
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="wechat listener worker")
     parser.add_argument("--target", default="", help="target chat/group name")
     parser.add_argument("--group", default="", help=argparse.SUPPRESS)
@@ -125,7 +125,7 @@ def main():
         action="store_true",
         help="force switch focus to WeChat each poll (more stable, but steals focus)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     # 兼容老参数 --group，但以 --target 为主。
     target_group = (args.target or args.group).strip()
     if not target_group:

@@ -12,3 +12,6 @@ pip-delete-this-directory.txt
 Thumbs.db
 .env.local
 @AutomationLog.txt
+artifacts/
+build/
+*.spec

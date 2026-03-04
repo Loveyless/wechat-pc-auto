@@ -75,6 +75,25 @@ set DEEPLX_URL=http://127.0.0.1:1188/translate
 python examples/sidebar_translate_listener.py --config "D:\code\wechat-pc-auto\config\listener.json"
 ```
 
+## 打包为 EXE（Windows）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_exe.ps1
+```
+
+默认输出：
+- `artifacts/dist/wechat-listener/`（`--onedir`）
+- 主程序：`wechat-listener.exe`
+
+可选参数：
+- `-OneFile`：打成单文件 exe（启动更慢，兼容性略弱于 onedir）。
+- `-Console`：保留控制台窗口，便于看日志。
+
+运行规则：
+- 配置文件默认读取 `exe` 同级目录下的 `config/listener.json`。
+- 若该文件不存在，程序会从打包内置模板自动生成一份。
+- 监听 worker 由主 exe 以内嵌模式拉起，不需要额外的 worker.exe。
+
 ## 注意事项
 
 - 仅支持 Windows 系统 + 微信 PC 版

@@ -20,7 +20,12 @@ from typing import Any, Dict
 # - 处理消息事件并执行翻译
 # - 以“聊天气泡”风格展示（支持自己消息右对齐）
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_CONFIG_PATH = os.path.join(ROOT_DIR, "config", "listener.json")
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+APP_DIR = os.path.dirname(sys.executable) if IS_FROZEN else ROOT_DIR
+BUNDLE_DIR = getattr(sys, "_MEIPASS", ROOT_DIR)
+DEFAULT_CONFIG_PATH = os.path.join(APP_DIR, "config", "listener.json")
 # 匹配 “发送人: 正文” / “发送人：正文”
 SENDER_PREFIX_RE = re.compile(r"^\s*([^:：]{1,40})[:：]\s*(.+?)\s*$")
 # 过滤图片占位文本（例如 [图片] / [Images]）
@@ -28,25 +33,66 @@ IMAGE_PLACEHOLDER_RE = re.compile(r"^\[\s*(图片|image|images|photo)\s*\]$", re
 
 
 def load_local_env():
-    env_path = os.path.join(ROOT_DIR, ".env.local")
-    if not os.path.exists(env_path):
-        return
-    try:
-        with open(env_path, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = value
-    except Exception:
-        pass
+    for env_path in (
+        os.path.join(APP_DIR, ".env.local"),
+        os.path.join(ROOT_DIR, ".env.local"),
+    ):
+        if not os.path.exists(env_path):
+            continue
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+            return
+        except Exception:
+            continue
 
 
 load_local_env()
+
+
+def ensure_default_config() -> str:
+    target = DEFAULT_CONFIG_PATH
+    if os.path.exists(target):
+        return target
+
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    candidates = [
+        os.path.join(BUNDLE_DIR, "config", "listener.json"),
+        os.path.join(ROOT_DIR, "config", "listener.json"),
+    ]
+    for src in candidates:
+        if not os.path.exists(src):
+            continue
+        try:
+            with open(src, "r", encoding="utf-8") as f_src, open(
+                target, "w", encoding="utf-8"
+            ) as f_dst:
+                f_dst.write(f_src.read())
+            return target
+        except Exception:
+            continue
+    raise RuntimeError(f"missing config template: {candidates}")
+
+
+def run_embedded_worker_if_requested() -> bool:
+    if "--worker-mode" not in sys.argv:
+        return False
+    worker_argv = [arg for arg in sys.argv[1:] if arg != "--worker-mode"]
+    try:
+        from examples import group_listener_worker as worker_entry
+    except Exception as e:
+        print(f"[sidebar] load embedded worker failed: {e}", file=sys.stderr)
+        raise SystemExit(2)
+    worker_entry.main(worker_argv)
+    return True
 
 
 def load_json_config(path: str) -> Dict[str, Any]:
@@ -330,22 +376,40 @@ def start_worker_process(
     load_retry_seconds: float,
 ) -> subprocess.Popen:
     # 使用 UTF-8 管道，避免中文在父子进程间错码。
-    worker = os.path.join(ROOT_DIR, "examples", "group_listener_worker.py")
-    cmd = [
-        sys.executable,
-        "-X",
-        "utf8",
-        "-u",
-        worker,
-        "--target",
-        target,
-        "--interval",
-        str(interval),
-        "--load-retry-seconds",
-        str(load_retry_seconds),
-        "--mode",
-        mode,
-    ]
+    cmd = [sys.executable]
+    if IS_FROZEN:
+        # 打包模式：复用同一个 exe 进入内嵌 worker 角色。
+        cmd.extend(
+            [
+                "--worker-mode",
+                "--target",
+                target,
+                "--interval",
+                str(interval),
+                "--load-retry-seconds",
+                str(load_retry_seconds),
+                "--mode",
+                mode,
+            ]
+        )
+    else:
+        worker = os.path.join(ROOT_DIR, "examples", "group_listener_worker.py")
+        cmd.extend(
+            [
+                "-X",
+                "utf8",
+                "-u",
+                worker,
+                "--target",
+                target,
+                "--interval",
+                str(interval),
+                "--load-retry-seconds",
+                str(load_retry_seconds),
+                "--mode",
+                mode,
+            ]
+        )
     if debug:
         cmd.append("--debug")
     if focus_refresh:
@@ -355,7 +419,7 @@ def start_worker_process(
     env["PYTHONIOENCODING"] = "utf-8"
     return subprocess.Popen(
         cmd,
-        cwd=ROOT_DIR,
+        cwd=APP_DIR if IS_FROZEN else ROOT_DIR,
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -391,8 +455,16 @@ def stderr_reader(proc: subprocess.Popen, q: "queue.Queue[dict]"):
 
 
 def main():
+    default_config_path = DEFAULT_CONFIG_PATH
+    if not os.path.exists(default_config_path):
+        try:
+            default_config_path = ensure_default_config()
+        except Exception:
+            # 延后到 load_json_config 时给出统一错误信息。
+            default_config_path = DEFAULT_CONFIG_PATH
+
     pre_parser = argparse.ArgumentParser(add_help=False)
-    pre_parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="JSON config path")
+    pre_parser.add_argument("--config", default=default_config_path, help="JSON config path")
     pre_args, _ = pre_parser.parse_known_args()
 
     try:
@@ -684,4 +756,6 @@ def main():
 
 
 if __name__ == "__main__":
+    if run_embedded_worker_if_requested():
+        raise SystemExit(0)
     main()
