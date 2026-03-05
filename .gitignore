@@ -19,3 +19,4 @@ build/
 *.spec
 dist/
 *.egg-info/
+.codex/
