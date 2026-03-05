@@ -23,6 +23,10 @@ from wechat_auto.controls import (
 
 TIME_LINE_RE = re.compile(r"^(?:昨天|今天|星期[一二三四五六日天])?\s*\d{1,2}:\d{2}$")
 UNREAD_PREFIX_RE = re.compile(r"^\[\d+条\]\s*")
+EMIT_DEBOUNCE_SECONDS = 0.8
+EMIT_CACHE_TTL_SECONDS = 120.0
+EMIT_CACHE_MAX_KEYS = 600
+EMIT_CLEANUP_INTERVAL_SECONDS = 30.0
 
 
 def emit(event: dict):
@@ -101,6 +105,31 @@ def wait_initial_chat_signature(window, timeout_seconds: float = 4.0):
     return None
 
 
+def should_emit(recent_emit_at: dict[str, float], key: str, now_ts: float) -> bool:
+    # 仅抑制短时间抖动重复；不做全生命周期永久去重。
+    prev_ts = recent_emit_at.get(key)
+    if prev_ts is not None and now_ts - prev_ts <= EMIT_DEBOUNCE_SECONDS:
+        return False
+    recent_emit_at[key] = now_ts
+    return True
+
+
+def cleanup_recent_emit_cache(recent_emit_at: dict[str, float], now_ts: float):
+    expired = [
+        key
+        for key, ts in recent_emit_at.items()
+        if now_ts - ts > EMIT_CACHE_TTL_SECONDS
+    ]
+    for key in expired:
+        recent_emit_at.pop(key, None)
+
+    overflow = len(recent_emit_at) - EMIT_CACHE_MAX_KEYS
+    if overflow > 0:
+        oldest = sorted(recent_emit_at.items(), key=lambda item: item[1])[:overflow]
+        for key, _ in oldest:
+            recent_emit_at.pop(key, None)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="wechat listener worker")
     parser.add_argument("--target", default="", help="target chat/group name")
@@ -155,11 +184,20 @@ def main(argv=None):
 
         window = wx.window
         last_chat_sig = wait_initial_chat_signature(window, timeout_seconds=4.0)
-        last_session_sig = find_target_session_raw(window, target_group)
-        emitted = set()
+        last_session_preview = extract_session_preview(find_target_session_raw(window, target_group))
+        recent_emit_at = {}
+        last_emit_cleanup = 0.0
         emit({"type": "status", "value": f"running mode={args.mode} target={target_group}"})
         if args.probe:
-            emit({"type": "log", "value": f"probe chat_sig={last_chat_sig} session_found={bool(last_session_sig)}"})
+            emit(
+                {
+                    "type": "log",
+                    "value": (
+                        f"probe chat_sig={last_chat_sig} "
+                        f"session_found={bool(last_session_preview)}"
+                    ),
+                }
+            )
             return
 
         while True:
@@ -181,6 +219,10 @@ def main(argv=None):
                         pass
 
                 now = datetime.now().strftime("%H:%M:%S")
+                now_ts = time.time()
+                if now_ts - last_emit_cleanup >= EMIT_CLEANUP_INTERVAL_SECONDS:
+                    cleanup_recent_emit_cache(recent_emit_at, now_ts)
+                    last_emit_cleanup = now_ts
 
                 if args.mode in ("chat", "mixed"):
                     sig = get_last_message_signature(window)
@@ -191,51 +233,50 @@ def main(argv=None):
 
                     if sig and last_chat_sig and sig != last_chat_sig:
                         _, text = sig
-                        if text:
-                            key = f"chat::{text}"
-                            if key not in emitted:
-                                emitted.add(key)
-                                emit(
-                                    {
-                                        "type": "message",
-                                        "source": "chat",
-                                        # chat_name 是给 UI 层标记会话来源用的稳定字段。
-                                        "chat_name": target_group,
-                                        "text": text,
-                                        "created_at": now,
-                                    }
-                                )
+                        if text and should_emit(recent_emit_at, f"{target_group}::{text}", now_ts):
+                            emit(
+                                {
+                                    "type": "message",
+                                    "source": "chat",
+                                    # chat_name 是给 UI 层标记会话来源用的稳定字段。
+                                    "chat_name": target_group,
+                                    "text": text,
+                                    "created_at": now,
+                                }
+                            )
                     if sig:
                         last_chat_sig = sig
 
                 if args.mode in ("session", "mixed"):
                     # session 模式基于会话列表预览变化触发。
                     session_raw = find_target_session_raw(window, target_group)
+                    current_preview = extract_session_preview(session_raw)
                     if args.debug:
                         emit(
                             {
                                 "type": "log",
-                                "value": f"debug session_preview={extract_session_preview(session_raw)}",
+                                "value": f"debug session_preview={current_preview}",
                             }
                         )
-                    if session_raw and last_session_sig and session_raw != last_session_sig:
-                        preview = extract_session_preview(session_raw)
-                        if preview:
-                            key = f"session::{preview}"
-                            if key not in emitted:
-                                emitted.add(key)
-                                emit(
-                                    {
-                                        "type": "message",
-                                        "source": "session_preview",
-                                        # chat_name 由 UI 用于多目标展示/去重。
-                                        "chat_name": target_group,
-                                        "text": preview,
-                                        "created_at": now,
-                                    }
-                                )
-                    if session_raw:
-                        last_session_sig = session_raw
+                    # 只在“预览正文”变化时触发，避免时间戳/未读数抖动导致同文案重复。
+                    if current_preview and current_preview != last_session_preview:
+                        if last_session_preview and should_emit(
+                            recent_emit_at,
+                            f"{target_group}::{current_preview}",
+                            now_ts,
+                        ):
+                            emit(
+                                {
+                                    "type": "message",
+                                    "source": "session_preview",
+                                    # chat_name 由 UI 用于多目标展示/去重。
+                                    "chat_name": target_group,
+                                    "text": current_preview,
+                                    "created_at": now,
+                                }
+                            )
+                    if current_preview:
+                        last_session_preview = current_preview
             except KeyboardInterrupt:
                 emit({"type": "status", "value": "stopped"})
                 break

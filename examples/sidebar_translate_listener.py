@@ -1,11 +1,15 @@
 import argparse
+import atexit
+import hashlib
 import json
+import math
 import os
 import queue
 import re
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,9 +36,26 @@ SENDER_PREFIX_RE = re.compile(r"^\s*([^:：]{1,40})[:：]\s*(.+?)\s*$")
 # 过滤图片占位文本（例如 [图片] / [Images]）
 IMAGE_PLACEHOLDER_RE = re.compile(r"^\[\s*(图片|image|images|photo)\s*\]$", re.IGNORECASE)
 PREFERRED_UI_FONTS = ("Cascadia Code", "JetBrains Mono", "黑体")
-DEFAULT_SIDEBAR_HEIGHT = 700
+DEFAULT_SIDEBAR_HEIGHT = 550
 DEFAULT_META_FONT_SIZE = 10
 MESSAGE_FONT_EXTRA_PX = 2
+ZERO_WIDTH_RE = re.compile(r"[\u200b\u200c\u200d\ufeff]")
+MULTI_SPACE_RE = re.compile(r"\s+")
+MESSAGE_DEDUPE_WINDOW_SECONDS = 2.5
+SESSION_PREVIEW_DEDUPE_WINDOW_SECONDS = 20.0
+CROSS_SOURCE_MERGE_WINDOW_SECONDS = 3.0
+DEDUPE_CACHE_TTL_SECONDS = 600.0
+DEDUPE_CACHE_MAX_KEYS = 5000
+DEDUPE_CLEANUP_INTERVAL_SECONDS = 30.0
+WINDOW_CASCADE_STEP_PX = 30
+LOG_ROTATE_MAX_BYTES = 10 * 1024 * 1024
+LOG_ROTATE_KEEP_FILES = 5
+TRANSLATE_QUEUE_MAXSIZE = 300
+TRANSLATE_QUEUE_DROP_LOG_INTERVAL_SECONDS = 5.0
+MIN_SIDEBAR_WIDTH = 280
+RUNTIME_LOCK_DIR = os.path.join(ROOT_DIR, "logs", ".runtime")
+_LOG_WRITE_LOCK = threading.Lock()
+_TARGET_LOCK_PATH = ""
 
 
 def load_local_env():
@@ -130,11 +151,50 @@ def as_float(value: Any, default: float) -> float:
         return default
 
 
+def as_non_negative_float(value: Any, default: float) -> float:
+    parsed = as_float(value, default)
+    if not math.isfinite(parsed) or parsed < 0:
+        return default
+    return parsed
+
+
 def as_int(value: Any, default: int) -> int:
     try:
         return int(value)
     except Exception:
         return default
+
+
+def read_config_float(cfg: dict[str, Any], key: str, default: float) -> float:
+    if key not in cfg:
+        return default
+    value = cfg.get(key)
+    try:
+        return float(value)
+    except Exception as e:
+        raise RuntimeError(f"{key} must be number, got {value!r}") from e
+
+
+def read_config_int(cfg: dict[str, Any], key: str, default: int) -> int:
+    if key not in cfg:
+        return default
+    value = cfg.get(key)
+    try:
+        return int(value)
+    except Exception as e:
+        raise RuntimeError(f"{key} must be integer, got {value!r}") from e
+
+
+def validate_positive_float(name: str, value: float) -> float:
+    if not math.isfinite(value) or value <= 0:
+        raise RuntimeError(f"{name} must be > 0, got {value!r}")
+    return value
+
+
+def validate_int_min(name: str, value: int, minimum: int) -> int:
+    if value < minimum:
+        raise RuntimeError(f"{name} must be >= {minimum}, got {value!r}")
+    return value
 
 
 def normalize_targets(value: Any) -> list[str]:
@@ -174,6 +234,42 @@ def split_sender_and_body(text: str) -> tuple[str, str, bool]:
 
 def is_image_placeholder(text: str) -> bool:
     return bool(IMAGE_PLACEHOLDER_RE.match(str(text or "").strip()))
+
+
+def normalize_message_for_dedupe(text: str) -> str:
+    cleaned = ZERO_WIDTH_RE.sub("", str(text or ""))
+    cleaned = MULTI_SPACE_RE.sub(" ", cleaned).strip()
+    return cleaned
+
+
+def is_cross_source_equivalent(current_text: str, previous_text: str) -> bool:
+    if not current_text or not previous_text:
+        return False
+    if current_text == previous_text:
+        return True
+    return current_text.startswith(previous_text) or previous_text.startswith(current_text)
+
+
+def cleanup_dedupe_cache(cache: Dict[str, float], now_ts: float):
+    expired = [key for key, ts in cache.items() if now_ts - ts > DEDUPE_CACHE_TTL_SECONDS]
+    for key in expired:
+        cache.pop(key, None)
+
+    overflow = len(cache) - DEDUPE_CACHE_MAX_KEYS
+    if overflow > 0:
+        oldest = sorted(cache.items(), key=lambda item: item[1])[:overflow]
+        for key, _ in oldest:
+            cache.pop(key, None)
+
+
+def cleanup_recent_chat_events(cache: dict[str, tuple[str, float, str]], now_ts: float):
+    expired = [
+        key
+        for key, (_, ts, _) in cache.items()
+        if now_ts - ts > DEDUPE_CACHE_TTL_SECONDS
+    ]
+    for key in expired:
+        cache.pop(key, None)
 
 
 def pick_ui_font_family(root: tk.Tk) -> str:
@@ -291,8 +387,10 @@ def append_log_file(path: str, line: str):
     if not path:
         return
     try:
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line.rstrip() + "\n")
+        with _LOG_WRITE_LOCK:
+            rotate_log_file_if_needed(path)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line.rstrip() + "\n")
     except Exception:
         pass
 
@@ -311,6 +409,232 @@ def resolve_log_file_path(path: Any) -> str:
         except Exception:
             pass
     return normalized
+
+
+def rotate_log_file_if_needed(path: str):
+    try:
+        if not os.path.exists(path):
+            return
+        if os.path.getsize(path) < LOG_ROTATE_MAX_BYTES:
+            return
+    except Exception:
+        return
+
+    try:
+        oldest = f"{path}.{LOG_ROTATE_KEEP_FILES}"
+        if os.path.exists(oldest):
+            os.remove(oldest)
+    except Exception:
+        pass
+
+    for idx in range(LOG_ROTATE_KEEP_FILES - 1, 0, -1):
+        src = f"{path}.{idx}"
+        dst = f"{path}.{idx + 1}"
+        try:
+            if os.path.exists(src):
+                os.replace(src, dst)
+        except Exception:
+            pass
+
+    try:
+        os.replace(path, f"{path}.1")
+    except Exception:
+        pass
+
+
+def _target_lock_path(target: str) -> str:
+    os.makedirs(RUNTIME_LOCK_DIR, exist_ok=True)
+    digest = hashlib.sha1(target.strip().lower().encode("utf-8")).hexdigest()[:12]
+    return os.path.join(RUNTIME_LOCK_DIR, f"target_{digest}.lock")
+
+
+def _read_lock_payload(lock_path: str) -> dict[str, Any]:
+    try:
+        with open(lock_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _get_pid_start_token(pid: int) -> str:
+    if pid <= 0 or os.name != "nt":
+        return ""
+    try:
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+        class FILETIME(ctypes.Structure):
+            _fields_ = [("dwLowDateTime", ctypes.c_uint32), ("dwHighDateTime", ctypes.c_uint32)]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        kernel32.GetProcessTimes.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(FILETIME),
+            ctypes.POINTER(FILETIME),
+            ctypes.POINTER(FILETIME),
+            ctypes.POINTER(FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return ""
+        creation = FILETIME()
+        exit_time = FILETIME()
+        kernel_time = FILETIME()
+        user_time = FILETIME()
+        ok = kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        )
+        kernel32.CloseHandle(handle)
+        if not ok:
+            return ""
+
+        ticks = (int(creation.dwHighDateTime) << 32) | int(creation.dwLowDateTime)
+        return str(ticks)
+    except Exception:
+        return ""
+
+
+def _is_lock_owner_alive(lock_payload: dict[str, Any]) -> bool:
+    pid = as_int(lock_payload.get("pid"), 0)
+    if not _is_pid_alive(pid):
+        return False
+
+    expected_token = str(lock_payload.get("start_token", "")).strip()
+    if not expected_token:
+        return True
+
+    current_token = _get_pid_start_token(pid)
+    if not current_token:
+        # 无法读取启动时间时退化为 PID 存活判断，避免误删活动锁。
+        return True
+    return current_token == expected_token
+
+
+def is_target_already_running(target: str) -> bool:
+    lock_path = _target_lock_path(target)
+    if not os.path.exists(lock_path):
+        return False
+    lock_payload = _read_lock_payload(lock_path)
+    if _is_lock_owner_alive(lock_payload):
+        return True
+    try:
+        os.remove(lock_path)
+    except Exception:
+        pass
+    return False
+
+
+def acquire_target_lock(target: str) -> tuple[bool, str]:
+    lock_path = _target_lock_path(target)
+    if os.path.exists(lock_path):
+        existing = _read_lock_payload(lock_path)
+        if _is_lock_owner_alive(existing):
+            pid = as_int(existing.get("pid"), 0)
+            return False, f"target already running pid={pid}"
+        try:
+            os.remove(lock_path)
+        except Exception:
+            pass
+
+    start_token = _get_pid_start_token(os.getpid())
+    payload = {
+        "pid": os.getpid(),
+        "target": target,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    if start_token:
+        payload["start_token"] = start_token
+    try:
+        with open(lock_path, "x", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except FileExistsError:
+        existing = _read_lock_payload(lock_path)
+        if _is_lock_owner_alive(existing):
+            pid = as_int(existing.get("pid"), 0)
+            return False, f"target already running pid={pid}"
+        try:
+            with open(lock_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+        except Exception as e:
+            return False, f"target lock create failed: {e}"
+    except Exception as e:
+        return False, f"target lock create failed: {e}"
+    return True, lock_path
+
+
+def release_target_lock():
+    global _TARGET_LOCK_PATH
+    path = _TARGET_LOCK_PATH
+    if not path:
+        return
+    try:
+        lock_payload = _read_lock_payload(path)
+        pid = as_int(lock_payload.get("pid"), 0)
+        expected_token = str(lock_payload.get("start_token", "")).strip()
+        current_token = _get_pid_start_token(os.getpid())
+        same_process = pid == os.getpid()
+        if expected_token and current_token and expected_token != current_token:
+            same_process = False
+        if same_process and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+    _TARGET_LOCK_PATH = ""
+
+
+def append_suffix_to_path(path: str, suffix: str) -> str:
+    if not path:
+        return ""
+    base, ext = os.path.splitext(path)
+    if not ext:
+        return f"{path}.{suffix}"
+    return f"{base}.{suffix}{ext}"
+
+
+def launch_multi_target_sidebars(config_path: str, targets: list[str]):
+    script_path = os.path.abspath(__file__)
+    for idx, target in enumerate(targets):
+        if is_target_already_running(target):
+            print(f"[sidebar] skip already running target: {target}", flush=True)
+            continue
+        cmd = [
+            sys.executable,
+            script_path,
+            "--config",
+            config_path,
+            "--target",
+            target,
+            "--target-index",
+            str(idx),
+        ]
+        subprocess.Popen(cmd, cwd=ROOT_DIR)
+        print(f"[sidebar] launched target#{idx + 1}: {target}", flush=True)
 
 
 def create_translator(
@@ -347,7 +671,14 @@ def build_translate_fallback(cn_text: str, err: Exception, behavior: str) -> str
 
 
 class SidebarUI:
-    def __init__(self, title: str, width: int, side: str, show_chat_name: bool):
+    def __init__(
+        self,
+        title: str,
+        width: int,
+        side: str,
+        show_chat_name: bool,
+        window_offset_index: int = 0,
+    ):
         self.root = tk.Tk()
         self.root.title(title)
         self.ui_font_family = pick_ui_font_family(self.root)
@@ -360,27 +691,27 @@ class SidebarUI:
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
         height = min(DEFAULT_SIDEBAR_HEIGHT, max(320, screen_h - 80))
-        x = screen_w - width - 16 if side == "right" else 16
-        y = 24
+        offset = max(0, window_offset_index) * WINDOW_CASCADE_STEP_PX
+        if side == "right":
+            x = screen_w - width - 16 - offset
+        else:
+            x = 16 + offset
+        max_x = max(0, screen_w - width - 8)
+        x = min(max(0, x), max_x)
+        y = 24 + offset
+        max_y = max(24, screen_h - height - 24)
+        if y > max_y:
+            y = max_y
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-        self.status_var = tk.StringVar(value="starting...")
-        header = ttk.Frame(self.root, padding=8)
-        header.pack(fill=tk.X)
-        title_row = ttk.Frame(header)
-        title_row.pack(fill=tk.X)
-        ttk.Label(
-            title_row, text="WeChat Message Sidebar", font=(self.ui_font_family, 11, "bold")
-        ).pack(
-            side=tk.LEFT
-        )
+        controls = ttk.Frame(self.root, padding=(8, 6, 8, 0))
+        controls.pack(fill=tk.X)
         ttk.Checkbutton(
-            title_row,
+            controls,
             text="置顶",
             variable=self.topmost_var,
             command=self.toggle_topmost,
         ).pack(side=tk.RIGHT)
-        ttk.Label(header, textvariable=self.status_var).pack(anchor="w")
 
         self.text = scrolledtext.ScrolledText(
             self.root,
@@ -411,7 +742,7 @@ class SidebarUI:
         self.text.tag_configure("meta_right", justify=tk.RIGHT, foreground="#666666")
 
     def set_status(self, text: str):
-        self.status_var.set(text)
+        self.root.title(text)
 
     def toggle_topmost(self):
         self.root.attributes("-topmost", self.topmost_var.get())
@@ -429,7 +760,7 @@ class SidebarUI:
             header += f" [{msg.chat_name}]"
         self.text.insert(tk.END, header + "\n", meta_tag)
         # 按需求：正文区不再显示 CN/EN 标签，也不显示 source=session_preview。
-        self.text.insert(tk.END, f"{msg.text_en}\n\n", msg_tag)
+        self.text.insert(tk.END, f"{msg.text_en}\n", msg_tag)
         self.text.see(tk.END)
         self.text.configure(state=tk.DISABLED)
 
@@ -528,6 +859,7 @@ def stderr_reader(proc: subprocess.Popen, q: "queue.Queue[dict]"):
 
 
 def main():
+    global _TARGET_LOCK_PATH
     default_config_path = DEFAULT_CONFIG_PATH
     if not os.path.exists(default_config_path):
         try:
@@ -540,10 +872,13 @@ def main():
         description="Sidebar listener: monitor target chat and show translated output."
     )
     parser.add_argument("--config", default=default_config_path, help="JSON config path")
+    parser.add_argument("--target", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--target-index", type=int, default=0, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
+    config_path = os.path.abspath(args.config)
     try:
-        config = load_json_config(args.config)
+        config = load_json_config(config_path)
     except Exception as e:
         print(f"[sidebar] load config failed: {e}", file=sys.stderr)
         raise SystemExit(2)
@@ -555,25 +890,65 @@ def main():
     display_cfg = config.get("display", {}) if isinstance(config.get("display", {}), dict) else {}
     logging_cfg = config.get("logging", {}) if isinstance(config.get("logging", {}), dict) else {}
 
-    # 当前版本只消费第一个 target；保留数组是为了后续平滑扩展多目标。
     targets = normalize_targets(listen_cfg.get("targets"))
     if not targets:
-        print("[sidebar] config listen.targets is empty", file=sys.stderr)
-        raise SystemExit(2)
-    if len(targets) > 1:
         print(
-            f"[sidebar] multiple targets configured, current version uses first only: {targets[0]!r}",
-            flush=True,
+            "[sidebar] config listen.targets is empty",
+            file=sys.stderr,
         )
-    target_group = targets[0]
+        raise SystemExit(2)
 
     listen_mode = str(listen_cfg.get("mode", "session"))
     if listen_mode not in ("chat", "session", "mixed"):
         listen_mode = "session"
-    listen_interval = as_float(listen_cfg.get("interval_seconds"), 1.0)
     focus_refresh = as_bool(listen_cfg.get("focus_refresh"), False)
     worker_debug = as_bool(listen_cfg.get("worker_debug"), False)
     load_retry_seconds = as_float(listen_cfg.get("load_retry_seconds"), 10.0)
+    message_dedupe_window_seconds = as_non_negative_float(
+        listen_cfg.get("dedupe_window_seconds"),
+        MESSAGE_DEDUPE_WINDOW_SECONDS,
+    )
+    session_preview_dedupe_window_seconds = as_non_negative_float(
+        listen_cfg.get("session_preview_dedupe_window_seconds"),
+        SESSION_PREVIEW_DEDUPE_WINDOW_SECONDS,
+    )
+    cross_source_merge_window_seconds = as_non_negative_float(
+        listen_cfg.get("cross_source_merge_window_seconds"),
+        CROSS_SOURCE_MERGE_WINDOW_SECONDS,
+    )
+
+    target_group = str(args.target or "").strip()
+    target_index = max(0, int(args.target_index))
+    if target_group:
+        if target_group not in targets:
+            print(
+                f"[sidebar] warning: --target not found in config listen.targets: {target_group}",
+                flush=True,
+            )
+    elif len(targets) == 1:
+        target_group = targets[0]
+    else:
+        if listen_mode != "session":
+            print(
+                "[sidebar] multi-target requires listen.mode=session",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        if focus_refresh:
+            print(
+                "[sidebar] multi-target requires listen.focus_refresh=false",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        launch_multi_target_sidebars(config_path, targets)
+        return
+
+    locked, lock_info = acquire_target_lock(target_group)
+    if not locked:
+        print(f"[sidebar] {lock_info}, target={target_group}", flush=True)
+        return
+    _TARGET_LOCK_PATH = lock_info
+    atexit.register(release_target_lock)
 
     translate_enabled = as_bool(translate_cfg.get("enabled"), True)
     translate_provider = str(translate_cfg.get("provider", "deeplx")).lower()
@@ -582,24 +957,36 @@ def main():
     deeplx_url = str(translate_cfg.get("deeplx_url") or os.getenv("DEEPLX_URL", ""))
     source_lang = str(translate_cfg.get("source_lang", "auto"))
     target_lang = str(translate_cfg.get("target_lang", "EN"))
-    translate_timeout = as_float(translate_cfg.get("timeout_seconds"), 8.0)
 
     english_only = as_bool(display_cfg.get("english_only"), True)
     translate_fail_behavior = str(display_cfg.get("on_translate_fail", "show_cn_with_reason"))
     if translate_fail_behavior not in ("show_cn_with_reason", "show_cn", "show_reason"):
         translate_fail_behavior = "show_cn_with_reason"
-    width = as_int(display_cfg.get("width"), 460)
     side = str(display_cfg.get("side", "right"))
     if side not in ("left", "right"):
         side = "right"
 
+    try:
+        listen_interval = read_config_float(listen_cfg, "interval_seconds", 1.0)
+        translate_timeout = read_config_float(translate_cfg, "timeout_seconds", 8.0)
+        width = read_config_int(display_cfg, "width", 420)
+        listen_interval = validate_positive_float("listen.interval_seconds", listen_interval)
+        translate_timeout = validate_positive_float("translate.timeout_seconds", translate_timeout)
+        width = validate_int_min("display.width", width, MIN_SIDEBAR_WIDTH)
+    except RuntimeError as e:
+        print(f"[sidebar] invalid config: {e}", file=sys.stderr)
+        raise SystemExit(2)
+
     log_file = resolve_log_file_path(logging_cfg.get("file", ""))
+    if len(targets) > 1:
+        log_file = append_suffix_to_path(log_file, f"t{target_index + 1}")
 
     ui = SidebarUI(
-        title=f"WeChat EN Sidebar - {target_group}",
+        title=f"{target_group} mode={listen_mode}",
         width=width,
         side=side,
-        show_chat_name=len(targets) > 1,
+        show_chat_name=False,
+        window_offset_index=target_index,
     )
     translator = create_translator(
         enabled=translate_enabled,
@@ -609,18 +996,27 @@ def main():
         target_lang=target_lang,
         timeout_seconds=translate_timeout,
     )
-    if translate_enabled and translate_provider == "deeplx" and deeplx_url:
-        ui.set_status(f"running (deeplx=enabled, mode={listen_mode})")
-    elif translate_enabled:
-        ui.set_status(f"running (translator={translate_provider}, mode={listen_mode})")
-    else:
-        ui.set_status(f"running (translator=disabled, mode={listen_mode})")
+    ui.set_status(f"{target_group} mode={listen_mode}")
     if listen_mode in ("chat", "mixed"):
         ui.append_log("warning: chat/mixed 会主动打开会话；仅监听请用 mode=session")
 
     append_log_file(log_file, "sidebar start")
+    append_log_file(
+        log_file,
+        (
+            "dedupe windows: "
+            f"message={message_dedupe_window_seconds}s "
+            f"session_preview={session_preview_dedupe_window_seconds}s "
+            f"cross_source={cross_source_merge_window_seconds}s"
+        ),
+    )
     event_queue: "queue.Queue[dict]" = queue.Queue()
-    emitted = set()
+    translate_queue: "queue.Queue[dict | None]" = queue.Queue(maxsize=TRANSLATE_QUEUE_MAXSIZE)
+    dedupe_cache: Dict[str, float] = {}
+    recent_chat_events: dict[str, tuple[str, float, str]] = {}
+    last_dedupe_cleanup_at = 0.0
+    translate_queue_drop_count = 0
+    last_translate_queue_drop_log_at = 0.0
 
     proc = start_worker_process(
         target_group,
@@ -637,11 +1033,105 @@ def main():
     t_out.start()
     t_err.start()
 
+    def enqueue_translate_task(task: dict):
+        nonlocal translate_queue_drop_count, last_translate_queue_drop_log_at
+        try:
+            translate_queue.put_nowait(task)
+            return
+        except queue.Full:
+            pass
+
+        empty_marker = object()
+        dropped = empty_marker
+        try:
+            dropped = translate_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        # 队列里如果是停止标记，恢复标记并放弃当前消息，优先保证退出流程可达。
+        if dropped is None:
+            try:
+                translate_queue.put_nowait(None)
+            except queue.Full:
+                pass
+            translate_queue_drop_count += 1
+        else:
+            try:
+                translate_queue.put_nowait(task)
+                return
+            except queue.Full:
+                translate_queue_drop_count += 1
+
+        now_ts = time.time()
+        if (
+            now_ts - last_translate_queue_drop_log_at
+            >= TRANSLATE_QUEUE_DROP_LOG_INTERVAL_SECONDS
+        ):
+            event_queue.put(
+                {
+                    "type": "log",
+                    "value": f"translate queue overflow: dropped={translate_queue_drop_count}",
+                }
+            )
+            last_translate_queue_drop_log_at = now_ts
+
+    def signal_translate_worker_stop():
+        try:
+            translate_queue.put_nowait(None)
+            return
+        except queue.Full:
+            pass
+
+        try:
+            translate_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            translate_queue.put_nowait(None)
+        except queue.Full:
+            pass
+
+    def translate_worker():
+        while True:
+            task = translate_queue.get()
+            if task is None:
+                return
+
+            body_cn = str(task.get("body_cn", ""))
+            rendered_body = body_cn
+            if translate_enabled:
+                try:
+                    rendered_body = translator.translate(body_cn)
+                except Exception as e:
+                    rendered_body = build_translate_fallback(
+                        body_cn, e, translate_fail_behavior
+                    )
+                    event_queue.put({"type": "log", "value": f"translate fallback: {e}"})
+
+            rendered_text = rendered_body
+            if not english_only and rendered_body != body_cn:
+                rendered_text = f"{rendered_text}\nCN: {body_cn}"
+
+            event_queue.put(
+                {
+                    "type": "render_message",
+                    "chat_name": task["chat_name"],
+                    "sender_name": task["sender_name"],
+                    "is_self": task["is_self"],
+                    "source": task["source"],
+                    "created_at": task["created_at"],
+                    "text_en": rendered_text,
+                }
+            )
+
+    t_translate = threading.Thread(target=translate_worker, daemon=True)
+    t_translate.start()
+
     def handle_event(event: dict):
+        nonlocal last_dedupe_cleanup_at
         kind = event.get("type")
         if kind == "status":
             value = str(event.get("value", ""))
-            ui.set_status(value)
             ui.append_log(f"status: {value}")
             append_log_file(log_file, f"status: {value}")
             return
@@ -652,12 +1142,36 @@ def main():
             append_log_file(log_file, value)
             return
 
+        if kind == "render_message":
+            created_at = str(event.get("created_at") or datetime.now().strftime("%H:%M:%S"))
+            chat_name = str(event.get("chat_name", target_group))
+            sender_name = str(event.get("sender_name", ""))
+            rendered_text = str(event.get("text_en", ""))
+            source = str(event.get("source", ""))
+            is_self = bool(event.get("is_self", False))
+            msg = SidebarMessage(
+                chat_name=chat_name,
+                sender_name=sender_name if not is_self else "",
+                text_en=rendered_text,
+                created_at=created_at,
+                is_self=is_self,
+            )
+            ui.append_message(msg)
+            append_log_file(
+                log_file,
+                (
+                    f"[{created_at}] chat={chat_name} source={source} sender={sender_name or 'self'} "
+                    f"en={rendered_text}"
+                ),
+            )
+            return
+
         if kind != "message":
             ui.append_log(f"unknown event: {event}")
             append_log_file(log_file, f"unknown event: {event}")
             return
 
-        # source 仅用于去重/日志，不进入 UI 展示。
+        # source 仅用于去重归并与日志，不进入 UI 展示。
         source = str(event.get("source", ""))
         chat_name = str(event.get("chat_name", target_group))
         cn_text = str(event.get("text", "")).strip()
@@ -673,43 +1187,48 @@ def main():
             append_log_file(log_file, f"skip image placeholder: {chat_name} {cn_text}")
             return
 
-        # 去重键包含 chat/source/sender/body，避免重复刷新导致重复显示。
-        dedupe_key = f"{chat_name}::{source}::{sender_name}::{body_cn}"
-        if dedupe_key in emitted:
+        normalized_body = normalize_message_for_dedupe(body_cn)
+        if not normalized_body:
             return
-        emitted.add(dedupe_key)
 
-        # 3) 只翻译正文 body，发送人单独放到时间行展示。
-        rendered_body = body_cn
-        if translate_enabled:
-            try:
-                rendered_body = translator.translate(body_cn)
-            except Exception as e:
-                rendered_body = build_translate_fallback(
-                    body_cn, e, translate_fail_behavior
-                )
-                ui.append_log(f"translate fallback: {e}")
-                append_log_file(log_file, f"translate fallback: {e}")
-        rendered_text = rendered_body
-        # english_only=false 时才追加 CN 行；默认 english_only=true 直接替换原文展示。
-        if not english_only and rendered_body != body_cn:
-            rendered_text = f"{rendered_text}\nCN: {body_cn}"
+        now_ts = time.time()
 
-        created_at = str(event.get("created_at") or datetime.now().strftime("%H:%M:%S"))
-        msg = SidebarMessage(
-            chat_name=chat_name,
-            sender_name=sender_name if not is_self else "",
-            text_en=rendered_text,
-            created_at=created_at,
-            is_self=is_self,
+        # 先做来源感知去重窗口：session_preview 使用更长窗口抑制重复预览抖动。
+        dedupe_key = f"{chat_name}::{sender_name}::{normalized_body}"
+        prev_ts = dedupe_cache.get(dedupe_key)
+        dedupe_window = (
+            session_preview_dedupe_window_seconds
+            if source == "session_preview"
+            else message_dedupe_window_seconds
         )
-        ui.append_message(msg)
-        append_log_file(
-            log_file,
-            (
-                f"[{created_at}] chat={chat_name} source={source} sender={sender_name or 'self'} "
-                f"en={rendered_text}"
-            ),
+        if prev_ts is not None and now_ts - prev_ts <= dedupe_window:
+            return
+
+        # mixed 模式下 chat/session_preview 双来源近实时重叠时，合并为一条。
+        prev_chat = recent_chat_events.get(chat_name)
+        if prev_chat:
+            prev_body, prev_body_ts, prev_source = prev_chat
+            if source != prev_source and now_ts - prev_body_ts <= cross_source_merge_window_seconds:
+                if is_cross_source_equivalent(normalized_body, prev_body):
+                    return
+
+        dedupe_cache[dedupe_key] = now_ts
+        recent_chat_events[chat_name] = (normalized_body, now_ts, source)
+
+        if now_ts - last_dedupe_cleanup_at >= DEDUPE_CLEANUP_INTERVAL_SECONDS:
+            cleanup_dedupe_cache(dedupe_cache, now_ts)
+            cleanup_recent_chat_events(recent_chat_events, now_ts)
+            last_dedupe_cleanup_at = now_ts
+
+        enqueue_translate_task(
+            {
+                "chat_name": chat_name,
+                "sender_name": sender_name,
+                "body_cn": body_cn,
+                "is_self": is_self,
+                "source": source,
+                "created_at": str(event.get("created_at") or datetime.now().strftime("%H:%M:%S")),
+            }
         )
 
     def drain_queue():
@@ -721,7 +1240,7 @@ def main():
             pass
 
         if proc.poll() is not None:
-            ui.set_status(f"worker exited ({proc.returncode})")
+            ui.set_status(f"{target_group} mode={listen_mode}")
             ui.append_log(f"worker exited ({proc.returncode})")
             append_log_file(log_file, f"worker exited ({proc.returncode})")
             return
@@ -734,6 +1253,11 @@ def main():
                 proc.terminate()
         except Exception:
             pass
+        try:
+            signal_translate_worker_stop()
+        except Exception:
+            pass
+        release_target_lock()
         ui.root.destroy()
 
     ui.root.protocol("WM_DELETE_WINDOW", on_close)
