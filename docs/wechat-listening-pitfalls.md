@@ -51,8 +51,8 @@
 - 某些环境下 UIA 读取会话列表可能保持旧快照。
 
 处理：
-- 增加可选参数 `--focus-refresh`（worker 轮询时执行 `SwitchToThisWindow`）。
-- 默认关闭该参数，避免频繁抢焦点；仅在出现“预览不刷新”时开启。
+- 配置项 `listen.focus_refresh=true` 时，worker 轮询会执行 `SwitchToThisWindow`。
+- 默认关闭该配置，避免频繁抢焦点；仅在出现“预览不刷新”时开启。
 
 ### 4) 抢焦点副作用
 现象：
@@ -60,12 +60,12 @@
 
 处理：
 - 默认不做轮询抢焦点。
-- 仅 `--focus-refresh` 显式开启时才允许抢焦点。
+- 仅 `listen.focus_refresh=true` 时才允许抢焦点。
 
 ### 5) 侧边栏置顶影响操作
 处理：
 - 侧边栏默认不置顶。
-- 仅在需要时显式加 `--topmost`。
+- 仅在需要时用侧边栏头部“置顶”开关临时切换。
 
 ### 6) Worker 日志与事件混流
 现象：
@@ -119,7 +119,7 @@
 - `sidebar_translate_listener.py` 在打包模式使用 `--worker-mode` 启动内嵌 worker；
 - 源码模式仍按 `examples/group_listener_worker.py` 运行，保持开发调试体验一致。
 
-## 推荐运行参数
+## 推荐运行命令
 
 ### 低干扰稳定方案（推荐）
 ```bash
@@ -128,27 +128,24 @@ python examples/sidebar_translate_listener.py ^
 ```
 
 ### 接入 DeepLX
-```bash
-python examples/sidebar_translate_listener.py ^
-  --config "D:\code\wechat-pc-auto\config\listener.json"
-```
+在 `config/listener.json` 设置 `translate.enabled=true` 且配置 `translate.deeplx_url`。
 
 ### 仅在必要时开启强刷新（会抢焦点）
-```bash
-python examples/sidebar_translate_listener.py ^
-  --config "D:\code\wechat-pc-auto\config\listener.json" ^
-  --focus-refresh
-```
+在 `config/listener.json` 设置 `listen.focus_refresh=true`。
 
 ## 排障最小步骤
 1. 先看侧边栏状态是否为 `running mode=...`。
-2. 再看 `--log-file` 是否有 `status: running`。
-3. 若无消息事件，临时加 `--worker-debug` 观察 `session_preview=...` 是否变化。
-4. `session_preview` 不变化时，再启用 `--focus-refresh` 验证是否恢复。
+2. 再看 `logging.file` 指向的日志文件是否有 `status: running`（相对路径按项目根目录解析）。
+3. 若无消息事件，临时设 `listen.worker_debug=true`，观察 `debug session_preview=...` 是否变化。
+4. `session_preview` 不变化时，再设 `listen.focus_refresh=true` 验证是否恢复。
 
 ## 契约约束（后续改动必须保持）
 - `group_listener_worker.py` 输出事件必须保持 JSON 行格式（至少包含 `type` 字段）。
 - `sidebar_translate_listener.py` 必须兼容非 JSON stdout 行，不得因解析失败退出。
+- 左侧消息（非自己消息）UI 头部展示格式为“`[时间] 发送人`”，正文只展示消息内容，不再重复 `发送人:` 前缀。
+- 消息正文字号比时间/昵称行大 `2px`；时间与昵称保持基础字号不变。
+- 侧边栏窗口初始高度为 `700px`；若屏幕高度不足，自动收缩到可显示范围内。
+- UI 字体优先顺序：`Cascadia Code` -> `JetBrains Mono` -> `黑体`；都不可用时回退系统默认字体。
 - 默认行为必须是低干扰：
-  - 不抢焦点（除非 `--focus-refresh`）
-  - 不置顶（除非 `--topmost`）
+  - 不抢焦点（除非 `listen.focus_refresh=true`）
+  - 不置顶（除非用户手动开启“置顶”开关）

@@ -8,6 +8,8 @@ venv/
 .venv/
 pip-delete-this-directory.txt
 *.log
+logs/*
+!logs/.gitkeep
 .DS_Store
 Thumbs.db
 .env.local

@@ -4,7 +4,8 @@
     "targets": ["ssh 前端进阶交流群3群「禁广告」"],
     "load_retry_seconds": 10.0,
     "interval_seconds": 1.0,
-    "focus_refresh": false
+    "focus_refresh": false,
+    "worker_debug": false
   },
   "translate": {
     "enabled": true,
@@ -18,10 +19,9 @@
     "english_only": true,
     "on_translate_fail": "show_cn_with_reason",
     "width": 460,
-    "side": "right",
-    "topmost": false
+    "side": "right"
   },
   "logging": {
-    "file": "D:\\code\\wechat-pc-auto\\logs\\sidebar_listener.log"
+    "file": "logs/sidebar_listener.log"
   }
 }

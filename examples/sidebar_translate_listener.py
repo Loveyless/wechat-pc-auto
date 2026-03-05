@@ -9,6 +9,7 @@ import threading
 import tkinter as tk
 from dataclasses import dataclass
 from datetime import datetime
+from tkinter import font as tkfont
 from tkinter import scrolledtext, ttk
 from urllib import error, request
 from urllib.parse import urlparse
@@ -30,6 +31,10 @@ DEFAULT_CONFIG_PATH = os.path.join(APP_DIR, "config", "listener.json")
 SENDER_PREFIX_RE = re.compile(r"^\s*([^:：]{1,40})[:：]\s*(.+?)\s*$")
 # 过滤图片占位文本（例如 [图片] / [Images]）
 IMAGE_PLACEHOLDER_RE = re.compile(r"^\[\s*(图片|image|images|photo)\s*\]$", re.IGNORECASE)
+PREFERRED_UI_FONTS = ("Cascadia Code", "JetBrains Mono", "黑体")
+DEFAULT_SIDEBAR_HEIGHT = 700
+DEFAULT_META_FONT_SIZE = 10
+MESSAGE_FONT_EXTRA_PX = 2
 
 
 def load_local_env():
@@ -171,6 +176,20 @@ def is_image_placeholder(text: str) -> bool:
     return bool(IMAGE_PLACEHOLDER_RE.match(str(text or "").strip()))
 
 
+def pick_ui_font_family(root: tk.Tk) -> str:
+    try:
+        available = {name.lower(): name for name in tkfont.families(root)}
+    except Exception:
+        available = {}
+
+    for font_name in PREFERRED_UI_FONTS:
+        chosen = available.get(font_name.lower())
+        if chosen:
+            return chosen
+
+    return str(tkfont.nametofont("TkDefaultFont").cget("family"))
+
+
 class TranslatorBase:
     def translate(self, text: str) -> str:
         raise NotImplementedError
@@ -262,6 +281,7 @@ class DeepLXTranslator(TranslatorBase):
 @dataclass
 class SidebarMessage:
     chat_name: str
+    sender_name: str
     text_en: str
     created_at: str
     is_self: bool
@@ -275,6 +295,22 @@ def append_log_file(path: str, line: str):
             f.write(line.rstrip() + "\n")
     except Exception:
         pass
+
+
+def resolve_log_file_path(path: Any) -> str:
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    base_dir = APP_DIR if IS_FROZEN else ROOT_DIR
+    resolved = raw if os.path.isabs(raw) else os.path.join(base_dir, raw)
+    normalized = os.path.normpath(resolved)
+    parent = os.path.dirname(normalized)
+    if parent:
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except Exception:
+            pass
+    return normalized
 
 
 def create_translator(
@@ -311,15 +347,19 @@ def build_translate_fallback(cn_text: str, err: Exception, behavior: str) -> str
 
 
 class SidebarUI:
-    def __init__(self, title: str, width: int, side: str, topmost: bool, show_chat_name: bool):
+    def __init__(self, title: str, width: int, side: str, show_chat_name: bool):
         self.root = tk.Tk()
         self.root.title(title)
-        self.root.attributes("-topmost", bool(topmost))
+        self.ui_font_family = pick_ui_font_family(self.root)
+        self.root.option_add("*Font", (self.ui_font_family, DEFAULT_META_FONT_SIZE))
+        # 置顶只允许通过面板按钮切换；启动默认非置顶。
+        self.topmost_var = tk.BooleanVar(value=False)
+        self.root.attributes("-topmost", self.topmost_var.get())
         self.show_chat_name = bool(show_chat_name)
 
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
-        height = max(480, screen_h - 80)
+        height = min(DEFAULT_SIDEBAR_HEIGHT, max(320, screen_h - 80))
         x = screen_w - width - 16 if side == "right" else 16
         y = 24
         self.root.geometry(f"{width}x{height}+{x}+{y}")
@@ -327,23 +367,54 @@ class SidebarUI:
         self.status_var = tk.StringVar(value="starting...")
         header = ttk.Frame(self.root, padding=8)
         header.pack(fill=tk.X)
-        ttk.Label(header, text="WeChat Message Sidebar", font=("Segoe UI", 11, "bold")).pack(
-            anchor="w"
+        title_row = ttk.Frame(header)
+        title_row.pack(fill=tk.X)
+        ttk.Label(
+            title_row, text="WeChat Message Sidebar", font=(self.ui_font_family, 11, "bold")
+        ).pack(
+            side=tk.LEFT
         )
+        ttk.Checkbutton(
+            title_row,
+            text="置顶",
+            variable=self.topmost_var,
+            command=self.toggle_topmost,
+        ).pack(side=tk.RIGHT)
         ttk.Label(header, textvariable=self.status_var).pack(anchor="w")
 
         self.text = scrolledtext.ScrolledText(
-            self.root, wrap=tk.WORD, font=("Consolas", 10), state=tk.DISABLED
+            self.root,
+            wrap=tk.WORD,
+            font=(self.ui_font_family, DEFAULT_META_FONT_SIZE),
+            state=tk.DISABLED,
         )
         self.text.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
         # 左右两套样式：别人消息靠左，自己消息靠右。
-        self.text.tag_configure("msg_left", justify=tk.LEFT, lmargin1=8, lmargin2=8, rmargin=40)
-        self.text.tag_configure("msg_right", justify=tk.RIGHT, lmargin1=40, lmargin2=40, rmargin=8)
+        message_font_size = DEFAULT_META_FONT_SIZE + MESSAGE_FONT_EXTRA_PX
+        self.text.tag_configure(
+            "msg_left",
+            justify=tk.LEFT,
+            lmargin1=8,
+            lmargin2=8,
+            rmargin=40,
+            font=(self.ui_font_family, message_font_size),
+        )
+        self.text.tag_configure(
+            "msg_right",
+            justify=tk.RIGHT,
+            lmargin1=40,
+            lmargin2=40,
+            rmargin=8,
+            font=(self.ui_font_family, message_font_size),
+        )
         self.text.tag_configure("meta_left", justify=tk.LEFT, foreground="#666666")
         self.text.tag_configure("meta_right", justify=tk.RIGHT, foreground="#666666")
 
     def set_status(self, text: str):
         self.status_var.set(text)
+
+    def toggle_topmost(self):
+        self.root.attributes("-topmost", self.topmost_var.get())
 
     def append_message(self, msg: SidebarMessage):
         self.text.configure(state=tk.NORMAL)
@@ -351,6 +422,8 @@ class SidebarUI:
         meta_tag = "meta_right" if msg.is_self else "meta_left"
         msg_tag = "msg_right" if msg.is_self else "msg_left"
         header = f"[{msg.created_at}]"
+        if msg.sender_name:
+            header += f" {msg.sender_name}"
         # 单目标监听时隐藏 chat_name；多目标时才展示会话名，避免视觉噪声。
         if self.show_chat_name and msg.chat_name:
             header += f" [{msg.chat_name}]"
@@ -463,12 +536,14 @@ def main():
             # 延后到 load_json_config 时给出统一错误信息。
             default_config_path = DEFAULT_CONFIG_PATH
 
-    pre_parser = argparse.ArgumentParser(add_help=False)
-    pre_parser.add_argument("--config", default=default_config_path, help="JSON config path")
-    pre_args, _ = pre_parser.parse_known_args()
+    parser = argparse.ArgumentParser(
+        description="Sidebar listener: monitor target chat and show translated output."
+    )
+    parser.add_argument("--config", default=default_config_path, help="JSON config path")
+    args = parser.parse_args()
 
     try:
-        config = load_json_config(pre_args.config)
+        config = load_json_config(args.config)
     except Exception as e:
         print(f"[sidebar] load config failed: {e}", file=sys.stderr)
         raise SystemExit(2)
@@ -490,159 +565,72 @@ def main():
             f"[sidebar] multiple targets configured, current version uses first only: {targets[0]!r}",
             flush=True,
         )
-    default_target = targets[0]
-    default_mode = str(listen_cfg.get("mode", "session"))
-    if default_mode not in ("chat", "session", "mixed"):
-        default_mode = "session"
-    default_side = str(display_cfg.get("side", "right"))
-    if default_side not in ("left", "right"):
-        default_side = "right"
+    target_group = targets[0]
 
-    parser = argparse.ArgumentParser(
-        parents=[pre_parser],
-        description="Sidebar listener: monitor target chat and show translated output.",
-    )
-    parser.add_argument("--target", default=default_target, help="target chat/group name")
-    parser.add_argument(
-        "--interval",
-        type=float,
-        default=as_float(listen_cfg.get("interval_seconds"), 1.0),
-        help="poll interval seconds",
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["chat", "session", "mixed"],
-        default=default_mode,
-        help="chat=listen opened target chat; session=listen session preview; mixed=both",
-    )
-    parser.add_argument(
-        "--focus-refresh",
-        action="store_true",
-        default=as_bool(listen_cfg.get("focus_refresh"), False),
-        help="force worker to switch focus to WeChat each poll",
-    )
-    parser.add_argument(
-        "--load-retry-seconds",
-        type=float,
-        default=as_float(listen_cfg.get("load_retry_seconds"), 10.0),
-        help="retry interval when WeChat is not ready at startup",
-    )
-    parser.add_argument(
-        "--deeplx-url",
-        default=str(translate_cfg.get("deeplx_url") or os.getenv("DEEPLX_URL", "")),
-        help="DeepLX endpoint, e.g. https://api.deeplx.org/<key>/translate",
-    )
-    parser.add_argument(
-        "--translate-enabled",
-        choices=["true", "false"],
-        default="true" if as_bool(translate_cfg.get("enabled"), True) else "false",
-        help="enable translation",
-    )
-    parser.add_argument(
-        "--translate-provider",
-        choices=["deeplx", "passthrough"],
-        default=str(translate_cfg.get("provider", "deeplx")).lower(),
-        help="translation provider",
-    )
-    parser.add_argument(
-        "--source-lang",
-        default=str(translate_cfg.get("source_lang", "auto")),
-        help="translation source language",
-    )
-    parser.add_argument(
-        "--target-lang",
-        default=str(translate_cfg.get("target_lang", "EN")),
-        help="translation target language",
-    )
-    parser.add_argument(
-        "--translate-timeout",
-        type=float,
-        default=as_float(translate_cfg.get("timeout_seconds"), 8.0),
-        help="translation timeout seconds",
-    )
-    parser.add_argument(
-        "--english-only",
-        choices=["true", "false"],
-        default="true" if as_bool(display_cfg.get("english_only"), True) else "false",
-        help="show translated line only",
-    )
-    parser.add_argument(
-        "--translate-fail-behavior",
-        choices=["show_cn_with_reason", "show_cn", "show_reason"],
-        default=str(display_cfg.get("on_translate_fail", "show_cn_with_reason")),
-        help="fallback behavior on translation failure",
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=as_int(display_cfg.get("width"), 460),
-        help="sidebar width",
-    )
-    parser.add_argument(
-        "--side",
-        choices=["left", "right"],
-        default=default_side,
-        help="sidebar dock side",
-    )
-    parser.add_argument(
-        "--topmost",
-        action="store_true",
-        default=as_bool(display_cfg.get("topmost"), False),
-        help="keep sidebar always on top",
-    )
-    parser.add_argument(
-        "--log-file",
-        default=str(logging_cfg.get("file", "")),
-        help="optional log output file path",
-    )
-    parser.add_argument("--worker-debug", action="store_true", help="enable worker debug logs")
-    args = parser.parse_args()
+    listen_mode = str(listen_cfg.get("mode", "session"))
+    if listen_mode not in ("chat", "session", "mixed"):
+        listen_mode = "session"
+    listen_interval = as_float(listen_cfg.get("interval_seconds"), 1.0)
+    focus_refresh = as_bool(listen_cfg.get("focus_refresh"), False)
+    worker_debug = as_bool(listen_cfg.get("worker_debug"), False)
+    load_retry_seconds = as_float(listen_cfg.get("load_retry_seconds"), 10.0)
 
-    target_group = (args.target or "").strip()
-    if not target_group:
-        print("[sidebar] empty target", file=sys.stderr)
-        raise SystemExit(2)
+    translate_enabled = as_bool(translate_cfg.get("enabled"), True)
+    translate_provider = str(translate_cfg.get("provider", "deeplx")).lower()
+    if translate_provider not in ("deeplx", "passthrough"):
+        translate_provider = "deeplx"
+    deeplx_url = str(translate_cfg.get("deeplx_url") or os.getenv("DEEPLX_URL", ""))
+    source_lang = str(translate_cfg.get("source_lang", "auto"))
+    target_lang = str(translate_cfg.get("target_lang", "EN"))
+    translate_timeout = as_float(translate_cfg.get("timeout_seconds"), 8.0)
 
-    translate_enabled = as_bool(args.translate_enabled, True)
-    english_only = as_bool(args.english_only, True)
+    english_only = as_bool(display_cfg.get("english_only"), True)
+    translate_fail_behavior = str(display_cfg.get("on_translate_fail", "show_cn_with_reason"))
+    if translate_fail_behavior not in ("show_cn_with_reason", "show_cn", "show_reason"):
+        translate_fail_behavior = "show_cn_with_reason"
+    width = as_int(display_cfg.get("width"), 460)
+    side = str(display_cfg.get("side", "right"))
+    if side not in ("left", "right"):
+        side = "right"
+
+    log_file = resolve_log_file_path(logging_cfg.get("file", ""))
 
     ui = SidebarUI(
         title=f"WeChat EN Sidebar - {target_group}",
-        width=args.width,
-        side=args.side,
-        topmost=args.topmost,
+        width=width,
+        side=side,
         show_chat_name=len(targets) > 1,
     )
     translator = create_translator(
         enabled=translate_enabled,
-        provider=args.translate_provider,
-        deeplx_url=args.deeplx_url,
-        source_lang=args.source_lang,
-        target_lang=args.target_lang,
-        timeout_seconds=args.translate_timeout,
+        provider=translate_provider,
+        deeplx_url=deeplx_url,
+        source_lang=source_lang,
+        target_lang=target_lang,
+        timeout_seconds=translate_timeout,
     )
-    if translate_enabled and args.translate_provider == "deeplx" and args.deeplx_url:
-        ui.set_status(f"running (deeplx=enabled, mode={args.mode})")
+    if translate_enabled and translate_provider == "deeplx" and deeplx_url:
+        ui.set_status(f"running (deeplx=enabled, mode={listen_mode})")
     elif translate_enabled:
-        ui.set_status(f"running (translator={args.translate_provider}, mode={args.mode})")
+        ui.set_status(f"running (translator={translate_provider}, mode={listen_mode})")
     else:
-        ui.set_status(f"running (translator=disabled, mode={args.mode})")
-    if args.mode in ("chat", "mixed"):
+        ui.set_status(f"running (translator=disabled, mode={listen_mode})")
+    if listen_mode in ("chat", "mixed"):
         ui.append_log("warning: chat/mixed 会主动打开会话；仅监听请用 mode=session")
 
-    append_log_file(args.log_file, "sidebar start")
+    append_log_file(log_file, "sidebar start")
     event_queue: "queue.Queue[dict]" = queue.Queue()
     emitted = set()
 
     proc = start_worker_process(
         target_group,
-        args.interval,
-        args.mode,
-        args.worker_debug,
-        args.focus_refresh,
-        args.load_retry_seconds,
+        listen_interval,
+        listen_mode,
+        worker_debug,
+        focus_refresh,
+        load_retry_seconds,
     )
-    append_log_file(args.log_file, f"worker start pid={proc.pid}")
+    append_log_file(log_file, f"worker start pid={proc.pid}")
 
     t_out = threading.Thread(target=stdout_reader, args=(proc, event_queue), daemon=True)
     t_err = threading.Thread(target=stderr_reader, args=(proc, event_queue), daemon=True)
@@ -655,18 +643,18 @@ def main():
             value = str(event.get("value", ""))
             ui.set_status(value)
             ui.append_log(f"status: {value}")
-            append_log_file(args.log_file, f"status: {value}")
+            append_log_file(log_file, f"status: {value}")
             return
 
         if kind == "log":
             value = str(event.get("value", ""))
             ui.append_log(value)
-            append_log_file(args.log_file, value)
+            append_log_file(log_file, value)
             return
 
         if kind != "message":
             ui.append_log(f"unknown event: {event}")
-            append_log_file(args.log_file, f"unknown event: {event}")
+            append_log_file(log_file, f"unknown event: {event}")
             return
 
         # source 仅用于去重/日志，不进入 UI 展示。
@@ -682,7 +670,7 @@ def main():
             return
         # 2) 图片占位消息直接过滤（例如 [图片]），不渲染到侧边栏。
         if is_image_placeholder(body_cn):
-            append_log_file(args.log_file, f"skip image placeholder: {chat_name} {cn_text}")
+            append_log_file(log_file, f"skip image placeholder: {chat_name} {cn_text}")
             return
 
         # 去重键包含 chat/source/sender/body，避免重复刷新导致重复显示。
@@ -691,35 +679,33 @@ def main():
             return
         emitted.add(dedupe_key)
 
-        # 3) 只翻译正文 body，发送人前缀保持原样。
+        # 3) 只翻译正文 body，发送人单独放到时间行展示。
         rendered_body = body_cn
         if translate_enabled:
             try:
                 rendered_body = translator.translate(body_cn)
             except Exception as e:
                 rendered_body = build_translate_fallback(
-                    body_cn, e, args.translate_fail_behavior
+                    body_cn, e, translate_fail_behavior
                 )
                 ui.append_log(f"translate fallback: {e}")
-                append_log_file(args.log_file, f"translate fallback: {e}")
+                append_log_file(log_file, f"translate fallback: {e}")
         rendered_text = rendered_body
-        if sender_name:
-            rendered_text = f"{sender_name}: {rendered_body}"
         # english_only=false 时才追加 CN 行；默认 english_only=true 直接替换原文展示。
         if not english_only and rendered_body != body_cn:
-            cn_line = f"{sender_name}: {body_cn}" if sender_name else body_cn
-            rendered_text = f"{rendered_text}\nCN: {cn_line}"
+            rendered_text = f"{rendered_text}\nCN: {body_cn}"
 
         created_at = str(event.get("created_at") or datetime.now().strftime("%H:%M:%S"))
         msg = SidebarMessage(
             chat_name=chat_name,
+            sender_name=sender_name if not is_self else "",
             text_en=rendered_text,
             created_at=created_at,
             is_self=is_self,
         )
         ui.append_message(msg)
         append_log_file(
-            args.log_file,
+            log_file,
             (
                 f"[{created_at}] chat={chat_name} source={source} sender={sender_name or 'self'} "
                 f"en={rendered_text}"
@@ -737,7 +723,7 @@ def main():
         if proc.poll() is not None:
             ui.set_status(f"worker exited ({proc.returncode})")
             ui.append_log(f"worker exited ({proc.returncode})")
-            append_log_file(args.log_file, f"worker exited ({proc.returncode})")
+            append_log_file(log_file, f"worker exited ({proc.returncode})")
             return
 
         ui.root.after(200, drain_queue)
