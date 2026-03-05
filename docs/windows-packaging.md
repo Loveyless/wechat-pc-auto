@@ -27,6 +27,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_exe.ps1 -OneFil
 ## 输出路径
 - 默认输出目录：`artifacts/dist/wechat-listener/`
 - 主程序：`wechat-listener.exe`
+- 构建脚本会自动在输出目录旁生成 `config/listener.json`（以及 `config/listener.md` 说明）：
+  - `-OneFile`：`artifacts/dist/config/listener.json`
+  - 默认 onedir：`artifacts/dist/wechat-listener/config/listener.json`
 
 ## 配置与运行
 - 程序默认读取：`<exe目录>\config\listener.json`

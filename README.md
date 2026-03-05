@@ -75,6 +75,8 @@ set DEEPLX_URL=http://127.0.0.1:1188/translate
 python examples/sidebar_translate_listener.py --config "D:\code\wechat-pc-auto\config\listener.json"
 ```
 
+注意：若使用环境变量，`config/listener.json` 中 `translate.deeplx_url` 需留空字符串，否则会优先使用配置值。
+
 ## 打包为 EXE（Windows）
 
 ```powershell
@@ -84,6 +86,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_exe.ps1
 默认输出：
 - `artifacts/dist/wechat-listener/`（`--onedir`）
 - 主程序：`wechat-listener.exe`
+- 打包脚本会自动复制配置模板到产物旁：
+  - `-OneFile`：`artifacts/dist/config/listener.json`
+  - `--onedir`：`artifacts/dist/wechat-listener/config/listener.json`
 
 可选参数：
 - `-OneFile`：打成单文件 exe（启动更慢，兼容性略弱于 onedir）。

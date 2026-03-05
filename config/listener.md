@@ -21,7 +21,7 @@
   "translate": {
     "enabled": true,
     "provider": "deeplx",
-    "deeplx_url": "https://api.deeplx.org/<your-key>/translate",
+    "deeplx_url": "",
     "source_lang": "auto",
     "target_lang": "EN",
     "timeout_seconds": 8.0
@@ -57,7 +57,7 @@
 - `source_lang`：源语言，`auto` 表示自动检测。
 - `target_lang`：目标语言，例如 `EN`。
 - `timeout_seconds`：翻译请求超时时间（秒）。
-- `deeplx_url` 建议放占位值，真实密钥通过 `.env.local`（已忽略）覆盖。
+- `deeplx_url` 为**配置优先**；若要使用 `.env.local` 的 `DEEPLX_URL`，这里必须留空字符串。
 
 ### `display`
 - `english_only`：`true` 时只显示翻译后的文本（替换原文展示）。
