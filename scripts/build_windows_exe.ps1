@@ -69,5 +69,28 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed."
 }
 
+$copyTargets = @()
+if ($OneFile) {
+    $copyTargets += $distPath
+} else {
+    $copyTargets += (Join-Path $distPath "wechat-listener")
+}
+
+foreach ($targetRoot in $copyTargets) {
+    $targetConfig = Join-Path $targetRoot "config"
+    New-Item -ItemType Directory -Force -Path $targetConfig | Out-Null
+    Copy-Item -Path (Join-Path $configSource "listener.json") -Destination (Join-Path $targetConfig "listener.json") -Force
+    $listenerDoc = Join-Path $configSource "listener.md"
+    if (Test-Path $listenerDoc) {
+        Copy-Item -Path $listenerDoc -Destination (Join-Path $targetConfig "listener.md") -Force
+    }
+}
+
 Write-Output "Build done."
-Write-Output "Output: $distPath\\wechat-listener"
+if ($OneFile) {
+    Write-Output "EXE: $distPath\\wechat-listener.exe"
+    Write-Output "Config: $distPath\\config\\listener.json"
+} else {
+    Write-Output "AppDir: $distPath\\wechat-listener"
+    Write-Output "Config: $distPath\\wechat-listener\\config\\listener.json"
+}
