@@ -1,9 +1,7 @@
 {
   "listen": {
     "mode": "session",
-    "targets": [
-      "ssh 前端进阶交流群3群「禁广告」"
-    ],
+    "targets": ["ssh 前端进阶交流群3群「禁广告」"],
     "load_retry_seconds": 10.0,
     "interval_seconds": 1.0,
     "focus_refresh": false
