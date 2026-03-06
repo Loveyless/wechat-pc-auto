@@ -48,6 +48,20 @@ class SidebarHelpersTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             sidebar.read_config_int({"width": "bad"}, "width", 420)
 
+    def test_append_message_with_limit(self):
+        cache = []
+        for idx in range(5):
+            msg = sidebar.SidebarMessage(
+                chat_name="g1",
+                sender_name="u",
+                text_en=f"m{idx}",
+                created_at="10:00:00",
+                is_self=False,
+            )
+            sidebar.append_message_with_limit(cache, msg, limit=3)
+        self.assertEqual(len(cache), 3)
+        self.assertEqual([item.text_en for item in cache], ["m2", "m3", "m4"])
+
 
 if __name__ == "__main__":
     unittest.main()

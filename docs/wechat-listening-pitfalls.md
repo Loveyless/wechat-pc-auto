@@ -16,7 +16,7 @@
 - 监听与 UI 必须分离：`group_listener_worker.py` 负责抓消息，`sidebar_translate_listener.py` 负责展示与翻译。
 - 默认推荐 `session` 模式，不推荐 `chat` 模式作为唯一监听来源。
 - 默认关闭焦点抢占与侧边栏置顶，避免打断用户操作。
-- 现支持多目标：每个 target 独立侧边栏窗口 + 独立 worker 子进程。
+- 现支持多目标：单侧边栏窗口 + 左侧目标菜单 + 每个 target 独立 worker 子进程。
 
 ## 关键坑位与处理
 
@@ -147,9 +147,9 @@
   - `listen.focus_refresh=false`
 - 采用“每个 target 一个侧边栏子进程”的隔离模型，避免共享状态互相污染。
 
-### 11) 重复启动导致同 target 多窗口
+### 11) 重复启动导致同 target 多实例
 现象：
-- 误重复执行启动命令后，同一个 target 可能出现多个窗口，消息重复显示。
+- 误重复执行启动命令后，同一个 target 可能被多个进程重复监听，消息重复显示。
 
 处理：
 - 为每个 target 增加运行时锁（`logs/.runtime/target_*.lock`）。
@@ -167,14 +167,23 @@
 - 翻译改为后台单线程队列，UI 线程只负责去重与渲染。
 - 翻译失败通过事件回流记录日志，不阻塞后续消息处理。
 
-### 13) 长时间运行日志膨胀
+### 13) 单窗口多目标视图切换
+现象：
+- 多目标监听时，若每个 target 都弹一个窗口，视觉负担重且切换效率低。
+
+处理：
+- 改为单窗口双栏布局：左侧 target 菜单，右侧消息区。
+- 每个 target 仍由独立 worker 监听；未选中 target 的新消息累计未读计数。
+- 每个 target 的消息缓存上限固定 `100` 条，超限后丢弃最旧消息。
+
+### 14) 长时间运行日志膨胀
 现象：
 - 多窗口持续运行时日志文件增长过快，排障时难以定位近期信息。
 
 处理：
 - 启用按大小轮转：单文件约 `10MB` 自动切分，保留最近 `5` 个历史文件。
 
-### 14) 配置脏值导致运行中崩溃
+### 15) 配置脏值导致运行中崩溃
 现象：
 - `listen.interval_seconds<=0` 或 `translate.timeout_seconds<=0` 时，worker/翻译线程会在运行期报错。
 - `display.width` 过小会导致窗口布局异常。
@@ -185,7 +194,7 @@
   - `translate.timeout_seconds > 0`
   - `display.width >= 280`
 
-### 15) PID 复用造成运行时锁误判
+### 16) PID 复用造成运行时锁误判
 现象：
 - 仅依赖 `pid` 判断锁活性时，极端情况下可能把“新进程复用旧 pid”误判为同一实例。
 
@@ -193,7 +202,7 @@
 - 运行时锁同时记录 `pid` 与进程启动时间 token（Windows `GetProcessTimes`）。
 - 清理陈旧锁前先校验 `pid+token` 一致性，减少误判概率。
 
-### 16) 翻译队列无限增长
+### 17) 翻译队列无限增长
 现象：
 - 翻译服务慢于消息流入时，若队列无上限，内存会持续增长。
 
@@ -240,10 +249,11 @@ python examples/sidebar_translate_listener.py ^
 ## 契约约束（后续改动必须保持）
 - `group_listener_worker.py` 输出事件必须保持 JSON 行格式（至少包含 `type` 字段）。
 - `sidebar_translate_listener.py` 必须兼容非 JSON stdout 行，不得因解析失败退出。
-- 多目标时必须“一目标一窗口一子进程”，禁止把多个目标塞进同一个 UI 事件队列。
+- 多目标时必须是“单窗口多视图 + 一目标一子进程”，禁止把多个目标混入同一无区分消息流。
 - 当 `listen.targets` 长度大于 1：`listen.mode` 必须是 `session` 且 `listen.focus_refresh=false`。
 - 同一 target 只允许一个活动侧边栏实例（由运行时锁保证）。
 - 去重必须是“时间窗策略”，禁止恢复为全生命周期永久 `set` 去重。
+- 每个 target 的消息缓存上限固定 `100` 条，禁止无限增长。
 - 启动阶段必须对 `listen.interval_seconds`、`translate.timeout_seconds`、`display.width` 做 fail-fast 校验。
 - 运行时锁活性判断必须包含 `pid` 与进程启动时间 token，禁止仅靠 `pid` 判断。
 - 翻译任务队列必须有上限并具备溢出日志，禁止无界增长。

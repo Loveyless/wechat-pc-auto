@@ -47,15 +47,15 @@ CROSS_SOURCE_MERGE_WINDOW_SECONDS = 3.0
 DEDUPE_CACHE_TTL_SECONDS = 600.0
 DEDUPE_CACHE_MAX_KEYS = 5000
 DEDUPE_CLEANUP_INTERVAL_SECONDS = 30.0
-WINDOW_CASCADE_STEP_PX = 30
 LOG_ROTATE_MAX_BYTES = 10 * 1024 * 1024
 LOG_ROTATE_KEEP_FILES = 5
 TRANSLATE_QUEUE_MAXSIZE = 300
 TRANSLATE_QUEUE_DROP_LOG_INTERVAL_SECONDS = 5.0
 MIN_SIDEBAR_WIDTH = 280
+CHAT_CACHE_LIMIT = 100
 RUNTIME_LOCK_DIR = os.path.join(ROOT_DIR, "logs", ".runtime")
 _LOG_WRITE_LOCK = threading.Lock()
-_TARGET_LOCK_PATH = ""
+_TARGET_LOCK_PATHS: list[str] = []
 
 
 def load_local_env():
@@ -383,6 +383,16 @@ class SidebarMessage:
     is_self: bool
 
 
+def append_message_with_limit(cache: list[SidebarMessage], msg: SidebarMessage, limit: int):
+    cache.append(msg)
+    if limit <= 0:
+        cache.clear()
+        return
+    overflow = len(cache) - limit
+    if overflow > 0:
+        del cache[:overflow]
+
+
 def append_log_file(path: str, line: str):
     if not path:
         return
@@ -589,52 +599,24 @@ def acquire_target_lock(target: str) -> tuple[bool, str]:
 
 
 def release_target_lock():
-    global _TARGET_LOCK_PATH
-    path = _TARGET_LOCK_PATH
-    if not path:
-        return
-    try:
-        lock_payload = _read_lock_payload(path)
-        pid = as_int(lock_payload.get("pid"), 0)
-        expected_token = str(lock_payload.get("start_token", "")).strip()
-        current_token = _get_pid_start_token(os.getpid())
-        same_process = pid == os.getpid()
-        if expected_token and current_token and expected_token != current_token:
-            same_process = False
-        if same_process and os.path.exists(path):
-            os.remove(path)
-    except Exception:
-        pass
-    _TARGET_LOCK_PATH = ""
-
-
-def append_suffix_to_path(path: str, suffix: str) -> str:
-    if not path:
-        return ""
-    base, ext = os.path.splitext(path)
-    if not ext:
-        return f"{path}.{suffix}"
-    return f"{base}.{suffix}{ext}"
-
-
-def launch_multi_target_sidebars(config_path: str, targets: list[str]):
-    script_path = os.path.abspath(__file__)
-    for idx, target in enumerate(targets):
-        if is_target_already_running(target):
-            print(f"[sidebar] skip already running target: {target}", flush=True)
+    global _TARGET_LOCK_PATHS
+    lock_paths = list(_TARGET_LOCK_PATHS)
+    _TARGET_LOCK_PATHS = []
+    for path in lock_paths:
+        if not path:
             continue
-        cmd = [
-            sys.executable,
-            script_path,
-            "--config",
-            config_path,
-            "--target",
-            target,
-            "--target-index",
-            str(idx),
-        ]
-        subprocess.Popen(cmd, cwd=ROOT_DIR)
-        print(f"[sidebar] launched target#{idx + 1}: {target}", flush=True)
+        try:
+            lock_payload = _read_lock_payload(path)
+            pid = as_int(lock_payload.get("pid"), 0)
+            expected_token = str(lock_payload.get("start_token", "")).strip()
+            current_token = _get_pid_start_token(os.getpid())
+            same_process = pid == os.getpid()
+            if expected_token and current_token and expected_token != current_token:
+                same_process = False
+            if same_process and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
 
 
 def create_translator(
@@ -676,8 +658,8 @@ class SidebarUI:
         title: str,
         width: int,
         side: str,
-        show_chat_name: bool,
-        window_offset_index: int = 0,
+        targets: list[str],
+        message_limit: int,
     ):
         self.root = tk.Tk()
         self.root.title(title)
@@ -686,26 +668,33 @@ class SidebarUI:
         # 置顶只允许通过面板按钮切换；启动默认非置顶。
         self.topmost_var = tk.BooleanVar(value=False)
         self.root.attributes("-topmost", self.topmost_var.get())
-        self.show_chat_name = bool(show_chat_name)
+        self.status_var = tk.StringVar(value="starting...")
+        self.message_limit = max(1, int(message_limit))
+        self.chat_order: list[str] = []
+        self.chat_messages: dict[str, list[SidebarMessage]] = {}
+        self.unread_counts: dict[str, int] = {}
+        self.active_chat = ""
 
         screen_w = self.root.winfo_screenwidth()
         screen_h = self.root.winfo_screenheight()
         height = min(DEFAULT_SIDEBAR_HEIGHT, max(320, screen_h - 80))
-        offset = max(0, window_offset_index) * WINDOW_CASCADE_STEP_PX
         if side == "right":
-            x = screen_w - width - 16 - offset
+            x = screen_w - width - 16
         else:
-            x = 16 + offset
+            x = 16
         max_x = max(0, screen_w - width - 8)
         x = min(max(0, x), max_x)
-        y = 24 + offset
+        y = 24
         max_y = max(24, screen_h - height - 24)
         if y > max_y:
             y = max_y
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-        controls = ttk.Frame(self.root, padding=(8, 6, 8, 0))
+        controls = ttk.Frame(self.root, padding=(8, 6, 8, 4))
         controls.pack(fill=tk.X)
+        ttk.Label(controls, textvariable=self.status_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
         ttk.Checkbutton(
             controls,
             text="置顶",
@@ -713,13 +702,28 @@ class SidebarUI:
             command=self.toggle_topmost,
         ).pack(side=tk.RIGHT)
 
+        content = ttk.Frame(self.root)
+        content.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+
+        left_panel = ttk.Frame(content, width=180)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 8))
+        left_panel.pack_propagate(False)
+        self.target_list = tk.Listbox(
+            left_panel,
+            exportselection=False,
+            activestyle="none",
+            font=(self.ui_font_family, DEFAULT_META_FONT_SIZE),
+        )
+        self.target_list.pack(fill=tk.BOTH, expand=True)
+        self.target_list.bind("<<ListboxSelect>>", self._on_target_selected)
+
         self.text = scrolledtext.ScrolledText(
-            self.root,
+            content,
             wrap=tk.WORD,
             font=(self.ui_font_family, DEFAULT_META_FONT_SIZE),
             state=tk.DISABLED,
         )
-        self.text.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        self.text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         # 左右两套样式：别人消息靠左，自己消息靠右。
         message_font_size = DEFAULT_META_FONT_SIZE + MESSAGE_FONT_EXTRA_PX
         self.text.tag_configure(
@@ -741,13 +745,63 @@ class SidebarUI:
         self.text.tag_configure("meta_left", justify=tk.LEFT, foreground="#666666")
         self.text.tag_configure("meta_right", justify=tk.RIGHT, foreground="#666666")
 
+        for target in targets:
+            self._ensure_chat(target)
+        if self.chat_order:
+            self.switch_chat(self.chat_order[0])
+
     def set_status(self, text: str):
-        self.root.title(text)
+        self.status_var.set(text)
 
     def toggle_topmost(self):
         self.root.attributes("-topmost", self.topmost_var.get())
 
-    def append_message(self, msg: SidebarMessage):
+    def _ensure_chat(self, chat_name: str):
+        name = str(chat_name or "").strip()
+        if not name:
+            return
+        if name not in self.chat_messages:
+            self.chat_messages[name] = []
+            self.unread_counts[name] = 0
+            self.chat_order.append(name)
+            self._refresh_target_list()
+
+    def _format_chat_label(self, chat_name: str) -> str:
+        unread = self.unread_counts.get(chat_name, 0)
+        if unread > 0:
+            return f"{chat_name} ({unread})"
+        return chat_name
+
+    def _refresh_target_list(self):
+        self.target_list.delete(0, tk.END)
+        for chat_name in self.chat_order:
+            self.target_list.insert(tk.END, self._format_chat_label(chat_name))
+        if self.active_chat in self.chat_order:
+            idx = self.chat_order.index(self.active_chat)
+            self.target_list.selection_clear(0, tk.END)
+            self.target_list.selection_set(idx)
+            self.target_list.activate(idx)
+
+    def _on_target_selected(self, _event=None):
+        selection = self.target_list.curselection()
+        if not selection:
+            return
+        idx = int(selection[0])
+        if idx < 0 or idx >= len(self.chat_order):
+            return
+        self.switch_chat(self.chat_order[idx])
+
+    def switch_chat(self, chat_name: str):
+        name = str(chat_name or "").strip()
+        if not name:
+            return
+        self._ensure_chat(name)
+        self.active_chat = name
+        self.unread_counts[name] = 0
+        self._refresh_target_list()
+        self._render_active_chat()
+
+    def _insert_message(self, msg: SidebarMessage):
         self.text.configure(state=tk.NORMAL)
         # 根据 is_self 决定气泡左右对齐。
         meta_tag = "meta_right" if msg.is_self else "meta_left"
@@ -755,20 +809,32 @@ class SidebarUI:
         header = f"[{msg.created_at}]"
         if msg.sender_name:
             header += f" {msg.sender_name}"
-        # 单目标监听时隐藏 chat_name；多目标时才展示会话名，避免视觉噪声。
-        if self.show_chat_name and msg.chat_name:
-            header += f" [{msg.chat_name}]"
         self.text.insert(tk.END, header + "\n", meta_tag)
         # 按需求：正文区不再显示 CN/EN 标签，也不显示 source=session_preview。
         self.text.insert(tk.END, f"{msg.text_en}\n", msg_tag)
-        self.text.see(tk.END)
         self.text.configure(state=tk.DISABLED)
 
-    def append_log(self, line: str):
+    def _render_active_chat(self):
         self.text.configure(state=tk.NORMAL)
-        self.text.insert(tk.END, f"{line}\n")
-        self.text.see(tk.END)
+        self.text.delete("1.0", tk.END)
+        for msg in self.chat_messages.get(self.active_chat, []):
+            self._insert_message(msg)
         self.text.configure(state=tk.DISABLED)
+        self.text.see(tk.END)
+
+    def append_message(self, msg: SidebarMessage):
+        self._ensure_chat(msg.chat_name)
+        cache = self.chat_messages[msg.chat_name]
+        append_message_with_limit(cache, msg, self.message_limit)
+        if msg.chat_name != self.active_chat:
+            self.unread_counts[msg.chat_name] = self.unread_counts.get(msg.chat_name, 0) + 1
+            self._refresh_target_list()
+            return
+        self._insert_message(msg)
+        self.text.see(tk.END)
+
+    def append_log(self, line: str):
+        self.status_var.set(str(line or ""))
 
 
 def start_worker_process(
@@ -834,7 +900,7 @@ def start_worker_process(
     )
 
 
-def stdout_reader(proc: subprocess.Popen, q: "queue.Queue[dict]"):
+def stdout_reader(proc: subprocess.Popen, q: "queue.Queue[dict]", worker_target: str = ""):
     assert proc.stdout is not None
     for raw in proc.stdout:
         line = raw.strip()
@@ -843,23 +909,36 @@ def stdout_reader(proc: subprocess.Popen, q: "queue.Queue[dict]"):
         try:
             event = json.loads(line)
             if isinstance(event, dict):
+                if worker_target:
+                    event.setdefault("worker_target", worker_target)
                 q.put(event)
             else:
-                q.put({"type": "log", "value": f"worker non-dict event: {line}"})
+                q.put(
+                    {
+                        "type": "log",
+                        "value": f"worker non-dict event: {line}",
+                        "worker_target": worker_target,
+                    }
+                )
         except json.JSONDecodeError:
-            q.put({"type": "log", "value": f"worker raw: {line}"})
+            q.put({"type": "log", "value": f"worker raw: {line}", "worker_target": worker_target})
 
 
-def stderr_reader(proc: subprocess.Popen, q: "queue.Queue[dict]"):
+def stderr_reader(proc: subprocess.Popen, q: "queue.Queue[dict]", worker_target: str = ""):
     assert proc.stderr is not None
     for raw in proc.stderr:
         line = raw.rstrip()
         if line:
-            q.put({"type": "log", "value": f"worker stderr: {line}"})
+            q.put(
+                {
+                    "type": "log",
+                    "value": f"worker stderr: {line}",
+                    "worker_target": worker_target,
+                }
+            )
 
 
 def main():
-    global _TARGET_LOCK_PATH
     default_config_path = DEFAULT_CONFIG_PATH
     if not os.path.exists(default_config_path):
         try:
@@ -867,13 +946,12 @@ def main():
         except Exception:
             # 延后到 load_json_config 时给出统一错误信息。
             default_config_path = DEFAULT_CONFIG_PATH
-
+    global _TARGET_LOCK_PATHS
     parser = argparse.ArgumentParser(
         description="Sidebar listener: monitor target chat and show translated output."
     )
     parser.add_argument("--config", default=default_config_path, help="JSON config path")
     parser.add_argument("--target", default="", help=argparse.SUPPRESS)
-    parser.add_argument("--target-index", type=int, default=0, help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     config_path = os.path.abspath(args.config)
@@ -897,6 +975,14 @@ def main():
             file=sys.stderr,
         )
         raise SystemExit(2)
+    if str(args.target or "").strip():
+        forced_target = str(args.target).strip()
+        if forced_target not in targets:
+            print(
+                f"[sidebar] warning: --target not found in config listen.targets: {forced_target}",
+                flush=True,
+            )
+        targets = [forced_target]
 
     listen_mode = str(listen_cfg.get("mode", "session"))
     if listen_mode not in ("chat", "session", "mixed"):
@@ -916,18 +1002,7 @@ def main():
         listen_cfg.get("cross_source_merge_window_seconds"),
         CROSS_SOURCE_MERGE_WINDOW_SECONDS,
     )
-
-    target_group = str(args.target or "").strip()
-    target_index = max(0, int(args.target_index))
-    if target_group:
-        if target_group not in targets:
-            print(
-                f"[sidebar] warning: --target not found in config listen.targets: {target_group}",
-                flush=True,
-            )
-    elif len(targets) == 1:
-        target_group = targets[0]
-    else:
+    if len(targets) > 1:
         if listen_mode != "session":
             print(
                 "[sidebar] multi-target requires listen.mode=session",
@@ -940,15 +1015,6 @@ def main():
                 file=sys.stderr,
             )
             raise SystemExit(2)
-        launch_multi_target_sidebars(config_path, targets)
-        return
-
-    locked, lock_info = acquire_target_lock(target_group)
-    if not locked:
-        print(f"[sidebar] {lock_info}, target={target_group}", flush=True)
-        return
-    _TARGET_LOCK_PATH = lock_info
-    atexit.register(release_target_lock)
 
     translate_enabled = as_bool(translate_cfg.get("enabled"), True)
     translate_provider = str(translate_cfg.get("provider", "deeplx")).lower()
@@ -978,15 +1044,25 @@ def main():
         raise SystemExit(2)
 
     log_file = resolve_log_file_path(logging_cfg.get("file", ""))
-    if len(targets) > 1:
-        log_file = append_suffix_to_path(log_file, f"t{target_index + 1}")
+
+    locked_paths: list[str] = []
+    for target in targets:
+        locked, lock_info = acquire_target_lock(target)
+        if not locked:
+            print(f"[sidebar] {lock_info}, target={target}", flush=True)
+            _TARGET_LOCK_PATHS = locked_paths
+            release_target_lock()
+            return
+        locked_paths.append(lock_info)
+    _TARGET_LOCK_PATHS = locked_paths
+    atexit.register(release_target_lock)
 
     ui = SidebarUI(
-        title=f"{target_group} mode={listen_mode}",
+        title=f"WeChat Sidebar mode={listen_mode}",
         width=width,
         side=side,
-        show_chat_name=False,
-        window_offset_index=target_index,
+        targets=targets,
+        message_limit=CHAT_CACHE_LIMIT,
     )
     translator = create_translator(
         enabled=translate_enabled,
@@ -996,11 +1072,13 @@ def main():
         target_lang=target_lang,
         timeout_seconds=translate_timeout,
     )
-    ui.set_status(f"{target_group} mode={listen_mode}")
+    ui.set_status(f"running mode={listen_mode} targets={len(targets)}")
     if listen_mode in ("chat", "mixed"):
         ui.append_log("warning: chat/mixed 会主动打开会话；仅监听请用 mode=session")
 
     append_log_file(log_file, "sidebar start")
+    append_log_file(log_file, f"targets={targets}")
+    append_log_file(log_file, f"chat cache limit={CHAT_CACHE_LIMIT}")
     append_log_file(
         log_file,
         (
@@ -1017,21 +1095,27 @@ def main():
     last_dedupe_cleanup_at = 0.0
     translate_queue_drop_count = 0
     last_translate_queue_drop_log_at = 0.0
-
-    proc = start_worker_process(
-        target_group,
-        listen_interval,
-        listen_mode,
-        worker_debug,
-        focus_refresh,
-        load_retry_seconds,
-    )
-    append_log_file(log_file, f"worker start pid={proc.pid}")
-
-    t_out = threading.Thread(target=stdout_reader, args=(proc, event_queue), daemon=True)
-    t_err = threading.Thread(target=stderr_reader, args=(proc, event_queue), daemon=True)
-    t_out.start()
-    t_err.start()
+    workers: dict[str, subprocess.Popen] = {}
+    exited_workers: set[str] = set()
+    for target in targets:
+        worker = start_worker_process(
+            target,
+            listen_interval,
+            listen_mode,
+            worker_debug,
+            focus_refresh,
+            load_retry_seconds,
+        )
+        workers[target] = worker
+        append_log_file(log_file, f"worker start target={target} pid={worker.pid}")
+        t_out = threading.Thread(
+            target=stdout_reader, args=(worker, event_queue, target), daemon=True
+        )
+        t_err = threading.Thread(
+            target=stderr_reader, args=(worker, event_queue, target), daemon=True
+        )
+        t_out.start()
+        t_err.start()
 
     def enqueue_translate_task(task: dict):
         nonlocal translate_queue_drop_count, last_translate_queue_drop_log_at
@@ -1130,21 +1214,24 @@ def main():
     def handle_event(event: dict):
         nonlocal last_dedupe_cleanup_at
         kind = event.get("type")
+        worker_target = str(event.get("worker_target", "")).strip()
+        log_prefix = f"[{worker_target}] " if worker_target else ""
+        default_chat_name = worker_target or (targets[0] if targets else "")
         if kind == "status":
             value = str(event.get("value", ""))
-            ui.append_log(f"status: {value}")
-            append_log_file(log_file, f"status: {value}")
+            ui.append_log(f"{log_prefix}status: {value}")
+            append_log_file(log_file, f"{log_prefix}status: {value}")
             return
 
         if kind == "log":
             value = str(event.get("value", ""))
-            ui.append_log(value)
-            append_log_file(log_file, value)
+            ui.append_log(f"{log_prefix}{value}")
+            append_log_file(log_file, f"{log_prefix}{value}")
             return
 
         if kind == "render_message":
             created_at = str(event.get("created_at") or datetime.now().strftime("%H:%M:%S"))
-            chat_name = str(event.get("chat_name", target_group))
+            chat_name = str(event.get("chat_name") or default_chat_name)
             sender_name = str(event.get("sender_name", ""))
             rendered_text = str(event.get("text_en", ""))
             source = str(event.get("source", ""))
@@ -1167,13 +1254,15 @@ def main():
             return
 
         if kind != "message":
-            ui.append_log(f"unknown event: {event}")
-            append_log_file(log_file, f"unknown event: {event}")
+            ui.append_log(f"{log_prefix}unknown event: {event}")
+            append_log_file(log_file, f"{log_prefix}unknown event: {event}")
             return
 
         # source 仅用于去重归并与日志，不进入 UI 展示。
         source = str(event.get("source", ""))
-        chat_name = str(event.get("chat_name", target_group))
+        chat_name = str(event.get("chat_name") or default_chat_name)
+        if not chat_name:
+            return
         cn_text = str(event.get("text", "")).strip()
         if not cn_text:
             return
@@ -1239,20 +1328,28 @@ def main():
         except queue.Empty:
             pass
 
-        if proc.poll() is not None:
-            ui.set_status(f"{target_group} mode={listen_mode}")
-            ui.append_log(f"worker exited ({proc.returncode})")
-            append_log_file(log_file, f"worker exited ({proc.returncode})")
-            return
+        for target, worker in workers.items():
+            if target in exited_workers:
+                continue
+            return_code = worker.poll()
+            if return_code is None:
+                continue
+            exited_workers.add(target)
+            exit_line = f"worker exited target={target} code={return_code}"
+            ui.append_log(exit_line)
+            append_log_file(log_file, exit_line)
+            if len(exited_workers) == len(workers):
+                ui.set_status(f"all workers exited mode={listen_mode}")
 
         ui.root.after(200, drain_queue)
 
     def on_close():
-        try:
-            if proc.poll() is None:
-                proc.terminate()
-        except Exception:
-            pass
+        for worker in workers.values():
+            try:
+                if worker.poll() is None:
+                    worker.terminate()
+            except Exception:
+                pass
         try:
             signal_translate_worker_stop()
         except Exception:
