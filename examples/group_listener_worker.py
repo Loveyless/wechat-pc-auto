@@ -23,6 +23,7 @@ from wechat_auto.controls import (
 
 TIME_LINE_RE = re.compile(r"^(?:昨天|今天|星期[一二三四五六日天])?\s*\d{1,2}:\d{2}$")
 UNREAD_PREFIX_RE = re.compile(r"^\[\d+条\]\s*")
+UNREAD_COUNT_RE = re.compile(r"^\[(\d+)条\]\s*")
 EMIT_DEBOUNCE_SECONDS = 0.8
 EMIT_CACHE_TTL_SECONDS = 120.0
 EMIT_CACHE_MAX_KEYS = 600
@@ -33,22 +34,54 @@ def emit(event: dict):
     print(json.dumps(event, ensure_ascii=False), flush=True)
 
 
-def extract_session_preview(raw_name: str) -> str:
-    # 从会话列表条目里提取预览正文，过滤“时间/免打扰/置顶”等噪音信息。
+def _iter_session_detail_lines(raw_name: str) -> list[str]:
     if not raw_name:
-        return ""
+        return []
     lines = [line.strip() for line in raw_name.splitlines() if line.strip()]
     if len(lines) <= 1:
-        return ""
+        return []
+    details = []
     for line in lines[1:]:
         if line in ("已置顶", "消息免打扰"):
             continue
         if TIME_LINE_RE.match(line):
             continue
+        details.append(line)
+    return details
+
+
+def extract_session_preview(raw_name: str) -> str:
+    # 从会话列表条目里提取预览正文，过滤“时间/免打扰/置顶”等噪音信息。
+    for line in _iter_session_detail_lines(raw_name):
         line = UNREAD_PREFIX_RE.sub("", line).strip()
         if line:
             return line
     return ""
+
+
+def extract_session_unread_count(raw_name: str) -> int:
+    for line in _iter_session_detail_lines(raw_name):
+        match = UNREAD_COUNT_RE.match(line)
+        if match:
+            try:
+                return int(match.group(1))
+            except Exception:
+                return 0
+        break
+    return 0
+
+
+def should_emit_session_preview(
+    current_preview: str,
+    current_unread: int,
+    last_preview: str,
+    last_unread: int,
+) -> bool:
+    if not current_preview:
+        return False
+    if current_preview != last_preview:
+        return True
+    return current_unread > last_unread
 
 
 def find_target_session_raw(window, target_name: str) -> str:
@@ -184,7 +217,9 @@ def main(argv=None):
 
         window = wx.window
         last_chat_sig = wait_initial_chat_signature(window, timeout_seconds=4.0)
-        last_session_preview = extract_session_preview(find_target_session_raw(window, target_group))
+        initial_session_raw = find_target_session_raw(window, target_group)
+        last_session_preview = extract_session_preview(initial_session_raw)
+        last_session_unread = extract_session_unread_count(initial_session_raw)
         recent_emit_at = {}
         last_emit_cleanup = 0.0
         emit({"type": "status", "value": f"running mode={args.mode} target={target_group}"})
@@ -251,15 +286,24 @@ def main(argv=None):
                     # session 模式基于会话列表预览变化触发。
                     session_raw = find_target_session_raw(window, target_group)
                     current_preview = extract_session_preview(session_raw)
+                    current_unread = extract_session_unread_count(session_raw)
                     if args.debug:
                         emit(
                             {
                                 "type": "log",
-                                "value": f"debug session_preview={current_preview}",
+                                "value": (
+                                    f"debug session_preview={current_preview} "
+                                    f"unread={current_unread}"
+                                ),
                             }
                         )
-                    # 只在“预览正文”变化时触发，避免时间戳/未读数抖动导致同文案重复。
-                    if current_preview and current_preview != last_session_preview:
+                    # session 只关心预览正文和未读增量，忽略时间/置顶/免打扰噪音。
+                    if should_emit_session_preview(
+                        current_preview,
+                        current_unread,
+                        last_session_preview,
+                        last_session_unread,
+                    ):
                         if last_session_preview and should_emit(
                             recent_emit_at,
                             f"{target_group}::{current_preview}",
@@ -277,6 +321,7 @@ def main(argv=None):
                             )
                     if current_preview:
                         last_session_preview = current_preview
+                        last_session_unread = current_unread
             except KeyboardInterrupt:
                 emit({"type": "status", "value": "stopped"})
                 break

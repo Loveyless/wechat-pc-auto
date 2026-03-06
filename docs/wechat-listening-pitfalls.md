@@ -114,7 +114,9 @@
 
 处理：
 - `group_listener_worker.py` 只做短防抖（默认 `0.8s`），用于抑制 UI 抖动和同轮询重复，不做永久去重。
-- `group_listener_worker.py` 的 `session` 触发改为比较“预览正文”是否变化，不再比较整条 `session_raw`（避免时间/未读数抖动造成重复）。
+- `group_listener_worker.py` 的 `session` 触发同时看“预览正文”和“未读数增量”：
+  - 忽略时间、置顶、免打扰这类噪音字段；
+  - 同文案但未读数增长时，允许重新触发，避免把长期重复文案永久吞掉。
 - `sidebar_translate_listener.py` 改为：
   - 精确去重窗口：`session_preview` 默认 `20s`，其他来源默认 `2.5s`；
   - 跨来源归并窗口（默认 `3.0s`）：合并 `chat/session_preview` 近实时重叠事件；
@@ -145,7 +147,7 @@
 - 多目标模式强制约束：
   - `listen.mode=session`
   - `listen.focus_refresh=false`
-- 采用“每个 target 一个侧边栏子进程”的隔离模型，避免共享状态互相污染。
+- 采用“每个 target 一个 worker 子进程 + 单侧边栏窗口”的隔离模型，避免共享状态互相污染。
 
 ### 11) 重复启动导致同 target 多实例
 现象：
@@ -153,7 +155,7 @@
 
 处理：
 - 为每个 target 增加运行时锁（`logs/.runtime/target_*.lock`）。
-- launcher 启动子进程前会检查锁并跳过已运行 target。
+- launcher 启动子进程前会检查锁并跳过已运行 target；剩余可用 target 继续启动。
 - 异常退出导致的陈旧锁会在下次启动时自动清理。
 
 ### 12) 翻译网络抖动卡 UI
@@ -174,7 +176,7 @@
 处理：
 - 改为单窗口双栏布局：左侧 target 菜单，右侧消息区。
 - 每个 target 仍由独立 worker 监听；未选中 target 的新消息累计未读计数。
-- 每个 target 的消息缓存上限固定 `100` 条，超限后丢弃最旧消息。
+- 每个 target 的消息缓存上限固定 `100` 条，超限后立即按缓存重绘，禁止当前可见消息区继续无限增长。
 
 ### 14) 长时间运行日志膨胀
 现象：

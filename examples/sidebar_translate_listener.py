@@ -692,15 +692,15 @@ class SidebarUI:
 
         controls = ttk.Frame(self.root, padding=(8, 6, 8, 4))
         controls.pack(fill=tk.X)
-        ttk.Label(controls, textvariable=self.status_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
-        )
         ttk.Checkbutton(
             controls,
             text="置顶",
             variable=self.topmost_var,
             command=self.toggle_topmost,
-        ).pack(side=tk.RIGHT)
+        ).pack(side=tk.LEFT)
+        ttk.Label(controls, textvariable=self.status_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
 
         content = ttk.Frame(self.root)
         content.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
@@ -801,8 +801,7 @@ class SidebarUI:
         self._refresh_target_list()
         self._render_active_chat()
 
-    def _insert_message(self, msg: SidebarMessage):
-        self.text.configure(state=tk.NORMAL)
+    def _insert_message_content(self, msg: SidebarMessage):
         # 根据 is_self 决定气泡左右对齐。
         meta_tag = "meta_right" if msg.is_self else "meta_left"
         msg_tag = "msg_right" if msg.is_self else "msg_left"
@@ -812,13 +811,17 @@ class SidebarUI:
         self.text.insert(tk.END, header + "\n", meta_tag)
         # 按需求：正文区不再显示 CN/EN 标签，也不显示 source=session_preview。
         self.text.insert(tk.END, f"{msg.text_en}\n", msg_tag)
+
+    def _insert_message(self, msg: SidebarMessage):
+        self.text.configure(state=tk.NORMAL)
+        self._insert_message_content(msg)
         self.text.configure(state=tk.DISABLED)
 
     def _render_active_chat(self):
         self.text.configure(state=tk.NORMAL)
         self.text.delete("1.0", tk.END)
         for msg in self.chat_messages.get(self.active_chat, []):
-            self._insert_message(msg)
+            self._insert_message_content(msg)
         self.text.configure(state=tk.DISABLED)
         self.text.see(tk.END)
 
@@ -830,8 +833,7 @@ class SidebarUI:
             self.unread_counts[msg.chat_name] = self.unread_counts.get(msg.chat_name, 0) + 1
             self._refresh_target_list()
             return
-        self._insert_message(msg)
-        self.text.see(tk.END)
+        self._render_active_chat()
 
     def append_log(self, line: str):
         self.status_var.set(str(line or ""))
@@ -1045,15 +1047,20 @@ def main():
 
     log_file = resolve_log_file_path(logging_cfg.get("file", ""))
 
+    running_targets: list[str] = []
+    skipped_targets: list[tuple[str, str]] = []
     locked_paths: list[str] = []
     for target in targets:
         locked, lock_info = acquire_target_lock(target)
         if not locked:
-            print(f"[sidebar] {lock_info}, target={target}", flush=True)
-            _TARGET_LOCK_PATHS = locked_paths
-            release_target_lock()
-            return
+            skipped_targets.append((target, lock_info))
+            print(f"[sidebar] skip target={target}: {lock_info}", flush=True)
+            continue
+        running_targets.append(target)
         locked_paths.append(lock_info)
+    if not running_targets:
+        print("[sidebar] no available targets to start", flush=True)
+        return
     _TARGET_LOCK_PATHS = locked_paths
     atexit.register(release_target_lock)
 
@@ -1061,7 +1068,7 @@ def main():
         title=f"WeChat Sidebar mode={listen_mode}",
         width=width,
         side=side,
-        targets=targets,
+        targets=running_targets,
         message_limit=CHAT_CACHE_LIMIT,
     )
     translator = create_translator(
@@ -1072,12 +1079,15 @@ def main():
         target_lang=target_lang,
         timeout_seconds=translate_timeout,
     )
-    ui.set_status(f"running mode={listen_mode} targets={len(targets)}")
+    ui.set_status(f"running mode={listen_mode} targets={len(running_targets)}")
     if listen_mode in ("chat", "mixed"):
         ui.append_log("warning: chat/mixed 会主动打开会话；仅监听请用 mode=session")
+    for target, reason in skipped_targets:
+        append_log_file(log_file, f"skip target={target}: {reason}")
 
     append_log_file(log_file, "sidebar start")
-    append_log_file(log_file, f"targets={targets}")
+    append_log_file(log_file, f"requested targets={targets}")
+    append_log_file(log_file, f"running targets={running_targets}")
     append_log_file(log_file, f"chat cache limit={CHAT_CACHE_LIMIT}")
     append_log_file(
         log_file,
@@ -1097,7 +1107,7 @@ def main():
     last_translate_queue_drop_log_at = 0.0
     workers: dict[str, subprocess.Popen] = {}
     exited_workers: set[str] = set()
-    for target in targets:
+    for target in running_targets:
         worker = start_worker_process(
             target,
             listen_interval,
@@ -1216,7 +1226,7 @@ def main():
         kind = event.get("type")
         worker_target = str(event.get("worker_target", "")).strip()
         log_prefix = f"[{worker_target}] " if worker_target else ""
-        default_chat_name = worker_target or (targets[0] if targets else "")
+        default_chat_name = worker_target or (running_targets[0] if running_targets else "")
         if kind == "status":
             value = str(event.get("value", ""))
             ui.append_log(f"{log_prefix}status: {value}")
