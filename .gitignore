@@ -13,6 +13,7 @@ logs/*
 .DS_Store
 Thumbs.db
 .env.local
+.codex/
 @AutomationLog.txt
 artifacts/
 build/

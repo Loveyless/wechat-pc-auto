@@ -92,6 +92,58 @@ class SidebarHelpersTest(unittest.TestCase):
         self.assertEqual(render_calls[-1], ["m1", "m2"])
         self.assertEqual(insert_calls, [])
 
+    def test_build_worker_status_text_single_target(self):
+        text = sidebar.build_worker_status_text(
+            "session",
+            {"g1": "waiting_wechat"},
+            {"g1": "wechat not ready, retry in 10.0s"},
+        )
+        self.assertIn("[g1] waiting_wechat", text)
+        self.assertIn("retry in 10.0s", text)
+
+    def test_build_worker_status_text_multi_target_summary(self):
+        text = sidebar.build_worker_status_text(
+            "session",
+            {"g1": "running", "g2": "waiting_wechat", "g3": "running"},
+            {"g1": "ok", "g2": "wechat not ready", "g3": "ok"},
+        )
+        self.assertIn("mode=session", text)
+        self.assertIn("running=2", text)
+        self.assertIn("waiting_wechat=1", text)
+        self.assertIn("g2=waiting_wechat: wechat not ready", text)
+
+    def test_compute_worker_restart_delay_caps(self):
+        self.assertEqual(sidebar.compute_worker_restart_delay(1), 3.0)
+        self.assertEqual(sidebar.compute_worker_restart_delay(2), 6.0)
+        self.assertEqual(sidebar.compute_worker_restart_delay(3), 12.0)
+        self.assertEqual(sidebar.compute_worker_restart_delay(4), 24.0)
+        self.assertEqual(sidebar.compute_worker_restart_delay(5), 30.0)
+        self.assertEqual(sidebar.compute_worker_restart_delay(9), 30.0)
+
+    def test_truncate_target_label(self):
+        self.assertEqual(sidebar.truncate_target_label("测试群123"), "测试群123")
+        self.assertEqual(sidebar.truncate_target_label("测试群1234"), "测试群123...")
+        self.assertEqual(sidebar.truncate_target_label("ABCDEFG"), "ABCDEF...")
+
+    def test_toggle_target_panel_shortcut_returns_break(self):
+        ui = object.__new__(sidebar.SidebarUI)
+        calls = []
+        ui.toggle_target_panel = lambda: calls.append("toggle")
+
+        result = sidebar.SidebarUI.on_toggle_target_panel_shortcut(ui)
+
+        self.assertEqual(calls, ["toggle"])
+        self.assertEqual(result, "break")
+
+    def test_build_worker_status_text_shows_worker_backoff(self):
+        text = sidebar.build_worker_status_text(
+            "session",
+            {"g1": "running", "g2": "worker_backoff"},
+            {"g1": "ok", "g2": "code=1, retry in 3.0s"},
+        )
+        self.assertIn("worker_backoff=1", text)
+        self.assertIn("g2=worker_backoff: code=1, retry in 3.0s", text)
+
 
 if __name__ == "__main__":
     unittest.main()

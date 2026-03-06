@@ -6,6 +6,9 @@ import uiautomation as auto
 
 _UNREAD_RE = re.compile(r"\[\d+条\]|\d+条新消息|未读")
 _TIME_ONLY_RE = re.compile(r"^(?:昨天|今天|星期[一二三四五六日天])?\s*\d{1,2}:\d{2}$")
+_CONTROL_CACHE: dict[tuple[int, str], auto.Control] = {}
+_WINDOW_CACHE_KEYS: list[int] = []
+_CONTROL_CACHE_MAX_WINDOWS = 16
 
 
 def normalize_session_name(raw_name: str) -> str:
@@ -62,15 +65,78 @@ def _exists(ctrl, timeout: float = 0.2) -> bool:
         return False
 
 
+def _window_cache_key(window) -> int:
+    try:
+        hwnd = int(window.NativeWindowHandle)
+        if hwnd:
+            return hwnd
+    except Exception:
+        pass
+    return id(window)
+
+
+def _remember_window_key(window_key: int):
+    if window_key in _WINDOW_CACHE_KEYS:
+        _WINDOW_CACHE_KEYS.remove(window_key)
+    _WINDOW_CACHE_KEYS.append(window_key)
+    overflow = len(_WINDOW_CACHE_KEYS) - _CONTROL_CACHE_MAX_WINDOWS
+    while overflow > 0:
+        expired_key = _WINDOW_CACHE_KEYS.pop(0)
+        stale_keys = [key for key in _CONTROL_CACHE if key[0] == expired_key]
+        for stale_key in stale_keys:
+            _CONTROL_CACHE.pop(stale_key, None)
+        overflow -= 1
+
+
+def _get_cached_control(window, control_name: str) -> Optional[auto.Control]:
+    window_key = _window_cache_key(window)
+    cached = _CONTROL_CACHE.get((window_key, control_name))
+    if _exists(cached):
+        _remember_window_key(window_key)
+        return cached
+    _CONTROL_CACHE.pop((window_key, control_name), None)
+    return None
+
+
+def _cache_control(window, control_name: str, ctrl) -> Optional[auto.Control]:
+    if not _exists(ctrl):
+        return None
+    window_key = _window_cache_key(window)
+    _CONTROL_CACHE[(window_key, control_name)] = ctrl
+    _remember_window_key(window_key)
+    return ctrl
+
+
+def clear_control_cache(window=None):
+    if window is None:
+        _CONTROL_CACHE.clear()
+        _WINDOW_CACHE_KEYS.clear()
+        return
+
+    window_key = _window_cache_key(window)
+    stale_keys = [key for key in _CONTROL_CACHE if key[0] == window_key]
+    for stale_key in stale_keys:
+        _CONTROL_CACHE.pop(stale_key, None)
+    try:
+        _WINDOW_CACHE_KEYS.remove(window_key)
+    except ValueError:
+        pass
+
+
 def find_session_list(window) -> Optional[auto.Control]:
+    cached = _get_cached_control(window, "session_list")
+    if cached:
+        return cached
+
     candidates = [
         window.ListControl(AutomationId="session_list"),
         window.ListControl(Name="会话"),
         window.ListControl(AutomationId="search_list"),
     ]
     for ctrl in candidates:
-        if _exists(ctrl):
-            return ctrl
+        cached_ctrl = _cache_control(window, "session_list", ctrl)
+        if cached_ctrl:
+            return cached_ctrl
 
     best = None
     best_score = -1
@@ -99,17 +165,22 @@ def find_session_list(window) -> Optional[auto.Control]:
                 best = ctrl
         except Exception:
             continue
-    return best
+    return _cache_control(window, "session_list", best)
 
 
 def find_message_list(window) -> Optional[auto.Control]:
+    cached = _get_cached_control(window, "message_list")
+    if cached:
+        return cached
+
     candidates = [
         window.ListControl(AutomationId="chat_message_list"),
         window.ListControl(Name="消息"),
     ]
     for ctrl in candidates:
-        if _exists(ctrl):
-            return ctrl
+        cached_ctrl = _cache_control(window, "message_list", ctrl)
+        if cached_ctrl:
+            return cached_ctrl
 
     best = None
     best_score = -1
@@ -136,17 +207,22 @@ def find_message_list(window) -> Optional[auto.Control]:
                 best = ctrl
         except Exception:
             continue
-    return best
+    return _cache_control(window, "message_list", best)
 
 
 def find_search_box(window) -> Optional[auto.Control]:
+    cached = _get_cached_control(window, "search_box")
+    if cached:
+        return cached
+
     direct = [
         window.EditControl(Name="搜索"),
         window.EditControl(ClassName="mmui::XValidatorTextEdit"),
     ]
     for ctrl in direct:
-        if _exists(ctrl):
-            return ctrl
+        cached_ctrl = _cache_control(window, "search_box", ctrl)
+        if cached_ctrl:
+            return cached_ctrl
 
     best = None
     best_score = -1
@@ -169,5 +245,5 @@ def find_search_box(window) -> Optional[auto.Control]:
                 best = ctrl
         except Exception:
             continue
-    return best
+    return _cache_control(window, "search_box", best)
 

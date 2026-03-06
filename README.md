@@ -57,6 +57,9 @@ wx.listen(callback=on_message, interval=2, auto_reply=True)
 ## 侧边栏监听 + 英文翻译
 
 监听目标与翻译策略由 `config/listener.json` 控制。默认仅展示英文；翻译失败时回退显示中文并附带失败原因。
+当前主维护链路只聚焦“监听 + 翻译 + 展示”；发送消息、文件发送、输入框写入等能力保留兼容，但不是当前持续优化重点。
+后续优化默认只围绕 `session` 模式展开；`chat` / `mixed` 仅保留兼容，不再作为主路径承接恢复能力和性能优化。
+当前支持先启动本程序、后启动微信；若微信中途关闭并重新打开，主链路会继续尝试恢复监听。
 
 ```bash
 python examples/sidebar_translate_listener.py --config "D:\code\wechat-pc-auto\config\listener.json"

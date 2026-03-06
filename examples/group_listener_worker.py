@@ -14,6 +14,7 @@ if ROOT_DIR not in sys.path:
 
 from wechat_auto import WxAuto
 from wechat_auto.controls import (
+    clear_control_cache,
     find_message_list,
     find_session_list,
     is_meaningful_message_text,
@@ -28,10 +29,15 @@ EMIT_DEBOUNCE_SECONDS = 0.8
 EMIT_CACHE_TTL_SECONDS = 120.0
 EMIT_CACHE_MAX_KEYS = 600
 EMIT_CLEANUP_INTERVAL_SECONDS = 30.0
+MIN_LOAD_RETRY_SECONDS = 0.5
 
 
 def emit(event: dict):
     print(json.dumps(event, ensure_ascii=False), flush=True)
+
+
+def emit_status(state: str, value: str):
+    emit({"type": "status", "state": state, "value": value})
 
 
 def _iter_session_detail_lines(raw_name: str) -> list[str]:
@@ -163,6 +169,56 @@ def cleanup_recent_emit_cache(recent_emit_at: dict[str, float], now_ts: float):
             recent_emit_at.pop(key, None)
 
 
+def wait_for_wechat_ready(
+    wx,
+    retry_seconds: float,
+    probe: bool = False,
+    reconnect: bool = False,
+    sleep_fn=time.sleep,
+) -> bool:
+    wait_state = "reconnecting" if reconnect else "waiting_wechat"
+    while not wx.load_wechat():
+        emit_status(wait_state, f"wechat not ready, retry in {retry_seconds:.1f}s")
+        if probe:
+            return False
+        sleep_fn(retry_seconds)
+    return True
+
+
+def connect_target_runtime(wx, args, target_group: str, retry_seconds: float, reconnect: bool = False):
+    current_reconnect = reconnect
+    while True:
+        if not wait_for_wechat_ready(
+            wx,
+            retry_seconds=retry_seconds,
+            probe=args.probe,
+            reconnect=current_reconnect,
+        ):
+            return None
+
+        emit_status("connecting", f"wechat ready, preparing mode={args.mode}")
+        if args.mode in ("chat", "mixed") and not wx.chat_with(target_group):
+            emit_status("open_target_failed", f"open target failed: {target_group}")
+            if args.probe:
+                return None
+            time.sleep(retry_seconds)
+            current_reconnect = True
+            continue
+
+        window = wx.window
+        clear_control_cache(window)
+        last_chat_sig = None
+        if args.mode in ("chat", "mixed"):
+            last_chat_sig = wait_initial_chat_signature(window, timeout_seconds=4.0)
+        initial_session_raw = find_target_session_raw(window, target_group)
+        return {
+            "window": window,
+            "last_chat_sig": last_chat_sig,
+            "last_session_preview": extract_session_preview(initial_session_raw),
+            "last_session_unread": extract_session_unread_count(initial_session_raw),
+        }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="wechat listener worker")
     parser.add_argument("--target", default="", help="target chat/group name")
@@ -180,7 +236,7 @@ def main(argv=None):
         "--load-retry-seconds",
         type=float,
         default=10.0,
-        help="retry interval when WeChat is not ready at startup",
+        help="retry interval when WeChat is not ready or reconnecting",
     )
     parser.add_argument(
         "--focus-refresh",
@@ -197,32 +253,23 @@ def main(argv=None):
     emit({"type": "log", "value": "boot"})
     try:
         wx = WxAuto()
-        retry_seconds = max(0.5, float(args.load_retry_seconds))
-        while not wx.load_wechat():
-            emit(
-                {
-                    "type": "status",
-                    "value": f"wechat not ready, retry in {retry_seconds:.1f}s",
-                }
-            )
-            if args.probe:
-                return
-            time.sleep(retry_seconds)
+        retry_seconds = max(MIN_LOAD_RETRY_SECONDS, float(args.load_retry_seconds))
+        runtime = connect_target_runtime(
+            wx,
+            args=args,
+            target_group=target_group,
+            retry_seconds=retry_seconds,
+        )
+        if runtime is None:
+            return
 
-        if args.mode in ("chat", "mixed"):
-            # chat/mixed 会主动打开目标会话；session 模式不会触发该行为。
-            if not wx.chat_with(target_group):
-                emit({"type": "status", "value": f"open target failed: {target_group}"})
-                return
-
-        window = wx.window
-        last_chat_sig = wait_initial_chat_signature(window, timeout_seconds=4.0)
-        initial_session_raw = find_target_session_raw(window, target_group)
-        last_session_preview = extract_session_preview(initial_session_raw)
-        last_session_unread = extract_session_unread_count(initial_session_raw)
+        window = runtime["window"]
+        last_chat_sig = runtime["last_chat_sig"]
+        last_session_preview = runtime["last_session_preview"]
+        last_session_unread = runtime["last_session_unread"]
         recent_emit_at = {}
         last_emit_cleanup = 0.0
-        emit({"type": "status", "value": f"running mode={args.mode} target={target_group}"})
+        emit_status("running", f"running mode={args.mode} target={target_group}")
         if args.probe:
             emit(
                 {
@@ -238,8 +285,23 @@ def main(argv=None):
         while True:
             try:
                 if not window or not window.Exists(0.2):
-                    emit({"type": "status", "value": "wechat window lost"})
-                    time.sleep(args.interval)
+                    emit_status("window_lost", "wechat window lost, reconnecting")
+                    runtime = connect_target_runtime(
+                        wx,
+                        args=args,
+                        target_group=target_group,
+                        retry_seconds=retry_seconds,
+                        reconnect=True,
+                    )
+                    if runtime is None:
+                        return
+                    window = runtime["window"]
+                    last_chat_sig = runtime["last_chat_sig"]
+                    last_session_preview = runtime["last_session_preview"]
+                    last_session_unread = runtime["last_session_unread"]
+                    recent_emit_at.clear()
+                    last_emit_cleanup = 0.0
+                    emit_status("running", f"running mode={args.mode} target={target_group}")
                     continue
 
                 # 可选：强制刷新窗口可访问树（会抢焦点）
@@ -323,7 +385,7 @@ def main(argv=None):
                         last_session_preview = current_preview
                         last_session_unread = current_unread
             except KeyboardInterrupt:
-                emit({"type": "status", "value": "stopped"})
+                emit_status("stopped", "stopped")
                 break
             except Exception as e:
                 emit({"type": "log", "value": f"worker error: {e}"})

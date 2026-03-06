@@ -15,6 +15,7 @@
     ],
     "load_retry_seconds": 10.0,
     "interval_seconds": 1.0,
+    "load_retry_seconds": 10.0,
     "dedupe_window_seconds": 2.5,
     "session_preview_dedupe_window_seconds": 20.0,
     "cross_source_merge_window_seconds": 3.0,
@@ -54,6 +55,9 @@
   - 若某个 target 已被其他实例占用，本次启动会跳过该 target，继续启动剩余可用 target。
 - `interval_seconds`：轮询间隔（秒）。越小越实时，但占用更高。
   - 必须 `> 0`，否则启动阶段会直接报错退出。
+- `load_retry_seconds`：微信未启动、未登录或重连时的重试间隔（秒），默认 `10.0`。
+  - 必须 `> 0`，否则启动阶段会直接报错退出。
+  - 该参数同时作用于“先启动程序后启动微信”和“微信运行中关闭后再次打开”的恢复等待。
 - `dedupe_window_seconds`：普通来源（如 `chat`）去重窗口秒数，默认 `2.5`。  
   - 值过小：重复消息更容易漏拦。  
   - 值过大：短时间内相同正文的真实消息可能被合并掉。
