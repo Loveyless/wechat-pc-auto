@@ -6,9 +6,9 @@
 
 ## 2. Local API and event transport
 
-- [ ] 2.1 Add local HTTP endpoints for runtime snapshot, sessions, config, and explicit runtime control
-- [ ] 2.2 Add a local WebSocket event stream for session, message, translation, TTS, backend-state, and error events
-- [ ] 2.3 Add contract-focused smoke tests or fixtures for the HTTP and WebSocket payloads
+- [x] 2.1 Add local HTTP endpoints for runtime snapshot, sessions, config, and explicit runtime control
+- [x] 2.2 Add a local WebSocket event stream for session, message, translation, TTS, backend-state, and error events
+- [x] 2.3 Add contract-focused smoke tests or fixtures for the HTTP and WebSocket payloads
 
 ## 3. Session monitoring model shift
 

@@ -91,6 +91,38 @@ class ListenerRuntime:
     def publish_log(self, value: str) -> None:
         self._publish("backend.log", {"value": str(value or "")})
 
+    def publish_error(self, *, source: str, message: str, detail: str = "") -> None:
+        self._publish(
+            "error.reported",
+            {
+                "source": str(source or "").strip(),
+                "message": str(message or "").strip(),
+                "detail": str(detail or ""),
+            },
+        )
+
+    def publish_tts_event(
+        self,
+        *,
+        action: str,
+        session_id: str,
+        message_id: str = "",
+        accepted: bool,
+        detail: str = "",
+    ) -> None:
+        tts_state = self.snapshot().get("tts", {})
+        self._publish(
+            "tts.updated",
+            {
+                "action": str(action or "").strip(),
+                "session_id": normalize_session_id(session_id),
+                "message_id": str(message_id or "").strip(),
+                "accepted": bool(accepted),
+                "provider": str(tts_state.get("provider", "")),
+                "detail": str(detail or ""),
+            },
+        )
+
     def record_preview_message(
         self,
         *,

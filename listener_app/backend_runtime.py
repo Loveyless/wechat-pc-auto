@@ -262,6 +262,36 @@ class BackendRuntimeService:
     def set_active_session(self, session_id: str) -> None:
         self.runtime.set_active_session(session_id)
 
+    def get_config_snapshot(self) -> dict[str, Any]:
+        settings = self.settings
+        if settings is None:
+            return {}
+        return {
+            "listen": {
+                "mode": "session",
+                "targets": list(self._running_targets or settings.targets),
+                "interval_seconds": settings.listen_interval,
+                "focus_refresh": settings.focus_refresh,
+                "load_retry_seconds": settings.load_retry_seconds,
+                "session_preview_dedupe_window_seconds": settings.session_preview_dedupe_window_seconds,
+            },
+            "translate": {
+                "enabled": settings.translate_enabled,
+                "provider": settings.translate_provider,
+            },
+            "display": {
+                "english_only": settings.english_only,
+                "tts_auto_read_active_chat": settings.tts_auto_read_active_chat,
+            },
+            "tts": {
+                "provider": settings.tts_provider,
+                "available": settings.tts_player is not None,
+            },
+            "runtime": {
+                "config_path": settings.config_path,
+            },
+        }
+
     def start(self) -> None:
         if self._runtime_thread and self._runtime_thread.is_alive():
             return
@@ -444,6 +474,11 @@ class BackendRuntimeService:
             return
 
         if kind != "message":
+            self.runtime.publish_error(
+                source="backend_runtime",
+                message="unknown event",
+                detail=str(event),
+            )
             self._log_line(f"unknown event: {event}")
             return
 
@@ -533,6 +568,11 @@ class BackendRuntimeService:
         self._log_line(
             f"translate queue overflow interval={TRANSLATE_QUEUE_DROP_LOG_INTERVAL_SECONDS:.1f}s"
         )
+        self.runtime.publish_error(
+            source="translate",
+            message="queue overflow",
+            detail="translate queue reached maxsize",
+        )
 
     def _signal_translate_worker_stop(self) -> None:
         try:
@@ -563,6 +603,11 @@ class BackendRuntimeService:
             body_cn,
             RuntimeError("translate queue overflow"),
             self.settings.translate_fail_behavior,
+        )
+        self.runtime.publish_error(
+            source="translate",
+            message="queue overflow",
+            detail=body_cn[:120],
         )
         self.runtime.record_render_message(
             session_name=str(task.get("chat_name", "")),
@@ -596,6 +641,11 @@ class BackendRuntimeService:
                         body_cn,
                         exc,
                         self.settings.translate_fail_behavior,
+                    )
+                    self.runtime.publish_error(
+                        source="translate",
+                        message="translate fallback",
+                        detail=last_error,
                     )
                     self._log_line(f"translate fallback: {exc}")
 
@@ -631,17 +681,37 @@ class BackendRuntimeService:
         text = str(message_payload.get("text_display") or message_payload.get("text_translated") or "")
         if not text:
             return
+        message_id = str(message_payload.get("message_id", ""))
+        session_id = str(message_payload.get("session_id", ""))
         try:
             ok = bool(speak_async(text))
         except Exception as exc:
             self.runtime.update_tts_state(last_error=str(exc))
+            self.runtime.publish_tts_event(
+                action="autoplay",
+                session_id=session_id,
+                message_id=message_id,
+                accepted=False,
+                detail=str(exc),
+            )
+            self.runtime.publish_error(
+                source="tts",
+                message="playback failed",
+                detail=str(exc),
+            )
             self._log_line(f"tts failed: {exc}")
             return
         self.runtime.update_tts_state(available=ok, last_error="" if ok else "tts rejected")
+        self.runtime.publish_tts_event(
+            action="autoplay",
+            session_id=session_id,
+            message_id=message_id,
+            accepted=ok,
+            detail="" if ok else "tts rejected",
+        )
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Tk-free backend runtime for the desktop shell.")
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="JSON config path")
     return parser
-
