@@ -62,6 +62,10 @@ class RuntimeApiServerTest(unittest.TestCase):
         with request.urlopen(req, timeout=3) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def test_http_runtime_endpoint_exposes_cors_headers(self):
+        with request.urlopen(f"{self.server.http_base_url}/api/runtime", timeout=3) as response:
+            self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+
     def test_http_snapshot_sessions_and_config_endpoints(self):
         self.service.runtime.record_preview_message(
             session_name="测试群",

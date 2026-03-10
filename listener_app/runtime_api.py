@@ -81,6 +81,11 @@ class RuntimeApiServer:
         api_server = self
 
         class RuntimeRequestHandler(BaseHTTPRequestHandler):
+            def _send_cors_headers(self) -> None:
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
             def _read_json_body(self) -> dict[str, Any]:
                 length = int(self.headers.get("Content-Length", "0") or "0")
                 if length <= 0:
@@ -96,10 +101,16 @@ class RuntimeApiServer:
             def _send_json(self, status: int, payload: dict[str, Any]) -> None:
                 body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 self.send_response(status)
+                self._send_cors_headers()
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            def do_OPTIONS(self) -> None:
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self._send_cors_headers()
+                self.end_headers()
 
             def do_GET(self) -> None:
                 parsed = urlparse(self.path)

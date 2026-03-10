@@ -19,8 +19,8 @@
 ## 4. Tauri frontend shell
 
 - [x] 4.1 Scaffold a Tauri + React + shadcn/ui frontend workspace
-- [ ] 4.2 Implement the session-list view and grouped per-session message-stream view
-- [ ] 4.3 Connect frontend state bootstrap to HTTP and live updates to the WebSocket stream
+- [x] 4.2 Implement the session-list view and grouped per-session message-stream view
+- [x] 4.3 Connect frontend state bootstrap to HTTP and live updates to the WebSocket stream
 
 ## 5. Cutover and documentation
 
