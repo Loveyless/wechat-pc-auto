@@ -3,15 +3,26 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from .runtime_models import (
-    CAPTURE_LEVEL_PREVIEW,
-    RuntimeMessage,
-    RuntimeState,
-    SessionState,
-    TTSState,
-    TranslationState,
-    normalize_session_id,
-)
+if __package__:
+    from .runtime_models import (
+        CAPTURE_LEVEL_PREVIEW,
+        RuntimeMessage,
+        RuntimeState,
+        SessionState,
+        TTSState,
+        TranslationState,
+        normalize_session_id,
+    )
+else:
+    from runtime_models import (
+        CAPTURE_LEVEL_PREVIEW,
+        RuntimeMessage,
+        RuntimeState,
+        SessionState,
+        TTSState,
+        TranslationState,
+        normalize_session_id,
+    )
 
 
 class RuntimeStore:

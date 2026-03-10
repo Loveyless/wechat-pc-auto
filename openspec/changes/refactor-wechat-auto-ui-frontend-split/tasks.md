@@ -2,7 +2,7 @@
 
 - [x] 1.1 Extract Tk-independent session, message, runtime-state, translation-state, and TTS-state models from the current Python entry path
 - [x] 1.2 Define explicit preview-event vs full-message-event semantics in the backend domain model
-- [ ] 1.3 Introduce a backend runtime entrypoint that can supervise the listener flow without constructing the legacy Tk UI
+- [x] 1.3 Introduce a backend runtime entrypoint that can supervise the listener flow without constructing the legacy Tk UI
 
 ## 2. Local API and event transport
 

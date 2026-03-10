@@ -6,8 +6,12 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from .runtime_models import RuntimeEvent, build_message, normalize_session_id
-from .runtime_store import RuntimeStore
+if __package__:
+    from .runtime_models import RuntimeEvent, build_message, normalize_session_id
+    from .runtime_store import RuntimeStore
+else:
+    from runtime_models import RuntimeEvent, build_message, normalize_session_id
+    from runtime_store import RuntimeStore
 
 
 class ListenerRuntime:
@@ -36,6 +40,9 @@ class ListenerRuntime:
     def get_session_messages(self, session_id: str) -> list[dict[str, Any]]:
         return self.store.get_session_messages(session_id)
 
+    def set_active_session(self, session_id: str) -> None:
+        self.store.set_runtime_state(active_session_id=session_id)
+
     def set_runtime_options(
         self,
         *,
@@ -53,6 +60,28 @@ class ListenerRuntime:
             auto_read_enabled=tts_auto_read_enabled,
             provider=tts_provider,
             available=tts_available,
+        )
+
+    def update_translation_state(
+        self,
+        *,
+        pending_count: int | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        self.store.set_translation_state(
+            pending_count=pending_count,
+            last_error=last_error,
+        )
+
+    def update_tts_state(
+        self,
+        *,
+        available: bool | None = None,
+        last_error: str | None = None,
+    ) -> None:
+        self.store.set_tts_state(
+            available=available,
+            last_error=last_error,
         )
 
     def publish_status(self, state: str, detail: str) -> None:
