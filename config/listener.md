@@ -1,9 +1,28 @@
 # listener.json 配置说明
 
 ## 启动参数约束
-- `listener_app/sidebar_translate_listener.py` 启动时仅保留 `--config`；这是旧 Tk 开发回退入口。
+- `listener_app/sidebar_translate_listener.py` 启动时仅保留 `--config`；这是旧 Tk 开发回退入口，不再是主路径。
 - `listener_app/backend_main.py` 作为新主路径入口，支持 `--config` / `--host` / `--http-port` / `--ws-port`。
+- `desktop-shell/` 通过本地 `HTTP + WebSocket` 消费后端；前端开发默认连接：
+  - `http://127.0.0.1:8765`
+  - `ws://127.0.0.1:8766/events`
 - 当前监听主链路为 `session-only + all_sessions preview-only`；其余运行行为（监听、翻译、展示、日志、TTS provider 选择、调试）统一从 `listener.json` 读取。
+
+## 当前主路径启动方式
+
+```bash
+python listener_app/backend_main.py --config ".\config\listener.json"
+cd desktop-shell
+npm run dev
+```
+
+如果你已经装好 Rust toolchain，也可以在 `desktop-shell/` 下继续跑：
+
+```bash
+npm run tauri dev
+```
+
+没有 `cargo/rustc` 时，不要把 `npm run dev` 的 Vite 页面误判成 Tauri 壳已经验收通过。
 
 ## 完整配置示例
 ```json
@@ -49,6 +68,7 @@
 - `targets`：监听目标数组。
   - 启动时从 `listener.json` 读取。
   - **仅旧 Tk 回退路径把它当主筛选条件。** 新后端主路径默认监听左侧可见全部会话，不再依赖 `targets` 做会话过滤。
+  - 新主路径下当前选中会话由桌面前端通过 `/api/runtime/active-session` 控制，不再靠 `listener.json` 固定一个当前会话。
   - 运行中可以在侧边栏顶部点击“添加群”，或在左侧菜单上右键删除 target；变更会回写 `listener.json`，并按“先停旧 worker、确认退出后再启动新 worker”的顺序生效。
   - 长度为 `1`：启动一个侧边栏窗口并监听该目标。
   - 长度 `>1`：仍然只启动一个侧边栏窗口，左侧菜单展示所有 target，点击切换右侧消息视图。
@@ -248,5 +268,6 @@
 
 ## 多目标运行约束
 - 当前主链路固定为 `session-only`，禁止恢复 `chat` / `mixed` 配置。
+- 当前主路径固定按 `all_sessions` 扫描左侧可见会话；`listen.targets` 不再决定后端监听范围。
 - 多目标监听不会再派生多个 worker；所有 targets 由同一个 worker 在一次 UIA 扫描中完成。
 - 运行时增删 target 也不会派生第二个 worker；当前实现是“回写 `listener.json` + 平滑重启单 worker”，不是 IPC 热更新。

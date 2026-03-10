@@ -24,6 +24,6 @@
 
 ## 5. Cutover and documentation
 
-- [ ] 5.1 Validate the new runtime against acceptance criteria while the old Tk entry remains available for development rollback
-- [ ] 5.2 Switch the primary UI path to the Tauri frontend with the Python backend and retire Tk from the primary run path
-- [ ] 5.3 Update README, config docs, and listener pitfalls documentation for the new architecture
+- [x] 5.1 Validate the new runtime against acceptance criteria while the old Tk entry remains available for development rollback
+- [x] 5.2 Switch the primary UI path to the Tauri frontend with the Python backend and retire Tk from the primary run path
+- [x] 5.3 Update README, config docs, and listener pitfalls documentation for the new architecture

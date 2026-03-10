@@ -2,6 +2,11 @@
 
 ## 适用范围
 本说明覆盖以下实现：
+- `listener_app/backend_main.py`
+- `listener_app/backend_runtime.py`
+- `listener_app/runtime_api.py`
+- `listener_app/runtime_engine.py`
+- `listener_app/runtime_store.py`
 - `listener_app/group_listener_worker.py`
 - `listener_app/sidebar_translate_listener.py`
 - `listener_app/sidebar_translate_runtime.py`
@@ -9,13 +14,14 @@
 - `listener_app/sidebar_ui.py`
 - `listener_app/sidebar_tts.py`
 - `listener_app/sidebar_shared.py`
+- `desktop-shell/src/**`
 - `wechat_auto/window.py`
 - `wechat_auto/controls.py`
 
 目标：在不改微信客户端的前提下，稳定监听左侧会话列表的预览消息并在桌面前端展示（可接 DeepLX 翻译）。
 
 当前存在两条运行路径：
-- 新主路径：`listener_app/backend_main.py`，默认按 `all_sessions` 方式扫描左侧可见会话列表，不再依赖 `listen.targets` 做主路径筛选。
+- 新主路径：`listener_app/backend_main.py` + `desktop-shell/`，默认按 `all_sessions` 方式扫描左侧可见会话列表，不再依赖 `listen.targets` 做主路径筛选。
 - 旧 Tk 开发回退路径：`listener_app/sidebar_translate_listener.py`，仍沿用 `listen.targets` 和 target 编辑能力；仅用于开发期回退，不再是长期主路径。
 
 ## 架构结论
@@ -31,6 +37,7 @@
   - 拆分后也不要再假设“所有 helper 都挂在 `sidebar_translate_listener.py`”；翻译 helper 的归属是 `sidebar_translate_runtime.py`，worker/runtime helper 的归属是 `sidebar_runtime_support.py`。
 - 当前监听主链路已收敛为 `session-only + preview-only`。
 - 新主路径 worker 为单进程全会话预览扫描：一次扫描微信主窗口左侧会话列表，覆盖当前可见的群聊和私聊会话。
+- 新主路径 UI 已切到 `desktop-shell/`；前端只消费本地 `HTTP + WebSocket` 契约，不再直连 worker stdout。
 - 旧 Tk 回退路径仍保留“单 worker 一次扫描全部 target”的 target 模式；运行时 target 变更不走 IPC 热更新，仍是“UI 显式增删 -> 回写 `listener.json` -> 先停旧 worker -> 确认退出后再启动新 worker”。
 - 当前主路径不再维护 `chat` / `mixed` 监听模式；相关复杂度已从主链路删除。
 - 当前分支不再维护任何主动操作微信的能力（发送消息、发送文件、自动回复、写输入框）。
@@ -379,7 +386,30 @@
 
 ## 推荐运行命令
 
-### 低干扰稳定方案（推荐）
+### 新主路径（推荐）
+```bash
+python listener_app/backend_main.py ^
+  --config ".\config\listener.json"
+```
+
+然后在另一个终端启动前端开发页：
+
+```bash
+cd desktop-shell
+npm run dev
+```
+
+### 可选：Tauri 壳调试
+
+```bash
+cd desktop-shell
+npm run tauri dev
+```
+
+前提是本机已经装好 `cargo` / `rustc`。没有 Rust toolchain 时，只能先跑 Vite 开发页验证前端契约，不要把它说成 Tauri 壳已经通过。
+
+### 旧 Tk 开发回退路径
+
 ```bash
 python listener_app/sidebar_translate_listener.py ^
   --config ".\config\listener.json"

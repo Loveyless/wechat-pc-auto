@@ -154,7 +154,7 @@ def exit_startup_error(message: str, exit_code: int = 2):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sidebar listener: monitor target chats in session-only mode and show translated output."
+        description="Legacy Tk rollback entry for the sidebar listener; no longer the primary desktop UI path."
     )
     parser.add_argument("--config", default=DEFAULT_CONFIG_PATH, help="JSON config path")
     parser.add_argument(
