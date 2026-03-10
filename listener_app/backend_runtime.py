@@ -155,8 +155,6 @@ def load_backend_settings(config_path: str) -> BackendSettings:
     logging_cfg = config.get("logging", {}) if isinstance(config.get("logging", {}), dict) else {}
 
     targets = normalize_targets(listen_cfg.get("targets"))
-    if not targets:
-        raise RuntimeError("config listen.targets is empty")
 
     listen_mode = str(listen_cfg.get("mode", "session")).strip().lower()
     if listen_mode and listen_mode != "session":
@@ -269,6 +267,7 @@ class BackendRuntimeService:
         return {
             "listen": {
                 "mode": "session",
+                "scope": "all_sessions",
                 "targets": list(self._running_targets or settings.targets),
                 "interval_seconds": settings.listen_interval,
                 "focus_refresh": settings.focus_refresh,
@@ -320,10 +319,21 @@ class BackendRuntimeService:
             tts_provider=self.settings.tts_provider,
             tts_available=self.settings.tts_player is not None,
         )
+        self.runtime.set_runtime_contract(
+            monitor_scope="all_sessions",
+            message_fidelity="preview_only",
+        )
         self.runtime.publish_status("starting", "starting worker")
         self._log_line(self.settings.translator_runtime_text)
         self._log_line(self.settings.tts_runtime_text)
-        self._log_line(f"backend targets={self._running_targets}")
+        self._log_line(
+            "backend scope=all_sessions"
+            + (
+                f" dev_target_locks={self._running_targets}"
+                if self._running_targets
+                else ""
+            )
+        )
 
         self._translate_thread = threading.Thread(target=self._translate_worker, daemon=True)
         self._translate_thread.start()
@@ -375,6 +385,7 @@ class BackendRuntimeService:
                 self.settings.worker_debug,
                 self.settings.focus_refresh,
                 self.settings.load_retry_seconds,
+                all_sessions=True,
             )
         except Exception as exc:
             attempt = self._worker_restart_attempt + 1
@@ -451,6 +462,34 @@ class BackendRuntimeService:
                 self._worker_restart_deadline = 0.0
             self.runtime.publish_status(state, detail)
             self._log_line(f"status: {detail}")
+            return
+
+        if kind == "session_snapshot":
+            items = event.get("items")
+            if not isinstance(items, list):
+                self.runtime.publish_error(
+                    source="backend_runtime",
+                    message="invalid session_snapshot payload",
+                    detail=str(event),
+                )
+                return
+            normalized_items = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                session_name = str(item.get("chat_name") or item.get("session_name") or "").strip()
+                if not session_name:
+                    continue
+                normalized_items.append(
+                    {
+                        "session_name": session_name,
+                        "latest_preview": str(item.get("preview", "")),
+                        "unread_count": item.get("unread", 0),
+                        "updated_at": str(item.get("updated_at", "")),
+                        "preview_only": True,
+                    }
+                )
+            self.runtime.sync_session_snapshot(normalized_items)
             return
 
         if kind == "log":

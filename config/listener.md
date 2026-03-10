@@ -1,8 +1,9 @@
 # listener.json 配置说明
 
 ## 启动参数约束
-- `listener_app/sidebar_translate_listener.py` 启动时仅保留 `--config`。
-- 当前监听主链路为 `session-only`，其余运行行为（监听、翻译、展示、日志、TTS provider 选择、调试）统一从 `listener.json` 读取。
+- `listener_app/sidebar_translate_listener.py` 启动时仅保留 `--config`；这是旧 Tk 开发回退入口。
+- `listener_app/backend_main.py` 作为新主路径入口，支持 `--config` / `--host` / `--http-port` / `--ws-port`。
+- 当前监听主链路为 `session-only + all_sessions preview-only`；其余运行行为（监听、翻译、展示、日志、TTS provider 选择、调试）统一从 `listener.json` 读取。
 
 ## 完整配置示例
 ```json
@@ -47,6 +48,7 @@
 ### `listen`
 - `targets`：监听目标数组。
   - 启动时从 `listener.json` 读取。
+  - **仅旧 Tk 回退路径把它当主筛选条件。** 新后端主路径默认监听左侧可见全部会话，不再依赖 `targets` 做会话过滤。
   - 运行中可以在侧边栏顶部点击“添加群”，或在左侧菜单上右键删除 target；变更会回写 `listener.json`，并按“先停旧 worker、确认退出后再启动新 worker”的顺序生效。
   - 长度为 `1`：启动一个侧边栏窗口并监听该目标。
   - 长度 `>1`：仍然只启动一个侧边栏窗口，左侧菜单展示所有 target，点击切换右侧消息视图。

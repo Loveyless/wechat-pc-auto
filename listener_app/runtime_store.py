@@ -60,6 +60,8 @@ class RuntimeStore:
         worker_state: str | None = None,
         worker_detail: str | None = None,
         active_session_id: str | None = None,
+        monitor_scope: str | None = None,
+        message_fidelity: str | None = None,
     ) -> None:
         with self._lock:
             if worker_state is not None:
@@ -68,6 +70,10 @@ class RuntimeStore:
                 self._runtime_state.worker_detail = str(worker_detail or "")
             if active_session_id is not None:
                 self._runtime_state.active_session_id = normalize_session_id(active_session_id)
+            if monitor_scope is not None:
+                self._runtime_state.monitor_scope = str(monitor_scope or "").strip()
+            if message_fidelity is not None:
+                self._runtime_state.message_fidelity = str(message_fidelity or "").strip()
 
     def set_translation_state(
         self,
@@ -104,6 +110,11 @@ class RuntimeStore:
                 self._tts_state.available = bool(available)
             if last_error is not None:
                 self._tts_state.last_error = str(last_error or "")
+
+    def sync_session_order(self, session_ids: list[str]) -> None:
+        normalized = [normalize_session_id(item) for item in session_ids if normalize_session_id(item)]
+        with self._lock:
+            self._runtime_state.session_order = normalized
 
     def upsert_session(
         self,

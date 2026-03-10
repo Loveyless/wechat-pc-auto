@@ -12,9 +12,9 @@
 
 ## 3. Session monitoring model shift
 
-- [ ] 3.1 Refactor the current target-based monitoring path into all-session left-sidebar preview monitoring across group and private chats
-- [ ] 3.2 Preserve translation output and TTS autoplay semantics in the new event flow
-- [ ] 3.3 Keep preview-only limitations explicit in runtime state, API payloads, and docs
+- [x] 3.1 Refactor the current target-based monitoring path into all-session left-sidebar preview monitoring across group and private chats
+- [x] 3.2 Preserve translation output and TTS autoplay semantics in the new event flow
+- [x] 3.3 Keep preview-only limitations explicit in runtime state, API payloads, and docs
 
 ## 4. Tauri frontend shell
 

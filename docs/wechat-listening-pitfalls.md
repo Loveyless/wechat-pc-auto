@@ -12,9 +12,11 @@
 - `wechat_auto/window.py`
 - `wechat_auto/controls.py`
 
-目标：在不改微信客户端的前提下，稳定监听指定会话的预览消息并在侧边栏展示（可接 DeepLX 翻译）。
+目标：在不改微信客户端的前提下，稳定监听左侧会话列表的预览消息并在桌面前端展示（可接 DeepLX 翻译）。
 
-启动时监听目标来源于配置文件：`config/listener.json` 的 `listen.targets`；运行中若用户在侧边栏显式添加/删除 target，也会回写该配置，并按“先停旧 worker、确认退出后再启动新 worker”的顺序生效。
+当前存在两条运行路径：
+- 新主路径：`listener_app/backend_main.py`，默认按 `all_sessions` 方式扫描左侧可见会话列表，不再依赖 `listen.targets` 做主路径筛选。
+- 旧 Tk 开发回退路径：`listener_app/sidebar_translate_listener.py`，仍沿用 `listen.targets` 和 target 编辑能力；仅用于开发期回退，不再是长期主路径。
 
 ## 架构结论
 - 监听与 UI 必须分离：`group_listener_worker.py` 负责抓消息，`sidebar_translate_listener.py` 负责展示与翻译。
@@ -27,11 +29,12 @@
   - `sidebar_shared.py` 收敛共享常量、路径/配置工具、文本归一化与通用校验。
   - UI 私有常量/快捷键节流与 TTS 私有 provider/config helper 不应继续堆进 `sidebar_shared.py`；否则 shared 会再次退化成垃圾桶。
   - 拆分后也不要再假设“所有 helper 都挂在 `sidebar_translate_listener.py`”；翻译 helper 的归属是 `sidebar_translate_runtime.py`，worker/runtime helper 的归属是 `sidebar_runtime_support.py`。
-- 当前监听主链路已收敛为 `session-only`。
-- 当前 worker 为单进程多目标：一次扫描微信主窗口左侧会话列表，覆盖全部 `listen.targets`。
-- 运行时 target 变更不走 IPC 热更新；当前实现是“UI 显式增删 -> 回写 `listener.json` -> 先停旧 worker -> 确认退出后再启动新 worker”。
+- 当前监听主链路已收敛为 `session-only + preview-only`。
+- 新主路径 worker 为单进程全会话预览扫描：一次扫描微信主窗口左侧会话列表，覆盖当前可见的群聊和私聊会话。
+- 旧 Tk 回退路径仍保留“单 worker 一次扫描全部 target”的 target 模式；运行时 target 变更不走 IPC 热更新，仍是“UI 显式增删 -> 回写 `listener.json` -> 先停旧 worker -> 确认退出后再启动新 worker”。
 - 当前主路径不再维护 `chat` / `mixed` 监听模式；相关复杂度已从主链路删除。
 - 当前分支不再维护任何主动操作微信的能力（发送消息、发送文件、自动回复、写输入框）。
+- 新主路径运行时会显式暴露 `runtime.monitor_scope=all_sessions`、`runtime.message_fidelity=preview_only`；消息事件继续通过 `capture_level=preview|full` 区分语义，禁止把预览事件冒充完整正文。
 - 默认行为必须低干扰：
   - 不抢焦点（除非 `listen.focus_refresh=true`）
   - 不置顶（除非用户手动开启“置顶”开关）
@@ -147,12 +150,12 @@
   - 过小：预览抖动更容易重复显示
   - 过大：短时间同文案重复发送更容易被吞
 
-### 10) 重复启动导致同 target 多实例
+### 10) 重复启动导致监听实例重叠
 现象：
-- 误重复执行启动命令后，同一个 target 可能被多个进程重复监听，消息重复显示。
+- 误重复执行启动命令后，旧 Tk 回退路径可能出现同一个 target 被多个进程重复监听；新后端主路径若并行启动多份，也会造成重复事件。
 
 处理：
-- 为每个 target 增加运行时锁（`logs/.runtime/target_*.lock`）。
+- 旧 Tk 路径继续为每个 target 增加运行时锁（`logs/.runtime/target_*.lock`）。
 - 启动阶段会先扫描 `logs/.runtime`，仅清理 `pid/start_token` 已失效或格式异常的陈旧锁。
 - 仍存活的锁必须保留，禁止“启动即全删锁”，否则会破坏单实例约束并造成重复监听。
 

@@ -43,6 +43,12 @@ class ListenerRuntime:
     def set_active_session(self, session_id: str) -> None:
         self.store.set_runtime_state(active_session_id=session_id)
 
+    def set_runtime_contract(self, *, monitor_scope: str, message_fidelity: str) -> None:
+        self.store.set_runtime_state(
+            monitor_scope=monitor_scope,
+            message_fidelity=message_fidelity,
+        )
+
     def set_runtime_options(
         self,
         *,
@@ -182,6 +188,25 @@ class ListenerRuntime:
         self._publish("translation.updated", payload)
         self._publish("session.upsert", self._build_session_payload(session_name))
         return payload
+
+    def sync_session_snapshot(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ordered_session_ids: list[str] = []
+        for item in items:
+            session_name = str(item.get("session_name", "")).strip()
+            if not session_name:
+                continue
+            ordered_session_ids.append(session_name)
+            self.store.upsert_session(
+                session_name=session_name,
+                updated_at=str(item.get("updated_at", "")),
+                latest_preview=str(item.get("latest_preview", "")),
+                unread_count=item.get("unread_count"),
+                preview_only=bool(item.get("preview_only", True)),
+            )
+        self.store.sync_session_order(ordered_session_ids)
+        sessions = self.store.list_sessions()
+        self._publish("session.list.updated", {"items": sessions})
+        return sessions
 
     def _build_session_payload(self, session_name: str) -> dict[str, Any]:
         session_id = normalize_session_id(session_name)

@@ -131,6 +131,35 @@ class RuntimeEngineTest(unittest.TestCase):
         self.assertTrue(snapshot["tts"]["auto_read_enabled"])
         self.assertEqual(snapshot["tts"]["provider"], "system")
 
+    def test_sync_session_snapshot_updates_order_and_preview_contract(self):
+        runtime = ListenerRuntime(message_limit=10)
+        runtime.set_runtime_contract(
+            monitor_scope="all_sessions",
+            message_fidelity="preview_only",
+        )
+        runtime.sync_session_snapshot(
+            [
+                {
+                    "session_name": "群2",
+                    "latest_preview": "b",
+                    "unread_count": 2,
+                    "updated_at": "10:01",
+                    "preview_only": True,
+                },
+                {
+                    "session_name": "群1",
+                    "latest_preview": "a",
+                    "unread_count": 1,
+                    "updated_at": "10:00",
+                    "preview_only": True,
+                },
+            ]
+        )
+        snapshot = runtime.snapshot()
+        self.assertEqual(snapshot["runtime"]["monitor_scope"], "all_sessions")
+        self.assertEqual(snapshot["runtime"]["message_fidelity"], "preview_only")
+        self.assertEqual([item["session_name"] for item in snapshot["sessions"]], ["群2", "群1"])
+
 
 if __name__ == "__main__":
     unittest.main()

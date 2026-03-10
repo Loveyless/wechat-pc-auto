@@ -108,6 +108,7 @@ def build_worker_command(
     focus_refresh: bool,
     load_retry_seconds: float,
     *,
+    all_sessions: bool = False,
     frozen: bool | None = None,
     python_executable: str | None = None,
     source_root: str = SOURCE_ROOT,
@@ -139,6 +140,8 @@ def build_worker_command(
             "--load-retry-seconds",
             str(load_retry_seconds),
         ]
+    if all_sessions:
+        cmd.append("--all-sessions")
     if debug:
         cmd.append("--debug")
     if focus_refresh:
@@ -433,6 +436,8 @@ def start_worker_process(
     debug: bool,
     focus_refresh: bool,
     load_retry_seconds: float,
+    *,
+    all_sessions: bool = False,
 ) -> subprocess.Popen:
     # 使用 UTF-8 管道，避免中文在父子进程间错码。
     cmd = build_worker_command(
@@ -441,6 +446,7 @@ def start_worker_process(
         debug,
         focus_refresh,
         load_retry_seconds,
+        all_sessions=all_sessions,
     )
     if is_frozen_app() and not os.path.exists(cmd[0]):
         raise RuntimeError(f"missing worker executable: {cmd[0]}")

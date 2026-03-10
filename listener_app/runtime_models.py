@@ -57,6 +57,8 @@ class RuntimeState:
     worker_state: str = "idle"
     worker_detail: str = ""
     active_session_id: str = ""
+    monitor_scope: str = "configured_targets"
+    message_fidelity: str = "preview_only"
     session_order: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:

@@ -28,11 +28,13 @@ class FakeWorkerProcess:
 class FakeTTSPlayer:
     def __init__(self):
         self.logger = None
+        self.spoken = []
 
     def set_logger(self, logger):
         self.logger = logger
 
     def speak_async(self, text: str) -> bool:
+        self.spoken.append(text)
         return bool(text)
 
 
@@ -112,6 +114,38 @@ class BackendRuntimeTest(unittest.TestCase):
         messages = service.get_session_messages("测试群")
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["capture_level"], "preview")
+
+    def test_active_session_keeps_tts_autoplay_semantics(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        player = FakeTTSPlayer()
+        service.settings = mock.Mock(
+            session_preview_dedupe_window_seconds=20.0,
+            translate_fail_behavior="show_cn_with_reason",
+            translate_enabled=False,
+            english_only=True,
+            tts_auto_read_active_chat=True,
+            tts_player=player,
+        )
+        service.runtime.set_runtime_options(
+            translate_enabled=False,
+            translate_provider="passthrough",
+            tts_auto_read_enabled=True,
+            tts_provider="windows_system",
+            tts_available=True,
+        )
+        service.set_active_session("测试群")
+        q = service.runtime.subscribe()
+        service._maybe_auto_tts(
+            {
+                "session_id": "测试群",
+                "message_id": "m1",
+                "text_display": "HELLO",
+                "text_translated": "HELLO",
+            }
+        )
+        event = q.get(timeout=1)
+        self.assertEqual(event.event_type, "tts.updated")
+        self.assertEqual(player.spoken, ["HELLO"])
 
 
 if __name__ == "__main__":

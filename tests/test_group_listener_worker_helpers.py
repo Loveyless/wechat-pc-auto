@@ -151,6 +151,48 @@ class GroupListenerWorkerHelpersTest(unittest.TestCase):
         self.assertEqual(state_map["群3"]["preview"], "")
         self.assertEqual(state_map["群3"]["unread"], 0)
 
+    def test_build_all_session_state_map_reads_visible_sessions(self):
+        class FakeItem:
+            def __init__(self, name):
+                self.Name = name
+
+        class FakeSessionList:
+            def Exists(self, timeout=0.3):
+                return True
+
+            def GetChildren(self):
+                return [
+                    FakeItem("群1\n[2条] 张三: 你好"),
+                    FakeItem("好友A\n李四: ok"),
+                ]
+
+        original_find_session_list = worker.find_session_list
+        worker.find_session_list = lambda window: FakeSessionList()
+        try:
+            state_map = worker.build_all_session_state_map(object())
+        finally:
+            worker.find_session_list = original_find_session_list
+
+        self.assertEqual(state_map["群1"]["preview"], "张三: 你好")
+        self.assertEqual(state_map["群1"]["unread"], 2)
+        self.assertEqual(state_map["好友A"]["preview"], "李四: ok")
+        self.assertEqual(state_map["好友A"]["unread"], 0)
+
+    def test_build_all_session_snapshot_signature_tracks_order(self):
+        first = worker.build_all_session_snapshot_signature(
+            [
+                {"chat_name": "群1", "preview": "a", "unread": 1},
+                {"chat_name": "群2", "preview": "b", "unread": 0},
+            ]
+        )
+        second = worker.build_all_session_snapshot_signature(
+            [
+                {"chat_name": "群2", "preview": "b", "unread": 0},
+                {"chat_name": "群1", "preview": "a", "unread": 1},
+            ]
+        )
+        self.assertNotEqual(first, second)
+
     def test_should_force_focus_refresh_only_when_stalled_or_missing(self):
         self.assertFalse(
             worker.should_force_focus_refresh(
