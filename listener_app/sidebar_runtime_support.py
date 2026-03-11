@@ -10,6 +10,7 @@ from typing import Any
 
 if __package__:
     from .sidebar_shared import (
+        EXECUTABLE_ROOT,
         LOG_ROTATE_KEEP_FILES,
         LOG_ROTATE_MAX_BYTES,
         ROOT_DIR,
@@ -25,6 +26,7 @@ if __package__:
     )
 else:
     from sidebar_shared import (
+        EXECUTABLE_ROOT,
         LOG_ROTATE_KEEP_FILES,
         LOG_ROTATE_MAX_BYTES,
         ROOT_DIR,
@@ -97,8 +99,8 @@ def resolve_log_file_path(path: Any) -> str:
     return normalized
 
 
-def resolve_worker_executable_path(runtime_root: str = ROOT_DIR) -> str:
-    return os.path.join(runtime_root, WORKER_EXE_NAME)
+def resolve_worker_executable_path(executable_root: str = EXECUTABLE_ROOT) -> str:
+    return os.path.join(executable_root, WORKER_EXE_NAME)
 
 
 def build_worker_command(
@@ -112,12 +114,12 @@ def build_worker_command(
     frozen: bool | None = None,
     python_executable: str | None = None,
     source_root: str = SOURCE_ROOT,
-    runtime_root: str = ROOT_DIR,
+    executable_root: str = EXECUTABLE_ROOT,
 ) -> list[str]:
     use_frozen = is_frozen_app() if frozen is None else bool(frozen)
     if use_frozen:
         cmd = [
-            resolve_worker_executable_path(runtime_root),
+            resolve_worker_executable_path(executable_root),
             "--targets-json",
             json.dumps(targets, ensure_ascii=False),
             "--interval",

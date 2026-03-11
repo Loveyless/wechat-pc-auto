@@ -8,9 +8,16 @@ import tempfile
 from typing import Any, Dict
 
 SOURCE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RUNTIME_ROOT_ENV = "WECHAT_AUTO_RUNTIME_ROOT"
 
 def is_frozen_app() -> bool:
     return bool(getattr(sys, "frozen", False))
+
+
+def get_executable_root() -> str:
+    if is_frozen_app():
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return SOURCE_ROOT
 
 
 def get_bundle_root() -> str:
@@ -18,13 +25,15 @@ def get_bundle_root() -> str:
 
 
 def get_runtime_root() -> str:
-    if is_frozen_app():
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return SOURCE_ROOT
+    override = str(os.getenv(RUNTIME_ROOT_ENV, "")).strip()
+    if override:
+        return os.path.abspath(override)
+    return get_executable_root()
 
 
 ROOT_DIR = get_runtime_root()
 BUNDLE_ROOT = get_bundle_root()
+EXECUTABLE_ROOT = get_executable_root()
 DEFAULT_CONFIG_PATH = os.path.join(ROOT_DIR, "config", "listener.json")
 BUNDLED_CONFIG_PATH = os.path.join(BUNDLE_ROOT, "config", "listener.json")
 WORKER_EXE_NAME = "group_listener_worker.exe"
@@ -73,8 +82,7 @@ RUNTIME_LOCK_DIR = os.path.join(ROOT_DIR, "logs", ".runtime")
 SUPPORTED_TRANSLATE_PROVIDERS = ("deeplx", "passthrough")
 
 
-def load_local_env():
-    env_path = os.path.join(ROOT_DIR, ".env.local")
+def _load_env_file(env_path: str):
     if not os.path.exists(env_path):
         return
     try:
@@ -90,6 +98,14 @@ def load_local_env():
                     os.environ[key] = value
     except Exception:
         pass
+
+
+def load_local_env():
+    runtime_env = os.path.join(ROOT_DIR, ".env.local")
+    executable_env = os.path.join(EXECUTABLE_ROOT, ".env.local")
+    _load_env_file(runtime_env)
+    if os.path.abspath(executable_env) != os.path.abspath(runtime_env):
+        _load_env_file(executable_env)
 
 
 def ensure_runtime_layout(

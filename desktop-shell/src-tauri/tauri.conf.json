@@ -23,6 +23,12 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": []
+    "externalBin": [
+      "binaries/wechat-auto-backend",
+      "binaries/group_listener_worker"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ]
   }
 }
