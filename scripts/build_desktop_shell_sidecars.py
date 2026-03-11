@@ -25,6 +25,16 @@ BACKEND_SOURCE = REPO_ROOT / "listener_app" / "backend_main.py"
 WORKER_SOURCE = REPO_ROOT / "listener_app" / "group_listener_worker.py"
 CONFIG_SOURCE = REPO_ROOT / "config"
 LISTENER_CONFIG = CONFIG_SOURCE / "listener.json"
+WORKER_SMOKE_ARGS = ("--help",)
+BACKEND_TTS_CHECK_ARGS = (
+    "--config",
+    str(LISTENER_CONFIG),
+    "--check-tts-deps",
+)
+BACKEND_HIDDEN_IMPORTS = (
+    "websockets",
+    "tencentcloud",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -92,16 +102,25 @@ def ensure_clean_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def preflight_tts_dependencies(python: str) -> None:
+def preflight_worker_dependencies(python: str) -> None:
+    run_command(
+        [
+            python,
+            str(WORKER_SOURCE),
+            *WORKER_SMOKE_ARGS,
+        ],
+        step="Source worker dependency preflight",
+    )
+
+
+def preflight_backend_dependencies(python: str) -> None:
     if not LISTENER_CONFIG.exists():
         raise RuntimeError(f"missing config file: {LISTENER_CONFIG}")
     run_command(
         [
             python,
             str(BACKEND_SOURCE),
-            "--config",
-            str(LISTENER_CONFIG),
-            "--check-tts-deps",
+            *BACKEND_TTS_CHECK_ARGS,
         ],
         step="Source backend TTS dependency preflight",
     )
@@ -146,7 +165,7 @@ def build_sidecar(
 
 def smoke_test_worker(worker_executable: Path) -> None:
     run_command(
-        [str(worker_executable), "--help"],
+        [str(worker_executable), *WORKER_SMOKE_ARGS],
         step="Worker smoke test (--help)",
     )
 
@@ -155,12 +174,17 @@ def smoke_test_backend(backend_executable: Path) -> None:
     run_command(
         [
             str(backend_executable),
-            "--config",
-            str(LISTENER_CONFIG),
-            "--check-tts-deps",
+            *BACKEND_TTS_CHECK_ARGS,
         ],
         step="Backend packaged TTS dependency smoke test",
     )
+
+
+def backend_hidden_import_args() -> list[str]:
+    args: list[str] = []
+    for module_name in BACKEND_HIDDEN_IMPORTS:
+        args.extend(["--collect-submodules", module_name])
+    return args
 
 
 def install_sidecar(built_executable: Path, *, name: str, target_triple: str) -> Path:
@@ -181,7 +205,8 @@ def main() -> None:
     SPEC_ROOT.mkdir(parents=True, exist_ok=True)
     DIST_ROOT.mkdir(parents=True, exist_ok=True)
 
-    preflight_tts_dependencies(args.python)
+    preflight_worker_dependencies(args.python)
+    preflight_backend_dependencies(args.python)
 
     worker_executable = build_sidecar(
         python=args.python,
@@ -194,10 +219,7 @@ def main() -> None:
         source=BACKEND_SOURCE,
         name=BACKEND_NAME,
         extra_args=[
-            "--collect-submodules",
-            "websockets",
-            "--collect-submodules",
-            "tencentcloud",
+            *backend_hidden_import_args(),
             "--add-data",
             pyinstaller_data_arg(CONFIG_SOURCE, "config"),
         ],

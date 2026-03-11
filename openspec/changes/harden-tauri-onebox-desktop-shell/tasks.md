@@ -12,9 +12,9 @@
 
 ## 3. Sidecar packaging consistency
 
-- [ ] 3.1 Inventory the real backend and worker runtime dependencies, separating auto-collected imports from dynamic hidden imports
-- [ ] 3.2 Update `requirements.txt`, `pyproject.toml`, and `scripts/build_desktop_shell_sidecars.py` only for runtime dependencies proven necessary by the inventory
-- [ ] 3.3 Keep build-time dependency checks and packaged smoke checks aligned with the runtime dependency inventory
+- [x] 3.1 Inventory the real backend and worker runtime dependencies, separating auto-collected imports from dynamic hidden imports
+- [x] 3.2 Update `requirements.txt`, `pyproject.toml`, and `scripts/build_desktop_shell_sidecars.py` only for runtime dependencies proven necessary by the inventory
+- [x] 3.3 Keep build-time dependency checks and packaged smoke checks aligned with the runtime dependency inventory
 
 ## 4. Automated verification
 
