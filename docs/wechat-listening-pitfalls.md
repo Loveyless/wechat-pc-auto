@@ -384,6 +384,68 @@
 - `F1` 提供快捷键速查，避免“功能做了但没人知道怎么用”。
 - 删除当前 target 后，若自动切到下一个 target，标题也必须同步切过去，不能继续挂旧标题。
 
+### 27) 桌面前端一直显示 reconnecting，但 HTTP 接口其实是活的
+现象：
+- `desktop-shell/` 开发页能正常拉到 `/api/runtime`、`/api/sessions`，列表也能渲染。
+- 但状态徽标一直停在 `reconnecting`，控制台反复刷 `WebSocket is closed before the connection is established`。
+- 网络面板会出现大量重复的 `/api/runtime`、`/api/sessions` 请求，看起来像“后端不稳”，其实未必。
+
+根因：
+- 前端连接逻辑如果把“拉快照”和“建 WebSocket”放在同一个 `useEffect` 里，又让 effect 依赖会在运行时频繁变化，就会反复清理旧连接。
+- React 开发态 `StrictMode` 会额外执行一次 mount/unmount 检查；如果没有做连接代次隔离，旧一轮异步请求回来的结果还能继续创建或关闭 socket，形成竞态。
+- 结果就是：真正的后端 WS 服务明明可用，前端却自己把还在 `CONNECTING` 的 socket 提前关掉。
+
+处理：
+- `desktop-shell/src/hooks/use-desktop-shell.ts` 的连接生命周期必须收敛成“单活跃代次”：
+  - 每次重连先递增连接代次，再关闭旧 socket、清掉旧 timer。
+  - 快照请求返回后，只有当前代次仍然有效，才允许继续创建 WebSocket。
+  - `open` / `error` / `close` 回调也必须校验代次；过期回调只能忽略，不能再改状态或补重连。
+- 不要用“删掉 `StrictMode`”掩盖问题；这只能把竞态藏起来，不能证明连接管理是对的。
+- 判断是否修好，至少看三点：
+  - 页面状态从 `reconnecting` 变成稳定 `ready`
+  - 控制台不再持续刷 `closed before the connection is established`
+  - `/events` 能被前端稳定订阅，而不是退回高频 HTTP 轮询
+
+### 28) `npm run tauri build` 现在已经能做一体化桌面壳，但密钥仍然必须外置
+现象：
+- `desktop-shell` 现在已经能产出 `wechat-auto-shell.exe`、`msi`、`nsis`，而且双击壳会自动拉起 backend sidecar。
+- 运行时配置、日志、锁会落到 `%LOCALAPPDATA%\com.wechatauto.shell`，不再写回源码目录。
+- 但如果 `translate.enabled=true` 且你既没在配置里写 `deeplx_url`，也没提供 `.env.local`，壳启动阶段仍会 fail-fast。
+
+根因：
+- `desktop-shell/package.json` 的 `pretauri` 会先构建 PyInstaller sidecar。
+- `desktop-shell/src-tauri/src/main.rs` 现在会托管 `wechat-auto-backend.exe`，并给 sidecar 注入 `WECHAT_AUTO_RUNTIME_ROOT`。
+- `listener_app/sidebar_shared.py` 会按运行时根目录解析配置/日志，并在 Tauri 壳下按“运行时目录优先、可执行目录兜底”读取 `.env.local`。
+- 一体化不等于“顺手把你的密钥一起烘焙进 installer”；这条边界必须保留。
+
+处理：
+- `tauri.conf.json` 继续显式维护 Windows `.ico`，否则 bundle 还是会直接失败。
+- 如果要让打包壳直接可用，至少满足下面任一条件：
+  - `config/listener.json` 里显式提供 `translate.deeplx_url`
+  - `%LOCALAPPDATA%\com.wechatauto.shell\.env.local` 存在
+  - `wechat-auto-shell.exe` 同目录 `.env.local` 存在
+- 真正的最小验证不是“exe 打开了”，而是：
+  - `http://127.0.0.1:8765/healthz` 返回 `{"status":"ok"}`
+  - `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log` 出现 `spawned backend sidecar pid=...`
+
+### 29) PyInstaller `onefile` 的双进程表现，别误判成重复 spawn
+现象：
+- 任务管理器里可能同时看到两个 `wechat-auto-backend.exe`
+- `group_listener_worker.exe` 也可能同时出现两个同名进程
+
+根因：
+- 当前 sidecar 用的是 PyInstaller `onefile`
+- Windows 下常见形态就是“同名父进程负责解包 + 同名子进程负责执行 payload”
+
+处理：
+- 先看父子关系，不要只看进程名个数。
+- 真正要判定“是否重复 spawn”，看这两处：
+  - `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log`
+  - `%LOCALAPPDATA%\com.wechatauto.shell\logs\.runtime\backend-sidecar.json`
+- 当前 Tauri bootstrap 已经加了两层约束：
+  - Windows named mutex：串行化 backend bootstrap
+  - `pid + start_token` 标记：避免二次启动壳时把“还在启动的 sidecar”误判成没起，再补一份
+
 ## 推荐运行命令
 
 ### 新主路径（推荐）
@@ -406,7 +468,18 @@ cd desktop-shell
 npm run tauri dev
 ```
 
-前提是本机已经装好 `cargo` / `rustc`。没有 Rust toolchain 时，只能先跑 Vite 开发页验证前端契约，不要把它说成 Tauri 壳已经通过。
+前提是本机已经装好 `cargo` / `rustc`。这条命令现在会先构建 sidecar，再由 Tauri 壳自动带起 backend。
+没有 Rust toolchain 时，只能先跑 Vite 开发页验证前端契约，不要把它说成 Tauri 壳已经通过。
+
+### 可选：Tauri 壳构建
+
+```bash
+cd desktop-shell
+npm run tauri build
+```
+
+这一步现在能产出一体化 Windows 桌面壳，并把 backend sidecar 一起带上。
+更具体的产物路径和验收边界看 `docs/desktop-shell-build.md`。
 
 ### 旧 Tk 开发回退路径
 

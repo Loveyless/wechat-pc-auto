@@ -2,6 +2,9 @@
 
 这份文档描述的是旧 Tk 路径的 Windows 打包，不是当前 `backend_main.py + desktop-shell/` 新主路径的正式交付方式。
 
+如果你要看当前主路径的测试命令、桌面壳构建命令和交付边界，去看 `docs/desktop-shell-build.md`。
+那条路现在已经支持 Tauri 壳自动托管 backend sidecar；别再拿这篇旧 Tk 文档去否认新主路径的一体化构建。
+
 如果你现在在看 React/Tauri 主路径，这篇文档只能当遗留参考，别把它误读成“新桌面壳已经打包完了”。
 
 这条 `session-only` 分支支持直接打包成 Windows 应用，但不是“一个 exe 包打天下”的花活。

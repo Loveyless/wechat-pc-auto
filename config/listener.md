@@ -6,6 +6,8 @@
 - `desktop-shell/` 通过本地 `HTTP + WebSocket` 消费后端；前端开发默认连接：
   - `http://127.0.0.1:8765`
   - `ws://127.0.0.1:8766/events`
+- `desktop-shell/` 的 `npm run tauri dev` / `npm run tauri build` 现在会先构建 PyInstaller sidecar，并由 Tauri 壳自动拉起 backend。
+- Tauri 壳运行时根目录固定在 `%LOCALAPPDATA%\\com.wechatauto.shell`；运行时配置、日志、锁都按这个目录落盘。
 - 当前监听主链路为 `session-only + all_sessions preview-only`；其余运行行为（监听、翻译、展示、日志、TTS provider 选择、调试）统一从 `listener.json` 读取。
 
 ## 当前主路径启动方式
@@ -23,6 +25,32 @@ npm run tauri dev
 ```
 
 没有 `cargo/rustc` 时，不要把 `npm run dev` 的 Vite 页面误判成 Tauri 壳已经验收通过。
+
+## 当前主路径验证与壳构建
+
+最小验证命令：
+
+```bash
+python listener_app/backend_main.py --config ".\config\listener.json"
+cd desktop-shell
+npm run build
+```
+
+如果要验证桌面壳：
+
+```bash
+cd desktop-shell
+npm run tauri dev
+npm run tauri build
+```
+
+这里要分清楚：
+
+- `npm run build` 只生成前端静态资源
+- `npm run tauri dev` / `npm run tauri build` 会先构建 sidecar，再由 Tauri 壳托管 backend
+- 源码态 `backend_main.py` 仍然是最直接的开发入口；但壳模式下不再要求手工先启动它
+
+当前主路径的测试命令、产物路径和交付边界，统一看 `docs/desktop-shell-build.md`。
 
 ## 完整配置示例
 ```json
@@ -95,6 +123,10 @@ npm run tauri dev
 - `provider`：翻译提供方。当前支持 `deeplx` / `passthrough`。
 - `deeplx_url`：DeepLX 接口地址。
   - 当 `translate.enabled=true` 且 `provider=deeplx` 时，若配置值和 `DEEPLX_URL` 环境变量都为空，启动阶段会直接报错退出。
+- `.env.local` 读取顺序要分清：
+  - 源码态默认读仓库根目录 `.env.local`
+  - Tauri 壳优先读 `%LOCALAPPDATA%\\com.wechatauto.shell\\.env.local`
+  - 若运行时目录没有，再回退到 `wechat-auto-shell.exe` 同目录 `.env.local`
 - `source_lang`：源语言，`auto` 表示自动检测。
 - `target_lang`：目标语言，例如 `EN`。
 - `timeout_seconds`：翻译请求超时时间（秒）。
@@ -134,7 +166,9 @@ npm run tauri dev
   - 推荐把 provider 私有配置拆到独立 JSON，别把不同供应商参数全堆回 `listener.json`。
 
 ### `logging`
-- `file`：运行日志输出文件路径。相对路径按项目根目录解析（例如 `logs/sidebar_listener.log`）。
+- `file`：运行日志输出文件路径。
+  - 相对路径按当前运行根目录解析。
+  - 源码态根目录是仓库根目录；Tauri 壳根目录是 `%LOCALAPPDATA%\\com.wechatauto.shell`。
 - 日志按大小自动轮转：默认单文件约 `10MB` 时切分，保留最近 `5` 个历史文件（`.1` ~ `.5`）。
 
 ## `config/doubao_tts.json` 示例

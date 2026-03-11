@@ -3,12 +3,12 @@
 这个分支现在的主路径已经不是 Tk 侧边栏，而是：
 
 - Python 本地后端：`listener_app/backend_main.py`
-- 桌面前端：`desktop-shell/`（React + Vite，后续接 Tauri）
+- 桌面前端：`desktop-shell/`（React + Vite + Tauri 壳）
 - 本地契约：`HTTP + WebSocket`
 
 旧 Tk 入口 `listener_app/sidebar_translate_listener.py` 还在，但只作为开发回退，不再是主路径。
 
-如果你要的是“低打扰抓左侧会话预览，顺手翻成英文练习”，这条路对。  
+如果你要的是“低打扰抓左侧会话预览，顺手翻成英文练习”，这条路对。
 如果你要的是“完整聊天正文审计、自动回复、自动发文件”，这个分支不做。
 
 ## 当前主路径
@@ -34,7 +34,7 @@ cd desktop-shell
 npm install
 ```
 
-接入 DeepLX / 云 TTS 时，推荐把真实密钥放进项目根目录的 `.env.local`：
+接入 DeepLX / 云 TTS 时，推荐把真实密钥放进 `.env.local`：
 
 ```bash
 DEEPLX_URL=http://127.0.0.1:1188/translate
@@ -47,6 +47,14 @@ TENCENTCLOUD_SECRET_KEY=<your-secret-key>
 如果你不想依赖云 TTS，把 `config/listener.json` 里的 `tts.provider` 改回 `windows_system` 即可。
 当前默认已经是腾讯云；如果你之前改过 provider，确保 `tts.provider=tencent_cloud`，并把 `tts.config_path` 指到 `config/tencent_tts.json`。
 当前默认腾讯云配置示例里的英文音色是 `WeJames`，代号 `VoiceType=501008`；这不是 `SampleRate`。
+
+`.env.local` 的读取位置要分清：
+
+- 源码态：仓库根目录 `.env.local`
+- Tauri 壳：优先 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`
+- Tauri 壳回退：`wechat-auto-shell.exe` 同目录 `.env.local`
+
+默认不自动把 `.env.local` 打进 installer。原因不是矫情，是避免把你本机密钥顺手分发出去。
 
 ## 启动
 
@@ -85,6 +93,7 @@ VITE_BACKEND_WS_URL=ws://127.0.0.1:8766/events
 npm run tauri dev
 ```
 
+`npm run tauri dev` 现在会先自动构建 PyInstaller sidecar，再由 Tauri 壳托管 backend。
 没有 Rust toolchain 时，只能先跑 `npm run dev` 验证前端页面和本地 API，不要装作 Tauri 壳已经可用。
 
 ### 4. 旧 Tk 开发回退入口
@@ -94,6 +103,33 @@ python listener_app/sidebar_translate_listener.py --config ".\config\listener.js
 ```
 
 这条路只用于开发期回退和对照，不再是主路径。
+
+## 测试与构建
+
+当前主路径至少要区分四件事，别再混着说：
+
+- 开发运行：`backend_main.py + npm run dev`
+- sidecar 构建：`python scripts/build_desktop_shell_sidecars.py`
+- 桌面壳调试：`npm run tauri dev`
+- 桌面壳构建：`npm run tauri build`
+
+最小验证命令：
+
+```bash
+python listener_app/backend_main.py --config ".\config\listener.json"
+cd desktop-shell
+npm run build
+```
+
+需要桌面壳时，再执行：
+
+```bash
+cd desktop-shell
+npm run tauri dev
+npm run tauri build
+```
+
+详细命令、产物位置和验收边界，看 `docs/desktop-shell-build.md`。
 
 ## 当前架构
 
@@ -128,17 +164,23 @@ python listener_app/sidebar_translate_listener.py --config ".\config\listener.js
 
 ## 打包现状
 
-这个阶段没有把新架构的安装包分发做完。
+现在别再说“新主路径不能打包成一体化桌面壳”，这话已经过期了。
 
-- `desktop-shell` 主路径的正式 Tauri 打包不在本阶段交付范围
-- `docs/windows-packaging.md` 现在描述的是旧 Tk 路径的 Windows 打包，不是新主路径的交付方式
+- `desktop-shell` 现在可以通过 `npm run tauri build` 产出一体化桌面壳 `exe/msi/nsis`
+- 壳启动后会自动拉起 `wechat-auto-backend.exe` 和 `group_listener_worker.exe`
+- 运行时配置、日志和锁落到 `%LOCALAPPDATA%\com.wechatauto.shell`
+- 旧 Tk 路径的 Windows 打包文档还在，见 `docs/windows-packaging.md`
 
-别把旧 Tk 打包文档误读成“新桌面壳已经能一键打包发布”。
+真正还保留的边界只有两条：
+
+- `.env.local` 不会自动塞进安装包，用户要自己提供
+- 当前 sidecar 用的是 PyInstaller `onefile`，任务管理器里看到同名双进程通常是 bootloader + payload，不等于重复启动
 
 ## 配置与排障
 
 - 配置字段说明看 `config/listener.md`
 - 监听坑位和恢复机制看 `docs/wechat-listening-pitfalls.md`
+- 当前主路径测试/构建看 `docs/desktop-shell-build.md`
 - 旧 Tk 打包说明看 `docs/windows-packaging.md`
 
 ## 项目结构
@@ -154,6 +196,7 @@ desktop-shell/
 ├── src-tauri/
 └── package.json
 docs/
+├── desktop-shell-build.md
 ├── wechat-listening-pitfalls.md
 └── windows-packaging.md
 listener_app/
