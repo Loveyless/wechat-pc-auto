@@ -122,7 +122,7 @@ def preflight_backend_dependencies(python: str) -> None:
             str(BACKEND_SOURCE),
             *BACKEND_TTS_CHECK_ARGS,
         ],
-        step="Source backend TTS dependency preflight",
+        step="Source backend dependency preflight",
     )
 
 
@@ -176,7 +176,7 @@ def smoke_test_backend(backend_executable: Path) -> None:
             str(backend_executable),
             *BACKEND_TTS_CHECK_ARGS,
         ],
-        step="Backend packaged TTS dependency smoke test",
+        step="Backend packaged dependency smoke test",
     )
 
 

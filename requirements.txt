@@ -1,3 +1,6 @@
+# worker 直接导入 uiautomation；comtypes 作为其传递依赖由预检和 smoke 覆盖。
 uiautomation>=2.0.18
+# runtime_api 和 doubao TTS runtime 都依赖 websockets。
 websockets>=14.0
+# 腾讯云 TTS runtime 通过 importlib 动态导入 tencentcloud.*。
 tencentcloud-sdk-python-tts>=3.0.0
