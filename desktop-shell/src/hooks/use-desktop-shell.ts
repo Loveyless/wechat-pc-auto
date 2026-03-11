@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import {
+  type BackendConnectionInfo,
+  ManagedBackendStartupError,
   createEventSocket,
   fetchSessionMessages,
   fetchSessions,
   fetchSnapshot,
-  getHttpBaseUrl,
-  getWsUrl,
+  resolveBackendConnectionInfo,
   setActiveSession,
 } from "@/lib/api"
 import type {
@@ -91,6 +92,14 @@ function upsertMessage(list: ShellMessage[], incoming: ShellMessage) {
   return next
 }
 
+const DEFAULT_BACKEND_INFO: BackendConnectionInfo = {
+  httpBaseUrl: import.meta.env.VITE_BACKEND_HTTP_URL ?? "http://127.0.0.1:8765",
+  wsUrl: import.meta.env.VITE_BACKEND_WS_URL ?? "ws://127.0.0.1:8766/events",
+  managed: false,
+  startupError: "",
+  runtimeRoot: "",
+}
+
 export function useDesktopShell() {
   const [connectionState, setConnectionState] = useState<ShellConnectionState>("loading")
   const [runtimeState, setRuntimeState] = useState<BackendRuntimeState>(mockRuntimeState)
@@ -103,48 +112,31 @@ export function useDesktopShell() {
   const [selectedSessionId, setSelectedSessionId] = useState<string>(mockSessions[0]?.id ?? "")
   const [lastError, setLastError] = useState("")
   const [lastEvent, setLastEvent] = useState("")
+  const [backendInfo, setBackendInfo] = useState<BackendConnectionInfo>(DEFAULT_BACKEND_INFO)
+  const selectedSessionIdRef = useRef(selectedSessionId)
+  const sessionOrderRef = useRef(runtimeState.session_order)
   const reconnectTimerRef = useRef<number | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
+  const connectionAttemptRef = useRef(0)
   const unmountedRef = useRef(false)
 
-  const replaceFromSnapshot = useCallback(
-    async (isReconnect = false) => {
-      try {
-        const [snapshot, backendSessions] = await Promise.all([fetchSnapshot(), fetchSessions()])
-        if (unmountedRef.current) {
-          return
-        }
-        const mappedSessions = backendSessions.map(mapSession)
-        const initialSessionId =
-          snapshot.runtime.active_session_id || mappedSessions[0]?.id || selectedSessionId
-        let initialMessages: ShellMessage[] = []
-        if (initialSessionId) {
-          const backendMessages = await fetchSessionMessages(initialSessionId)
-          initialMessages = backendMessages.map(mapMessage)
-        }
-        setRuntimeState(snapshot.runtime)
-        setTranslationState(snapshot.translation)
-        setTtsState(snapshot.tts)
-        setSessions(mappedSessions)
-        setSelectedSessionId(initialSessionId)
-        if (initialSessionId) {
-          setMessagesBySession((current) => ({
-            ...current,
-            [initialSessionId]: initialMessages,
-          }))
-        }
-        setConnectionState(isReconnect ? "ready" : "ready")
-        setLastError("")
-      } catch (error) {
-        if (unmountedRef.current) {
-          return
-        }
-        setConnectionState(isReconnect ? "reconnecting" : "degraded")
-        setLastError(error instanceof Error ? error.message : String(error))
-      }
-    },
-    [selectedSessionId],
-  )
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+  }, [])
+
+  const closeSocket = useCallback(() => {
+    const socket = socketRef.current
+    socketRef.current = null
+    if (!socket) {
+      return
+    }
+    if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
+      socket.close()
+    }
+  }, [])
 
   const loadMessagesForSession = useCallback(async (sessionId: string) => {
     const backendMessages = await fetchSessionMessages(sessionId)
@@ -157,6 +149,70 @@ export function useDesktopShell() {
     }))
   }, [])
 
+  const hydrateFromSnapshot = useCallback(
+    async (attemptId: number, isReconnect = false) => {
+      try {
+        const connectionInfo = await resolveBackendConnectionInfo()
+        if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+          return { ok: false, fatal: false }
+        }
+        setBackendInfo(connectionInfo)
+        if (connectionInfo.startupError) {
+          throw new ManagedBackendStartupError(connectionInfo.startupError)
+        }
+        const [snapshot, backendSessions] = await Promise.all([fetchSnapshot(), fetchSessions()])
+        if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+          return { ok: false, fatal: false }
+        }
+        const mappedSessions = backendSessions.map(mapSession)
+        const nextSessionOrder =
+          snapshot.runtime.session_order.length > 0
+            ? snapshot.runtime.session_order
+            : mappedSessions.map((session) => session.id)
+        const initialSessionId =
+          snapshot.runtime.active_session_id ||
+          mappedSessions[0]?.id ||
+          selectedSessionIdRef.current ||
+          ""
+        let initialMessages: ShellMessage[] = []
+        if (initialSessionId) {
+          const backendMessages = await fetchSessionMessages(initialSessionId)
+          initialMessages = backendMessages.map(mapMessage)
+        }
+        if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+          return { ok: false, fatal: false }
+        }
+        sessionOrderRef.current = nextSessionOrder
+        selectedSessionIdRef.current = initialSessionId
+        setRuntimeState({
+          ...snapshot.runtime,
+          session_order: nextSessionOrder,
+        })
+        setTranslationState(snapshot.translation)
+        setTtsState(snapshot.tts)
+        setSessions(mappedSessions)
+        setSelectedSessionId(initialSessionId)
+        if (initialSessionId) {
+          setMessagesBySession((current) => ({
+            ...current,
+            [initialSessionId]: initialMessages,
+          }))
+        }
+        setLastError("")
+        return { ok: true, fatal: false }
+      } catch (error) {
+        if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+          return { ok: false, fatal: false }
+        }
+        const fatal = error instanceof ManagedBackendStartupError
+        setConnectionState(fatal ? "degraded" : isReconnect ? "reconnecting" : "degraded")
+        setLastError(error instanceof Error ? error.message : String(error))
+        return { ok: false, fatal }
+      }
+    },
+    [],
+  )
+
   const handleEvent = useCallback((event: BackendEvent) => {
     setLastEvent(event.event)
     if (event.event === "backend.state") {
@@ -168,12 +224,23 @@ export function useDesktopShell() {
       return
     }
     if (event.event === "session.list.updated") {
-      setSessions(event.payload.items.map(mapSession))
+      const mappedSessions = event.payload.items.map(mapSession)
+      const nextSessionOrder = mappedSessions.map((session) => session.id)
+      sessionOrderRef.current = nextSessionOrder
+      setRuntimeState((current) => ({
+        ...current,
+        session_order: nextSessionOrder,
+      }))
+      setSessions(mappedSessions)
+      if (!selectedSessionIdRef.current && mappedSessions[0]?.id) {
+        selectedSessionIdRef.current = mappedSessions[0].id
+        setSelectedSessionId(mappedSessions[0].id)
+      }
       return
     }
     if (event.event === "session.upsert") {
       setSessions((current) =>
-        upsertSession(current, mapSession(event.payload), runtimeState.session_order),
+        upsertSession(current, mapSession(event.payload), sessionOrderRef.current),
       )
       return
     }
@@ -195,50 +262,99 @@ export function useDesktopShell() {
     if (event.event === "error.reported") {
       setLastError(`${event.payload.source}: ${event.payload.message}`)
     }
-  }, [runtimeState.session_order])
+  }, [])
 
-  useEffect(() => {
-    unmountedRef.current = false
-    const connect = async (isReconnect = false) => {
-      await replaceFromSnapshot(isReconnect)
-      if (unmountedRef.current) {
+  const connect = useCallback(
+    async function connect(isReconnect = false) {
+      const attemptId = connectionAttemptRef.current + 1
+      connectionAttemptRef.current = attemptId
+      clearReconnectTimer()
+      closeSocket()
+      setConnectionState(isReconnect ? "reconnecting" : "loading")
+      const hydrated = await hydrateFromSnapshot(attemptId, isReconnect)
+      if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
         return
       }
-      const socket = createEventSocket(handleEvent)
-      socketRef.current = socket
-      socket.addEventListener("open", () => {
-        if (!unmountedRef.current) {
-          setConnectionState("ready")
-        }
-      })
-      socket.addEventListener("close", () => {
-        if (unmountedRef.current) {
+      if (!hydrated.ok) {
+        if (hydrated.fatal) {
           return
         }
-        setConnectionState("reconnecting")
         reconnectTimerRef.current = window.setTimeout(() => {
           void connect(true)
         }, 1500)
-      })
-      socket.addEventListener("error", () => {
-        if (!unmountedRef.current) {
-          setConnectionState("reconnecting")
+        return
+      }
+      try {
+        const socket = await createEventSocket((event) => {
+          if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+            return
+          }
+          handleEvent(event)
+        })
+        if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+          if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) {
+            socket.close()
+          }
+          return
         }
-      })
-    }
+        socketRef.current = socket
+        socket.addEventListener("open", () => {
+          if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+            return
+          }
+          setConnectionState("ready")
+          setLastError("")
+        })
+        socket.addEventListener("close", () => {
+          if (socketRef.current === socket) {
+            socketRef.current = null
+          }
+          if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+            return
+          }
+          setConnectionState("reconnecting")
+          clearReconnectTimer()
+          reconnectTimerRef.current = window.setTimeout(() => {
+            void connect(true)
+          }, 1500)
+        })
+        socket.addEventListener("error", () => {
+          if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+            return
+          }
+          setConnectionState("reconnecting")
+        })
+      } catch (error) {
+        if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
+          return
+        }
+        const fatal = error instanceof ManagedBackendStartupError
+        setConnectionState(fatal ? "degraded" : "reconnecting")
+        setLastError(error instanceof Error ? error.message : String(error))
+        if (!fatal) {
+          reconnectTimerRef.current = window.setTimeout(() => {
+            void connect(true)
+          }, 1500)
+        }
+      }
+    },
+    [clearReconnectTimer, closeSocket, handleEvent, hydrateFromSnapshot],
+  )
 
+  useEffect(() => {
+    unmountedRef.current = false
     void connect(false)
     return () => {
       unmountedRef.current = true
-      if (reconnectTimerRef.current !== null) {
-        window.clearTimeout(reconnectTimerRef.current)
-      }
-      socketRef.current?.close()
+      connectionAttemptRef.current += 1
+      clearReconnectTimer()
+      closeSocket()
     }
-  }, [handleEvent, replaceFromSnapshot])
+  }, [clearReconnectTimer, closeSocket, connect])
 
   const selectSession = useCallback(
     async (sessionId: string) => {
+      selectedSessionIdRef.current = sessionId
       setSelectedSessionId(sessionId)
       setRuntimeState((current) => ({
         ...current,
@@ -269,9 +385,6 @@ export function useDesktopShell() {
     lastError,
     lastEvent,
     selectSession,
-    backendInfo: {
-      httpBaseUrl: getHttpBaseUrl(),
-      wsUrl: getWsUrl(),
-    },
+    backendInfo,
   }
 }
