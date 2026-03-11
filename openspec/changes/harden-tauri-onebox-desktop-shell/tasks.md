@@ -24,6 +24,6 @@
 
 ## 5. Documentation and release gate updates
 
-- [ ] 5.1 Update `docs/wechat-listening-pitfalls.md` and `docs/desktop-shell-build.md` to document the hardened bootstrap contract, startup states, single-instance behavior, and release verification flow
-- [ ] 5.2 Update `README.md` to reflect the new release expectations, rollback boundary, and development-only role of the Tk fallback
-- [ ] 5.3 Re-run the documented verification commands and record any environment-limited acceptance gaps before treating the hardened shell path as complete
+- [x] 5.1 Update `docs/wechat-listening-pitfalls.md` and `docs/desktop-shell-build.md` to document the hardened bootstrap contract, startup states, single-instance behavior, and release verification flow
+- [x] 5.2 Update `README.md` to reflect the new release expectations, rollback boundary, and development-only role of the Tk fallback
+- [x] 5.3 Re-run the documented verification commands and record any environment-limited acceptance gaps before treating the hardened shell path as complete

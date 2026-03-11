@@ -116,9 +116,9 @@ def bootstrap_log_path(runtime_root: Path) -> Path:
 def read_log_delta(log_path: Path, start_offset: int) -> str:
     if not log_path.exists():
         return ""
-    with log_path.open("r", encoding="utf-8", errors="replace") as handle:
+    with log_path.open("rb") as handle:
         handle.seek(start_offset)
-        return handle.read()
+        return handle.read().decode("utf-8", errors="replace")
 
 
 def launch_process(executable: Path) -> subprocess.Popen[bytes]:

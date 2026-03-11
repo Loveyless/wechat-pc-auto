@@ -38,6 +38,7 @@
 - 当前监听主链路已收敛为 `session-only + preview-only`。
 - 新主路径 worker 为单进程全会话预览扫描：一次扫描微信主窗口左侧会话列表，覆盖当前可见的群聊和私聊会话。
 - 新主路径 UI 已切到 `desktop-shell/`；前端只消费本地 `HTTP + WebSocket` 契约，不再直连 worker stdout。
+- 新主路径桌面壳必须保持 `single-instance`：第二次启动只聚焦已有窗口，不允许额外拉起第二个壳窗口。
 - 旧 Tk 回退路径仍保留“单 worker 一次扫描全部 target”的 target 模式；运行时 target 变更不走 IPC 热更新，仍是“UI 显式增删 -> 回写 `listener.json` -> 先停旧 worker -> 确认退出后再启动新 worker”。
 - 当前主路径不再维护 `chat` / `mixed` 监听模式；相关复杂度已从主链路删除。
 - 当前分支不再维护任何主动操作微信的能力（发送消息、发送文件、自动回复、写输入框）。
@@ -402,9 +403,23 @@
   - `open` / `error` / `close` 回调也必须校验代次；过期回调只能忽略，不能再改状态或补重连。
 - 不要用“删掉 `StrictMode`”掩盖问题；这只能把竞态藏起来，不能证明连接管理是对的。
 - 判断是否修好，至少看三点：
-  - 页面状态从 `reconnecting` 变成稳定 `ready`
+  - managed backend 冷启动时先看到 `starting`，而不是误报 `reconnecting`
+  - 页面状态最终从 `starting` 变成稳定 `ready`
   - 控制台不再持续刷 `closed before the connection is established`
   - `/events` 能被前端稳定订阅，而不是退回高频 HTTP 轮询
+
+### 27.1) `/healthz` 判活不能再靠裸字符串包含
+现象：
+- backend 明明已经返回健康 JSON，但桌面壳还在等 ready。
+- 最典型的坏实现是拿 `{"status":"ok"}` 当固定字符串去匹配，结果被空格或编码细节打脸。
+
+根因：
+- `listener_app/runtime_api.py` 返回的是 JSON，不是约定好的固定字节串。
+- 只做裸字符串包含，等于把健康协议写成了“碰巧长这样”。
+
+处理：
+- `desktop-shell/src-tauri/src/backend_health.rs` 必须按“HTTP 200 + JSON `status == ok`”判活。
+- 这个协议是桌面壳 bootstrap 的硬契约，不允许再退回字符串猜测。
 
 ### 28) `npm run tauri build` 现在已经能做一体化桌面壳，但密钥仍然必须外置
 现象：
@@ -445,6 +460,19 @@
 - 当前 Tauri bootstrap 已经加了两层约束：
   - Windows named mutex：串行化 backend bootstrap
   - `pid + start_token` 标记：避免二次启动壳时把“还在启动的 sidecar”误判成没起，再补一份
+
+### 29.1) 第二次启动桌面壳，只能聚焦已有窗口
+现象：
+- 二次双击 `wechat-auto-shell.exe` 后，如果又弹出一个新壳窗口，或者又补拉了一份 backend sidecar，这就是回归，不是“方便多开”。
+
+根因：
+- 壳窗口生命周期和 backend 复用不是一回事。
+- backend 已经有 mutex + marker 约束，桌面壳自己再允许多开，只会把窗口状态和 bootstrap 日志搅乱。
+
+处理：
+- `desktop-shell/src-tauri/src/main.rs` 必须把 `tauri-plugin-single-instance` 放在第一个 plugin。
+- 二次启动只做两件事：记录 `single-instance relaunch detected, focus existing window`，然后聚焦已有 `main` 窗口。
+- release 验证必须实际跑 `python scripts/smoke_desktop_shell_release.py`，确认整轮里只有一次 `spawning backend sidecar`。
 
 ## 推荐运行命令
 

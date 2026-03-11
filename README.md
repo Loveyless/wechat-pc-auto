@@ -110,6 +110,7 @@ python listener_app/sidebar_translate_listener.py --config ".\config\listener.js
 
 - 开发运行：`backend_main.py + npm run dev`
 - sidecar 构建：`python scripts/build_desktop_shell_sidecars.py`
+- 前端/Rust 回归：`npm test` + `cargo test`
 - 桌面壳调试：`npm run tauri dev`
 - 桌面壳构建：`npm run tauri build`
 
@@ -118,6 +119,7 @@ python listener_app/sidebar_translate_listener.py --config ".\config\listener.js
 ```bash
 python listener_app/backend_main.py --config ".\config\listener.json"
 cd desktop-shell
+npm test
 npm run build
 ```
 
@@ -128,6 +130,27 @@ cd desktop-shell
 npm run tauri dev
 npm run tauri build
 ```
+
+release 壳真正的最小交付闸口不是 “build 过了”，而是：
+
+```bash
+python scripts/build_desktop_shell_sidecars.py --python python
+cd desktop-shell
+npm test
+cd src-tauri
+cargo test
+cd ..\..
+python scripts/smoke_desktop_shell_release.py
+```
+
+只有这套命令都过，才说明桌面壳的 `/healthz`、bootstrap log 和 single-instance 复用没有当场回归。
+
+## 发布边界
+
+- 正式交付目标是 `desktop-shell/` 这条桌面壳主路径，不是旧 Tk。
+- 旧 Tk 入口 `listener_app/sidebar_translate_listener.py` 只保留开发期回退和对照用途，不作为正式交付降级路径。
+- 如果 release 壳回归，允许回退到源码态主路径 `backend_main.py + npm run dev` 或 `npm run tauri dev` 排障；不要把旧 Tk 重新包装成“官方 fallback”。
+- 桌面壳现在是 `single-instance`：第二次启动只聚焦已有窗口，不允许再起第二个壳窗口或再补拉一份 backend sidecar。
 
 详细命令、产物位置和验收边界，看 `docs/desktop-shell-build.md`。
 
@@ -168,6 +191,7 @@ npm run tauri build
 
 - `desktop-shell` 现在可以通过 `npm run tauri build` 产出一体化桌面壳 `exe/msi/nsis`
 - 壳启动后会自动拉起 `wechat-auto-backend.exe` 和 `group_listener_worker.exe`
+- 第二次启动壳只会聚焦已有窗口，不会再起第二个壳
 - 运行时配置、日志和锁落到 `%LOCALAPPDATA%\com.wechatauto.shell`
 - 旧 Tk 路径的 Windows 打包文档还在，见 `docs/windows-packaging.md`
 

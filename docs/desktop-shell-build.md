@@ -13,6 +13,7 @@
 
 - 当前主路径已经支持 Tauri 一体化桌面壳。
 - `npm run tauri dev` / `npm run tauri build` 会先构建 PyInstaller sidecar，再由 Tauri 自动托管 backend。
+- 桌面壳现在按 `single-instance` 运行：第二次启动只聚焦已有窗口，不得再拉第二个壳窗口。
 - `npm run tauri build` 产物可以直接双击，壳会自动拉起：
   - `wechat-auto-backend.exe`
   - `group_listener_worker.exe`
@@ -69,6 +70,16 @@ npm run tauri build
 
 这条命令同样会先自动构建 sidecar，再产出 release 壳和 installer。
 
+### 前端/Rust 回归
+
+```bash
+cd desktop-shell
+npm test
+
+cd src-tauri
+cargo test
+```
+
 ## 产物
 
 `npm run tauri build` 当前会产出：
@@ -97,6 +108,14 @@ Tauri 壳启动后，运行时根目录固定在：
 - `logs/desktop-shell-bootstrap.log`
 - `logs/.runtime/backend-sidecar.json`
 
+## 启动契约
+
+- `/healthz` 只有在 HTTP 200 且响应 JSON 的 `status == "ok"` 时才算 ready。
+- managed backend 冷启动阶段前端状态应显示 `starting`，不能再拿 `reconnecting` 伪装。
+- 首次连上前就 fatal 的错误是 `startup_failed`，不是 `degraded`。
+- `reconnecting` 只允许用于“已经成功连过一次 WebSocket 之后”的断线重连。
+- 第二次启动 `wechat-auto-shell.exe` 时，只允许聚焦已有 `main` 窗口；不允许再 spawn 第二个壳，也不允许再补拉一份 backend sidecar。
+
 配置复制规则是：
 
 - 首次启动时，把 bundle 里的 `config/*.json` 拷到运行时目录
@@ -119,17 +138,35 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 但默认仍不自动复制 `.env.local` 进产物。
 原因很简单：这玩意通常带密钥，自动打包出去就是泄漏。
 
-## 最小验证
+## 发布闸口
 
 推荐按这个顺序验：
 
-1. 执行 `npm run tauri build`
-2. 直接运行 `desktop-shell/src-tauri/target/release/wechat-auto-shell.exe`
-3. 访问 `http://127.0.0.1:8765/healthz`，预期返回 `{"status":"ok"}`
-4. 看 `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log`
-   - 预期能看到 `spawned backend sidecar pid=...`
-   - 二次启动壳时，预期看到 `reuse backend marker ...`，而不是再 spawn 一份
-5. 若要查 sidecar 身份，看 `%LOCALAPPDATA%\com.wechatauto.shell\logs\.runtime\backend-sidecar.json`
+1. 执行 `python scripts/build_desktop_shell_sidecars.py --python python`
+2. 执行 `cd desktop-shell && npm test`
+3. 执行 `cd desktop-shell/src-tauri && cargo test`
+4. 执行 `python scripts/smoke_desktop_shell_release.py`
+5. 只有这四步都过，才允许把 release 壳当成可交付产物
+
+`scripts/smoke_desktop_shell_release.py` 会实际做这些事：
+
+- 执行 `npm run tauri -- build`
+- 启动 `desktop-shell/src-tauri/target/release/wechat-auto-shell.exe`
+- 轮询 `http://127.0.0.1:8765/healthz`
+- 检查 `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log`
+- 再启动第二次壳，确认出现 `single-instance relaunch detected, focus existing window`
+- 断言整轮 smoke 里只出现一次 `spawning backend sidecar`
+
+2026-03-11 已在当前仓库实际跑过：
+
+- `python scripts/build_desktop_shell_sidecars.py --python python`
+- `cd desktop-shell && npm install`
+- `cd desktop-shell && npm test`
+- `cd desktop-shell/src-tauri && cargo test`
+- `python scripts/smoke_desktop_shell_release.py`
+
+当前 release smoke 已通过，但 `%LOCALAPPDATA%\\com.wechatauto.shell\\logs\\desktop-shell-bootstrap.log`
+里仍会出现一条 `RequestsDependencyWarning`。这轮没有把它当阻断项抹平，所以不要把“无警告”写进交付结论。
 
 ## 常见误判
 
@@ -152,15 +189,19 @@ Windows 下常见表现就是：
 
 ### 2) 冷启动时先看到 `reconnecting`
 
-这不一定是故障。
+现在如果还看到这个，优先怀疑前端状态机回归了。
 
-当前 `/healthz` 只有在 backend 完成启动后才会 ready。
-Tauri 壳会先拉起 sidecar，再等它变成健康状态；如果 15 秒内还没 ready，前端会短暂重连，等 API 真起来后恢复。
+当前正确语义是：
 
-判断是不是坏了，看结果，不看瞬时状态：
+- 冷启动中的 managed backend: `starting`
+- 首次启动失败: `startup_failed`
+- 连通过后再断线: `reconnecting`
+
+判断是不是坏了，看结果，不看单次过渡：
 
 - `http://127.0.0.1:8765/healthz` 最终是否返回 `{"status":"ok"}`
 - `/api/runtime` 是否能返回 `worker_state`
+- `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log` 是否能看到一次 `spawning backend sidecar`
 
 ### 3) 打包后壳能起，但启动阶段直接失败
 
@@ -170,3 +211,9 @@ Tauri 壳会先拉起 sidecar，再等它变成健康状态；如果 15 秒内�
 - `.env.local` 放错位置
 
 这类问题现在会 fail-fast，不会再假装“壳起了所以算成功”。
+
+## 回滚边界
+
+- release 壳如果回归，优先回退到当前源码态主路径：`backend_main.py + npm run dev`，或者 `npm run tauri dev` 做开发期排障。
+- 旧 Tk 入口 `listener_app/sidebar_translate_listener.py` 只保留开发回退价值，不再是正式交付降级路径。
+- 不要把“旧 Tk 还能跑”误写成“桌面壳发布失败后的官方 fallback”；那会直接把交付边界写坏。
