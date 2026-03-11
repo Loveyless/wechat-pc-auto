@@ -6,9 +6,9 @@
 
 ## 2. Shell lifecycle and single-instance behavior
 
-- [ ] 2.1 Refactor `desktop-shell/src-tauri/src/main.rs` into smaller bootstrap-focused modules while preserving backend mutex / marker reuse behaviour
-- [ ] 2.2 Add shell single-instance handling so a second launch activates the existing window instead of creating another shell window
-- [ ] 2.3 Verify second-launch handling does not spawn an extra backend sidecar and still cleans child lifecycle correctly on exit
+- [x] 2.1 Refactor `desktop-shell/src-tauri/src/main.rs` into smaller bootstrap-focused modules while preserving backend mutex / marker reuse behaviour
+- [x] 2.2 Add shell single-instance handling so a second launch activates the existing window instead of creating another shell window
+- [x] 2.3 Verify second-launch handling does not spawn an extra backend sidecar and still cleans child lifecycle correctly on exit
 
 ## 3. Sidecar packaging consistency
 
