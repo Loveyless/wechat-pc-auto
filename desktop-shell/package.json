@@ -7,6 +7,7 @@
     "dev": "vite --host 127.0.0.1 --port 1420",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "test": "vitest run",
     "build:sidecars": "python ../scripts/build_desktop_shell_sidecars.py",
     "pretauri": "npm run build:sidecars",
     "tauri": "tauri"
@@ -28,6 +29,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "tailwindcss": "^4.1.5",
     "typescript": "^5.6.3",
-    "vite": "^5.4.10"
+    "vite": "^5.4.10",
+    "vitest": "^2.1.9"
   }
 }

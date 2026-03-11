@@ -18,9 +18,9 @@
 
 ## 4. Automated verification
 
-- [ ] 4.1 Add a runnable desktop-shell frontend test command and regression coverage for startup-state and connection-handling logic
-- [ ] 4.2 Add Rust tests for extracted bootstrap logic where the refactor creates testable pure or isolated units
-- [ ] 4.3 Add a release-shell smoke flow that builds the shell, launches it, verifies `/healthz`, checks bootstrap logs, and validates second-launch reuse behavior
+- [x] 4.1 Add a runnable desktop-shell frontend test command and regression coverage for startup-state and connection-handling logic
+- [x] 4.2 Add Rust tests for extracted bootstrap logic where the refactor creates testable pure or isolated units
+- [x] 4.3 Add a release-shell smoke flow that builds the shell, launches it, verifies `/healthz`, checks bootstrap logs, and validates second-launch reuse behavior
 
 ## 5. Documentation and release gate updates
 

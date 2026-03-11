@@ -27,6 +27,11 @@ import {
   mockTranslationState,
   mockTtsState,
 } from "@/data/mock-shell"
+import {
+  resolveConnectAttemptState,
+  resolveFailureConnectionState,
+  resolveHydrationConnectionState,
+} from "@/hooks/desktop-shell-connection"
 
 function inferSessionKind(name: string): ShellSession["kind"] {
   if (!name) {
@@ -100,27 +105,6 @@ const DEFAULT_BACKEND_INFO: BackendConnectionInfo = {
   runtimeRoot: "",
 }
 
-function shouldUseStartupState(
-  backendInfo: BackendConnectionInfo,
-  hasConnected: boolean,
-): boolean {
-  return backendInfo.managed && !hasConnected
-}
-
-function resolveFailureConnectionState(
-  backendInfo: BackendConnectionInfo,
-  hasConnected: boolean,
-  fatal: boolean,
-): ShellConnectionState {
-  if (fatal) {
-    return hasConnected ? "degraded" : "startup_failed"
-  }
-  if (shouldUseStartupState(backendInfo, hasConnected)) {
-    return "starting"
-  }
-  return hasConnected ? "reconnecting" : "degraded"
-}
-
 export function useDesktopShell() {
   const [connectionState, setConnectionState] = useState<ShellConnectionState>("loading")
   const [runtimeState, setRuntimeState] = useState<BackendRuntimeState>(mockRuntimeState)
@@ -185,8 +169,12 @@ export function useDesktopShell() {
         if (connectionInfo.startupError) {
           throw new ManagedBackendStartupError(connectionInfo.startupError)
         }
-        if (shouldUseStartupState(connectionInfo, hasConnectedRef.current)) {
-          setConnectionState("starting")
+        const hydrationConnectionState = resolveHydrationConnectionState(
+          connectionInfo,
+          hasConnectedRef.current,
+        )
+        if (hydrationConnectionState) {
+          setConnectionState(hydrationConnectionState)
         }
         const [snapshot, backendSessions] = await Promise.all([fetchSnapshot(), fetchSessions()])
         if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
@@ -300,7 +288,7 @@ export function useDesktopShell() {
       connectionAttemptRef.current = attemptId
       clearReconnectTimer()
       closeSocket()
-      setConnectionState(hasConnectedRef.current && isReconnect ? "reconnecting" : "loading")
+      setConnectionState(resolveConnectAttemptState(hasConnectedRef.current, isReconnect))
       const hydrated = await hydrateFromSnapshot(attemptId, isReconnect)
       if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
         return

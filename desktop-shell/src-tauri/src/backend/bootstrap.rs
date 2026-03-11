@@ -529,3 +529,36 @@ fn spawn_backend_sidecar<R: Runtime>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::{backend_marker_path, build_backend_bootstrap_mutex_name};
+
+    #[test]
+    fn backend_bootstrap_mutex_name_is_stable_for_same_runtime_root() {
+        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        assert_eq!(
+            build_backend_bootstrap_mutex_name(runtime_root),
+            build_backend_bootstrap_mutex_name(runtime_root)
+        );
+    }
+
+    #[test]
+    fn backend_bootstrap_mutex_name_changes_with_runtime_root() {
+        let left = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let right = Path::new("D:/sandbox/com.wechatauto.shell");
+        assert_ne!(
+            build_backend_bootstrap_mutex_name(left),
+            build_backend_bootstrap_mutex_name(right)
+        );
+    }
+
+    #[test]
+    fn backend_marker_path_stays_under_runtime_log_state_dir() {
+        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let marker_path = backend_marker_path(runtime_root);
+        assert!(marker_path.ends_with("logs/.runtime/backend-sidecar.json"));
+    }
+}
