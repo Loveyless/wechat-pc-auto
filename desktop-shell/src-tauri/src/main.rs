@@ -1,13 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod backend_health;
+
 use std::{
     collections::hash_map::DefaultHasher,
     ffi::OsStr,
     fs,
     fs::OpenOptions,
     hash::{Hash, Hasher},
-    io::{Read, Write},
-    net::{Ipv4Addr, SocketAddr, TcpStream},
+    io::Write,
     os::windows::ffi::OsStrExt,
     path::{Path, PathBuf},
     ptr::null_mut,
@@ -35,6 +36,8 @@ use windows_sys::Win32::{
         WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
     },
 };
+
+use crate::backend_health::probe_backend_health;
 
 const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_HTTP_PORT: u16 = 8765;
@@ -150,29 +153,6 @@ fn append_bootstrap_log(runtime_root: &Path, message: &str) {
         Err(_) => return,
     };
     let _ = writeln!(file, "{message}");
-}
-
-fn probe_backend_health() -> bool {
-    let address = SocketAddr::from((Ipv4Addr::LOCALHOST, BACKEND_HTTP_PORT));
-    let timeout = Duration::from_millis(300);
-    let mut stream = match TcpStream::connect_timeout(&address, timeout) {
-        Ok(stream) => stream,
-        Err(_) => return false,
-    };
-    let _ = stream.set_read_timeout(Some(timeout));
-    let _ = stream.set_write_timeout(Some(timeout));
-    if stream
-        .write_all(b"GET /healthz HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-        .is_err()
-    {
-        return false;
-    }
-    let mut response = String::new();
-    if stream.read_to_string(&mut response).is_err() {
-        return false;
-    }
-    (response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200"))
-        && response.contains(r#"{"status":"ok"}"#)
 }
 
 fn managed_runtime_root<R: Runtime>(app: &tauri::App<R>) -> Result<PathBuf, String> {
@@ -369,7 +349,7 @@ where
 {
     let deadline = Instant::now() + Duration::from_secs(BACKEND_READY_TIMEOUT_SECONDS);
     while Instant::now() < deadline {
-        if probe_backend_health() {
+        if probe_backend_health(BACKEND_HTTP_PORT) {
             return BackendWaitResult::Ready;
         }
         if is_exited() {
@@ -378,7 +358,7 @@ where
         thread::sleep(Duration::from_millis(BACKEND_READY_POLL_INTERVAL_MS));
     }
 
-    if probe_backend_health() {
+    if probe_backend_health(BACKEND_HTTP_PORT) {
         return BackendWaitResult::Ready;
     }
     if is_exited() {
@@ -387,7 +367,7 @@ where
     BackendWaitResult::StillStarting
 }
 
-fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> bool {
+fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> BackendWaitResult {
     append_bootstrap_log(
         runtime_root,
         &format!(
@@ -401,7 +381,7 @@ fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> 
                 runtime_root,
                 &format!("existing backend ready pid={}", marker.pid),
             );
-            true
+            BackendWaitResult::Ready
         }
         BackendWaitResult::Exited => {
             append_bootstrap_log(
@@ -409,7 +389,7 @@ fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> 
                 &format!("existing backend exited before ready pid={}", marker.pid),
             );
             clear_backend_marker_if_matches(runtime_root, Some(marker));
-            false
+            BackendWaitResult::Exited
         }
         BackendWaitResult::StillStarting => {
             append_bootstrap_log(
@@ -419,7 +399,7 @@ fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> 
                     BACKEND_READY_TIMEOUT_SECONDS, marker.pid
                 ),
             );
-            true
+            BackendWaitResult::StillStarting
         }
     }
 }
@@ -573,7 +553,7 @@ fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState {
         &format!("bootstrap start runtime_root={}", runtime_root.display()),
     );
 
-    if probe_backend_health() {
+    if probe_backend_health(BACKEND_HTTP_PORT) {
         append_bootstrap_log(&runtime_root, "reuse existing backend on fixed ports");
         return ManagedBackendState::new(
             build_backend_info(&runtime_root, false, String::new()),
@@ -599,7 +579,7 @@ fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState {
         }
     };
 
-    if probe_backend_health() {
+    if probe_backend_health(BACKEND_HTTP_PORT) {
         append_bootstrap_log(&runtime_root, "reuse existing backend after bootstrap lock");
         return ManagedBackendState::new(
             build_backend_info(&runtime_root, false, String::new()),
@@ -612,15 +592,26 @@ fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState {
 
     if let Some(marker) = read_backend_marker(&runtime_root) {
         if backend_marker_is_alive(&marker) {
-            let reuse_existing = wait_for_existing_backend(&runtime_root, &marker);
-            if reuse_existing {
-                return ManagedBackendState::new(
-                    build_backend_info(&runtime_root, false, String::new()),
-                    None,
-                    false,
-                    runtime_root,
-                    None,
-                );
+            match wait_for_existing_backend(&runtime_root, &marker) {
+                BackendWaitResult::Ready => {
+                    return ManagedBackendState::new(
+                        build_backend_info(&runtime_root, false, String::new()),
+                        None,
+                        false,
+                        runtime_root,
+                        None,
+                    );
+                }
+                BackendWaitResult::StillStarting => {
+                    return ManagedBackendState::new(
+                        build_backend_info(&runtime_root, true, String::new()),
+                        None,
+                        false,
+                        runtime_root,
+                        None,
+                    );
+                }
+                BackendWaitResult::Exited => {}
             }
         } else {
             append_bootstrap_log(

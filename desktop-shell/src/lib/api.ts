@@ -23,8 +23,6 @@ const DEFAULT_BACKEND_INFO: BackendConnectionInfo = {
   runtimeRoot: "",
 }
 
-let backendInfoPromise: Promise<BackendConnectionInfo> | null = null
-
 export class ManagedBackendStartupError extends Error {
   constructor(message: string) {
     super(message)
@@ -36,12 +34,7 @@ export async function resolveBackendConnectionInfo(): Promise<BackendConnectionI
   if (!isTauri()) {
     return DEFAULT_BACKEND_INFO
   }
-  if (!backendInfoPromise) {
-    backendInfoPromise = invoke<BackendConnectionInfo>("get_backend_connection_info").catch(
-      () => DEFAULT_BACKEND_INFO,
-    )
-  }
-  return backendInfoPromise
+  return invoke<BackendConnectionInfo>("get_backend_connection_info").catch(() => DEFAULT_BACKEND_INFO)
 }
 
 async function requireBackendConnectionInfo() {

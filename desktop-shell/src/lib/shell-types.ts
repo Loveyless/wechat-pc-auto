@@ -1,4 +1,10 @@
-export type ShellConnectionState = "loading" | "ready" | "degraded" | "reconnecting"
+export type ShellConnectionState =
+  | "loading"
+  | "starting"
+  | "ready"
+  | "startup_failed"
+  | "degraded"
+  | "reconnecting"
 
 export type ShellSession = {
   id: string

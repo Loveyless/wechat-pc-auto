@@ -96,7 +96,7 @@ function MessageStreamPane({
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge tone="accent">{runtimeState.message_fidelity}</StatusBadge>
           <StatusBadge tone="accent">{runtimeState.monitor_scope}</StatusBadge>
-          <StatusBadge tone={connectionState === "ready" ? "primary" : "neutral"}>{connectionState}</StatusBadge>
+          <StatusBadge tone={connectionState === "ready" ? "primary" : connectionState === "starting" ? "accent" : "neutral"}>{connectionState}</StatusBadge>
           <StatusBadge tone="neutral">translate:{translationState.provider}</StatusBadge>
           <StatusBadge tone="neutral">tts:{ttsState.provider}</StatusBadge>
         </div>

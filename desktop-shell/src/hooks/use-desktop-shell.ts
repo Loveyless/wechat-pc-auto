@@ -100,6 +100,27 @@ const DEFAULT_BACKEND_INFO: BackendConnectionInfo = {
   runtimeRoot: "",
 }
 
+function shouldUseStartupState(
+  backendInfo: BackendConnectionInfo,
+  hasConnected: boolean,
+): boolean {
+  return backendInfo.managed && !hasConnected
+}
+
+function resolveFailureConnectionState(
+  backendInfo: BackendConnectionInfo,
+  hasConnected: boolean,
+  fatal: boolean,
+): ShellConnectionState {
+  if (fatal) {
+    return hasConnected ? "degraded" : "startup_failed"
+  }
+  if (shouldUseStartupState(backendInfo, hasConnected)) {
+    return "starting"
+  }
+  return hasConnected ? "reconnecting" : "degraded"
+}
+
 export function useDesktopShell() {
   const [connectionState, setConnectionState] = useState<ShellConnectionState>("loading")
   const [runtimeState, setRuntimeState] = useState<BackendRuntimeState>(mockRuntimeState)
@@ -118,6 +139,8 @@ export function useDesktopShell() {
   const reconnectTimerRef = useRef<number | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   const connectionAttemptRef = useRef(0)
+  const hasConnectedRef = useRef(false)
+  const backendInfoRef = useRef(DEFAULT_BACKEND_INFO)
   const unmountedRef = useRef(false)
 
   const clearReconnectTimer = useCallback(() => {
@@ -151,14 +174,19 @@ export function useDesktopShell() {
 
   const hydrateFromSnapshot = useCallback(
     async (attemptId: number, isReconnect = false) => {
+      let connectionInfo = backendInfoRef.current
       try {
-        const connectionInfo = await resolveBackendConnectionInfo()
+        connectionInfo = await resolveBackendConnectionInfo()
         if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
           return { ok: false, fatal: false }
         }
+        backendInfoRef.current = connectionInfo
         setBackendInfo(connectionInfo)
         if (connectionInfo.startupError) {
           throw new ManagedBackendStartupError(connectionInfo.startupError)
+        }
+        if (shouldUseStartupState(connectionInfo, hasConnectedRef.current)) {
+          setConnectionState("starting")
         }
         const [snapshot, backendSessions] = await Promise.all([fetchSnapshot(), fetchSessions()])
         if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
@@ -205,7 +233,9 @@ export function useDesktopShell() {
           return { ok: false, fatal: false }
         }
         const fatal = error instanceof ManagedBackendStartupError
-        setConnectionState(fatal ? "degraded" : isReconnect ? "reconnecting" : "degraded")
+        setConnectionState(
+          resolveFailureConnectionState(connectionInfo, hasConnectedRef.current, fatal),
+        )
         setLastError(error instanceof Error ? error.message : String(error))
         return { ok: false, fatal }
       }
@@ -270,7 +300,7 @@ export function useDesktopShell() {
       connectionAttemptRef.current = attemptId
       clearReconnectTimer()
       closeSocket()
-      setConnectionState(isReconnect ? "reconnecting" : "loading")
+      setConnectionState(hasConnectedRef.current && isReconnect ? "reconnecting" : "loading")
       const hydrated = await hydrateFromSnapshot(attemptId, isReconnect)
       if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
         return
@@ -302,6 +332,7 @@ export function useDesktopShell() {
           if (unmountedRef.current || attemptId !== connectionAttemptRef.current) {
             return
           }
+          hasConnectedRef.current = true
           setConnectionState("ready")
           setLastError("")
         })
@@ -329,7 +360,9 @@ export function useDesktopShell() {
           return
         }
         const fatal = error instanceof ManagedBackendStartupError
-        setConnectionState(fatal ? "degraded" : "reconnecting")
+        setConnectionState(
+          resolveFailureConnectionState(backendInfoRef.current, hasConnectedRef.current, fatal),
+        )
         setLastError(error instanceof Error ? error.message : String(error))
         if (!fatal) {
           reconnectTimerRef.current = window.setTimeout(() => {
@@ -343,9 +376,11 @@ export function useDesktopShell() {
 
   useEffect(() => {
     unmountedRef.current = false
+    hasConnectedRef.current = false
     void connect(false)
     return () => {
       unmountedRef.current = true
+      hasConnectedRef.current = false
       connectionAttemptRef.current += 1
       clearReconnectTimer()
       closeSocket()
