@@ -11,6 +11,8 @@ permissions:
 jobs:
   packaging-smoke:
     runs-on: windows-latest
+    env:
+      DEEPLX_URL: http://127.0.0.1:1188/translate
 
     steps:
       - name: Checkout

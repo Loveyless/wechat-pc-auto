@@ -115,13 +115,31 @@ def is_backend_healthy(health_url: str) -> bool:
     return payload.get("status") == "ok"
 
 
-def wait_for_backend_ready(health_url: str, timeout: float) -> None:
+def summarize_log_delta(log_delta: str, *, max_lines: int = 20) -> str:
+    lines = [line for line in log_delta.splitlines() if line.strip()]
+    if not lines:
+        return "(no bootstrap log output captured)"
+    return "\n".join(lines[-max_lines:])
+
+
+def wait_for_backend_ready(
+    health_url: str,
+    timeout: float,
+    *,
+    log_path: Path,
+    start_offset: int,
+) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         if is_backend_healthy(health_url):
             return
         time.sleep(0.5)
-    raise RuntimeError(f"backend never became healthy within {timeout:.1f}s: {health_url}")
+    log_delta = read_log_delta(log_path, start_offset)
+    fail_on_forbidden_log_patterns(log_delta)
+    raise RuntimeError(
+        f"backend never became healthy within {timeout:.1f}s: {health_url}\n"
+        f"bootstrap log tail:\n{summarize_log_delta(log_delta)}"
+    )
 
 
 def bootstrap_log_path(runtime_root: Path) -> Path:
@@ -210,7 +228,12 @@ def main() -> None:
     first_shell = launch_process(shell_exe)
     second_shell: subprocess.Popen[bytes] | None = None
     try:
-        wait_for_backend_ready(args.health_url, args.ready_timeout)
+        wait_for_backend_ready(
+            args.health_url,
+            args.ready_timeout,
+            log_path=log_path,
+            start_offset=log_offset,
+        )
         log_delta = read_log_delta(log_path, log_offset)
         log_delta = assert_log_contains(
             log_delta,
