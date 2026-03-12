@@ -110,7 +110,8 @@ function Invoke-SmokeTestCommand {
         [string]$FilePath,
         [Parameter(Mandatory = $true)]
         [string[]]$Arguments,
-        [string]$FailureHint = ""
+        [string]$FailureHint = "",
+        [string[]]$ForbiddenOutputPatterns = @()
     )
 
     $stdoutPath = [System.IO.Path]::GetTempFileName()
@@ -142,6 +143,13 @@ function Invoke-SmokeTestCommand {
             }
             throw "$StepName failed"
         }
+
+        foreach ($pattern in $ForbiddenOutputPatterns) {
+            if ($output | Where-Object { "$_" -match [regex]::Escape($pattern) }) {
+                $output | ForEach-Object { Write-Host $_ }
+                throw "$StepName emitted forbidden dependency warning: $pattern"
+            }
+        }
     }
     finally {
         Remove-Item $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
@@ -154,6 +162,7 @@ if (-not $ScriptPath) {
 }
 $ScriptPath = Normalize-WindowsPath $ScriptPath
 $ScriptDir = Split-Path -Parent $ScriptPath
+$PyInstallerHooksDir = Join-Path $ScriptDir "pyinstaller_hooks"
 $RepoRoot = Split-Path -Parent $ScriptDir
 $BuildParentRoot = Join-Path $RepoRoot "build"
 $BuildRoot = Join-Path $RepoRoot "build\pyinstaller"
@@ -208,6 +217,7 @@ Invoke-SmokeTestCommand `
     -StepName "Source TTS dependency preflight" `
     -FilePath $Python `
     -Arguments @($MainSource, "--config", $SourceConfigPath, "--check-tts-deps") `
+    -ForbiddenOutputPatterns @("RequestsDependencyWarning") `
     -FailureHint "Install runtime dependencies with 'python -m pip install -r requirements.txt', or change config\\listener.json tts.provider to windows_system if you intentionally do not want to package cloud TTS."
 
 if (Test-Path $BuildRoot) {
@@ -233,6 +243,7 @@ $workerArgs = @(
     "--workpath", $WorkerWorkRoot,
     "--specpath", $SpecRoot,
     "--paths", $RepoRoot,
+    "--additional-hooks-dir", $PyInstallerHooksDir,
     $WorkerSource
 )
 
@@ -252,8 +263,10 @@ $mainArgs = @(
     "--workpath", $MainWorkRoot,
     "--specpath", $SpecRoot,
     "--paths", $RepoRoot,
+    "--additional-hooks-dir", $PyInstallerHooksDir,
     "--collect-submodules", "websockets",
     "--collect-submodules", "tencentcloud",
+    "--collect-all", "charset_normalizer",
     "--add-data", $ConfigData,
     $MainSource
 )
@@ -279,6 +292,7 @@ Invoke-SmokeTestCommand `
     -StepName "Sidebar TTS dependency smoke test" `
     -FilePath $MainExe `
     -Arguments @("--check-tts-deps") `
+    -ForbiddenOutputPatterns @("RequestsDependencyWarning") `
     -FailureHint "The packaged app is missing TTS runtime modules. Reinstall runtime dependencies, rebuild, and do not distribute this artifact until the smoke test passes."
 
 Copy-Item $WorkerExe (Join-Path $MainAppRoot "$WorkerName.exe") -Force

@@ -10,6 +10,7 @@ from shutil import which
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PYINSTALLER_HOOKS_DIR = Path(__file__).resolve().parent / "pyinstaller_hooks"
 DESKTOP_SHELL_ROOT = REPO_ROOT / "desktop-shell"
 SRC_TAURI_ROOT = DESKTOP_SHELL_ROOT / "src-tauri"
 BINARIES_ROOT = SRC_TAURI_ROOT / "binaries"
@@ -31,9 +32,15 @@ BACKEND_TTS_CHECK_ARGS = (
     str(LISTENER_CONFIG),
     "--check-tts-deps",
 )
-BACKEND_HIDDEN_IMPORTS = (
+BACKEND_COLLECT_SUBMODULES = (
     "websockets",
     "tencentcloud",
+)
+BACKEND_COLLECT_ALL = (
+    "charset_normalizer",
+)
+FORBIDDEN_DEPENDENCY_WARNING_PATTERNS = (
+    "RequestsDependencyWarning",
 )
 
 
@@ -80,6 +87,19 @@ def run_command(
     return result
 
 
+def fail_on_forbidden_dependency_warnings(
+    result: subprocess.CompletedProcess[str],
+    *,
+    step: str,
+) -> None:
+    combined_output = "\n".join(
+        part for part in (result.stdout.strip(), result.stderr.strip()) if part
+    )
+    for pattern in FORBIDDEN_DEPENDENCY_WARNING_PATTERNS:
+        if pattern in combined_output:
+            raise RuntimeError(f"{step} emitted forbidden dependency warning: {pattern}")
+
+
 def host_target_triple(rustc: str) -> str:
     result = run_command([rustc, "-vV"], step="Resolve rust target triple")
     for raw in result.stdout.splitlines():
@@ -116,7 +136,7 @@ def preflight_worker_dependencies(python: str) -> None:
 def preflight_backend_dependencies(python: str) -> None:
     if not LISTENER_CONFIG.exists():
         raise RuntimeError(f"missing config file: {LISTENER_CONFIG}")
-    run_command(
+    result = run_command(
         [
             python,
             str(BACKEND_SOURCE),
@@ -124,6 +144,7 @@ def preflight_backend_dependencies(python: str) -> None:
         ],
         step="Source backend dependency preflight",
     )
+    fail_on_forbidden_dependency_warnings(result, step="Source backend dependency preflight")
 
 
 def build_sidecar(
@@ -153,6 +174,8 @@ def build_sidecar(
         str(SPEC_ROOT),
         "--paths",
         str(REPO_ROOT),
+        "--additional-hooks-dir",
+        str(PYINSTALLER_HOOKS_DIR),
         *extra_args,
         str(source),
     ]
@@ -171,19 +194,22 @@ def smoke_test_worker(worker_executable: Path) -> None:
 
 
 def smoke_test_backend(backend_executable: Path) -> None:
-    run_command(
+    result = run_command(
         [
             str(backend_executable),
             *BACKEND_TTS_CHECK_ARGS,
         ],
         step="Backend packaged dependency smoke test",
     )
+    fail_on_forbidden_dependency_warnings(result, step="Backend packaged dependency smoke test")
 
 
 def backend_hidden_import_args() -> list[str]:
     args: list[str] = []
-    for module_name in BACKEND_HIDDEN_IMPORTS:
+    for module_name in BACKEND_COLLECT_SUBMODULES:
         args.extend(["--collect-submodules", module_name])
+    for module_name in BACKEND_COLLECT_ALL:
+        args.extend(["--collect-all", module_name])
     return args
 
 
