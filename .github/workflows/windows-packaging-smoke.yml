@@ -1,0 +1,60 @@
+name: windows-packaging-smoke
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packaging-smoke:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop-shell/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pip install -r requirements.txt
+
+      - name: Install desktop-shell dependencies
+        working-directory: desktop-shell
+        run: npm ci
+
+      - name: Build desktop-shell sidecars
+        run: python scripts/build_desktop_shell_sidecars.py --python python
+
+      - name: Run desktop-shell frontend tests
+        working-directory: desktop-shell
+        run: npm test
+
+      - name: Run desktop-shell Rust tests
+        working-directory: desktop-shell/src-tauri
+        run: cargo test
+
+      - name: Run legacy Windows packaging smoke
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_exe.ps1
+
+      - name: Run desktop-shell release smoke
+        run: python scripts/smoke_desktop_shell_release.py
