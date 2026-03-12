@@ -1,0 +1,64 @@
+name: windows-fast-regression
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-regression:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop-shell/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run active desktop Python tests
+        run: >
+          python -m unittest
+          tests.test_backend_main
+          tests.test_backend_runtime
+          tests.test_controls_helpers
+          tests.test_group_listener_worker_helpers
+          tests.test_runtime_api
+          tests.test_runtime_store
+          tests.test_smoke_desktop_shell_release
+
+      - name: Install desktop-shell dependencies
+        working-directory: desktop-shell
+        run: npm ci
+
+      - name: Run desktop-shell frontend tests
+        working-directory: desktop-shell
+        run: npm test
+
+      - name: Build desktop-shell frontend dist
+        working-directory: desktop-shell
+        run: npm run build
+
+      - name: Run desktop-shell Rust tests
+        working-directory: desktop-shell/src-tauri
+        run: cargo test

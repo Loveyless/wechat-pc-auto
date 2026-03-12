@@ -137,6 +137,7 @@ class RuntimeApiServerTest(unittest.TestCase):
     def test_websocket_stream_emits_runtime_events(self):
         async def run_test():
             async with connect(self.server.ws_url) as websocket:
+                await asyncio.sleep(0.1)
                 self.service.runtime.record_preview_message(
                     session_name="测试群",
                     text="hello",

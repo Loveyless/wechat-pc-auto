@@ -12,7 +12,7 @@
 
 ## 3. Fast regression gate and config schema ownership
 
-- [ ] 3.1 Add a lightweight CI workflow for Python tests, desktop-shell frontend tests/build, and Rust tests without packaged Windows smoke
+- [x] 3.1 Add a lightweight CI workflow for Python tests, desktop-shell frontend tests/build, and Rust tests without packaged Windows smoke
 - [ ] 3.2 Extract a single authoritative runtime configuration schema/loading module for the supported desktop path
 - [ ] 3.3 Migrate the surviving desktop runtime code to the shared config schema and keep any temporary legacy compatibility behind a thin adapter only
 
