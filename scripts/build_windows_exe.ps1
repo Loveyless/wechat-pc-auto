@@ -162,8 +162,13 @@ if (-not $ScriptPath) {
 }
 $ScriptPath = Normalize-WindowsPath $ScriptPath
 $ScriptDir = Split-Path -Parent $ScriptPath
-$PyInstallerHooksDir = Join-Path $ScriptDir "pyinstaller_hooks"
 $RepoRoot = Split-Path -Parent $ScriptDir
+$PackagingManifestPath = Join-Path $ScriptDir "packaging_manifest.json"
+$PackagingManifest = Get-Content -Path $PackagingManifestPath -Raw | ConvertFrom-Json
+$PyInstallerHooksDir = Join-Path $RepoRoot ([string]$PackagingManifest.pyinstaller.additional_hooks_dir)
+$RuntimeCollectSubmodules = @($PackagingManifest.pyinstaller.runtime_dependencies.collect_submodules | ForEach-Object { [string]$_ })
+$RuntimeCollectAll = @($PackagingManifest.pyinstaller.runtime_dependencies.collect_all | ForEach-Object { [string]$_ })
+$ForbiddenOutputPatterns = @($PackagingManifest.validation.forbidden_output_patterns | ForEach-Object { [string]$_ })
 $BuildParentRoot = Join-Path $RepoRoot "build"
 $BuildRoot = Join-Path $RepoRoot "build\pyinstaller"
 $DistRoot = Join-Path $RepoRoot $ArtifactRoot
@@ -217,7 +222,7 @@ Invoke-SmokeTestCommand `
     -StepName "Source TTS dependency preflight" `
     -FilePath $Python `
     -Arguments @($MainSource, "--config", $SourceConfigPath, "--check-tts-deps") `
-    -ForbiddenOutputPatterns @("RequestsDependencyWarning") `
+    -ForbiddenOutputPatterns $ForbiddenOutputPatterns `
     -FailureHint "Install runtime dependencies with 'python -m pip install -r requirements.txt', or change config\\listener.json tts.provider to windows_system if you intentionally do not want to package cloud TTS."
 
 if (Test-Path $BuildRoot) {
@@ -263,10 +268,15 @@ $mainArgs = @(
     "--workpath", $MainWorkRoot,
     "--specpath", $SpecRoot,
     "--paths", $RepoRoot,
-    "--additional-hooks-dir", $PyInstallerHooksDir,
-    "--collect-submodules", "websockets",
-    "--collect-submodules", "tencentcloud",
-    "--collect-all", "charset_normalizer",
+    "--additional-hooks-dir", $PyInstallerHooksDir
+)
+foreach ($moduleName in $RuntimeCollectSubmodules) {
+    $mainArgs += @("--collect-submodules", $moduleName)
+}
+foreach ($moduleName in $RuntimeCollectAll) {
+    $mainArgs += @("--collect-all", $moduleName)
+}
+$mainArgs += @(
     "--add-data", $ConfigData,
     $MainSource
 )
@@ -292,7 +302,7 @@ Invoke-SmokeTestCommand `
     -StepName "Sidebar TTS dependency smoke test" `
     -FilePath $MainExe `
     -Arguments @("--check-tts-deps") `
-    -ForbiddenOutputPatterns @("RequestsDependencyWarning") `
+    -ForbiddenOutputPatterns $ForbiddenOutputPatterns `
     -FailureHint "The packaged app is missing TTS runtime modules. Reinstall runtime dependencies, rebuild, and do not distribute this artifact until the smoke test passes."
 
 Copy-Item $WorkerExe (Join-Path $MainAppRoot "$WorkerName.exe") -Force

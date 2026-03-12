@@ -13,11 +13,26 @@ from shutil import which
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PACKAGING_MANIFEST_PATH = REPO_ROOT / "scripts" / "packaging_manifest.json"
 DESKTOP_SHELL_ROOT = REPO_ROOT / "desktop-shell"
 SRC_TAURI_ROOT = DESKTOP_SHELL_ROOT / "src-tauri"
 DEFAULT_SHELL_EXE = SRC_TAURI_ROOT / "target" / "release" / "wechat-auto-shell.exe"
 DEFAULT_RUNTIME_ROOT = Path(os.environ["LOCALAPPDATA"]) / "com.wechatauto.shell"
 DEFAULT_HEALTH_URL = "http://127.0.0.1:8765/healthz"
+
+
+def load_forbidden_bootstrap_log_patterns() -> tuple[str, ...]:
+    try:
+        manifest = json.loads(PACKAGING_MANIFEST_PATH.read_text(encoding="utf-8"))
+        patterns = manifest["validation"]["release_smoke"]["forbidden_bootstrap_log_patterns"]
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"invalid packaging manifest: {PACKAGING_MANIFEST_PATH}"
+        ) from exc
+    return tuple(str(item) for item in patterns)
+
+
+FORBIDDEN_BOOTSTRAP_LOG_PATTERNS = load_forbidden_bootstrap_log_patterns()
 
 
 def parse_args() -> argparse.Namespace:
@@ -121,6 +136,12 @@ def read_log_delta(log_path: Path, start_offset: int) -> str:
         return handle.read().decode("utf-8", errors="replace")
 
 
+def fail_on_forbidden_log_patterns(log_delta: str) -> None:
+    for pattern in FORBIDDEN_BOOTSTRAP_LOG_PATTERNS:
+        if pattern in log_delta:
+            raise RuntimeError(f"bootstrap log contains forbidden text: {pattern}")
+
+
 def launch_process(executable: Path) -> subprocess.Popen[bytes]:
     return subprocess.Popen(
         [str(executable)],
@@ -165,10 +186,12 @@ def assert_log_contains(log_delta: str, needle: str, *, timeout: float, log_path
     deadline = time.time() + timeout
     current = log_delta
     while time.time() < deadline:
+        fail_on_forbidden_log_patterns(current)
         if needle in current:
             return current
         time.sleep(0.5)
         current = read_log_delta(log_path, start_offset)
+    fail_on_forbidden_log_patterns(current)
     raise RuntimeError(f"missing bootstrap log line: {needle}")
 
 
@@ -211,6 +234,8 @@ def main() -> None:
             raise RuntimeError("expected exactly one backend sidecar spawn during smoke test")
         if not is_backend_healthy(args.health_url):
             raise RuntimeError("backend lost readiness after second launch")
+        log_delta = read_log_delta(log_path, log_offset)
+        fail_on_forbidden_log_patterns(log_delta)
 
         print(f"Release smoke passed: {shell_exe}")
         print(f"Verified health endpoint: {args.health_url}")

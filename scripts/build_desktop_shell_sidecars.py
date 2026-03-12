@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -10,7 +11,7 @@ from shutil import which
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PYINSTALLER_HOOKS_DIR = Path(__file__).resolve().parent / "pyinstaller_hooks"
+PACKAGING_MANIFEST_PATH = Path(__file__).resolve().with_name("packaging_manifest.json")
 DESKTOP_SHELL_ROOT = REPO_ROOT / "desktop-shell"
 SRC_TAURI_ROOT = DESKTOP_SHELL_ROOT / "src-tauri"
 BINARIES_ROOT = SRC_TAURI_ROOT / "binaries"
@@ -32,16 +33,33 @@ BACKEND_TTS_CHECK_ARGS = (
     str(LISTENER_CONFIG),
     "--check-tts-deps",
 )
-BACKEND_COLLECT_SUBMODULES = (
-    "websockets",
-    "tencentcloud",
-)
-BACKEND_COLLECT_ALL = (
-    "charset_normalizer",
-)
-FORBIDDEN_DEPENDENCY_WARNING_PATTERNS = (
-    "RequestsDependencyWarning",
-)
+
+
+def load_packaging_settings() -> tuple[Path, tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    try:
+        manifest = json.loads(PACKAGING_MANIFEST_PATH.read_text(encoding="utf-8"))
+        pyinstaller = manifest["pyinstaller"]
+        runtime_dependencies = pyinstaller["runtime_dependencies"]
+        validation = manifest["validation"]
+        hooks_dir = REPO_ROOT / str(pyinstaller["additional_hooks_dir"])
+        collect_submodules = tuple(str(item) for item in runtime_dependencies["collect_submodules"])
+        collect_all = tuple(str(item) for item in runtime_dependencies["collect_all"])
+        forbidden_output_patterns = tuple(
+            str(item) for item in validation["forbidden_output_patterns"]
+        )
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"invalid packaging manifest: {PACKAGING_MANIFEST_PATH}"
+        ) from exc
+    return hooks_dir, collect_submodules, collect_all, forbidden_output_patterns
+
+
+(
+    PYINSTALLER_HOOKS_DIR,
+    BACKEND_COLLECT_SUBMODULES,
+    BACKEND_COLLECT_ALL,
+    FORBIDDEN_DEPENDENCY_WARNING_PATTERNS,
+) = load_packaging_settings()
 
 
 def parse_args() -> argparse.Namespace:

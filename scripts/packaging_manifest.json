@@ -1,0 +1,28 @@
+{
+  "pyinstaller": {
+    "additional_hooks_dir": "scripts/pyinstaller_hooks",
+    "runtime_dependencies": {
+      "collect_submodules": [
+        "websockets",
+        "tencentcloud"
+      ],
+      "collect_all": [
+        "charset_normalizer"
+      ]
+    }
+  },
+  "validation": {
+    "forbidden_output_patterns": [
+      "RequestsDependencyWarning"
+    ],
+    "release_smoke": {
+      "forbidden_bootstrap_log_patterns": [
+        "backend stderr:",
+        "backend error:",
+        "bootstrap failed:",
+        "Traceback (most recent call last):",
+        "thread 'main' panicked"
+      ]
+    }
+  }
+}
