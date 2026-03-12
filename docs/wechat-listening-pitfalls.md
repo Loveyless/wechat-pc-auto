@@ -366,10 +366,10 @@
 - 当前代码在真正合成时才动态导入这些模块；如果 PyInstaller 没显式收集，主程序照样能启动，但一到朗读分支才现场崩。
 
 处理：
-- 打包脚本对主程序显式加 `--collect-submodules websockets` 和 `--collect-submodules tencentcloud`，不能继续赌 PyInstaller 会自动猜中函数内动态导入。
+- 打包脚本对主程序显式加 `--collect-submodules websockets`、`--collect-submodules tencentcloud` 和 `--collect-all charset_normalizer`，并通过仓库内 PyInstaller hook 动态补齐 `charset_normalizer` 的发行版级 `__mypyc` 顶层模块；不能继续赌 PyInstaller 会自动猜中函数内动态导入和 `requests` 的字符集依赖链。
 - 打包脚本在真正调用 PyInstaller 前，会先用源码态主程序跑一次 `--check-tts-deps`。当前默认 `tts.provider=tencent_cloud`，缺 `tencentcloud` SDK 时必须在这里直接失败，不能等 PyInstaller 白跑完才补刀。
 - 主程序启动创建 TTS 时，会先做一次 provider 对应依赖探测；若缺依赖，不再伪装成 `tts configured ...`，而是直接记成 `tts unavailable ... reason=...`。
-- 构建后额外执行 `wechat_sidebar.exe --check-tts-deps` 做最小冒烟；这一步失败，说明产物里的 TTS 朗读链路根本不完整，不该继续分发。
+- 构建后额外执行 `wechat_sidebar.exe --check-tts-deps` 做最小冒烟；这一步失败，或者打出 `RequestsDependencyWarning`，都说明产物里的 TTS 朗读链路根本不完整，不该继续分发。
 
 ### 26) 收起左侧菜单后，看不出当前正在看哪个群
 现象：

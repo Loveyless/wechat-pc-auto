@@ -165,8 +165,8 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 - `cd desktop-shell/src-tauri && cargo test`
 - `python scripts/smoke_desktop_shell_release.py`
 
-当前 release smoke 已通过，但 `%LOCALAPPDATA%\\com.wechatauto.shell\\logs\\desktop-shell-bootstrap.log`
-里仍会出现一条 `RequestsDependencyWarning`。这轮没有把它当阻断项抹平，所以不要把“无警告”写进交付结论。
+当前 sidecar 构建会额外显式收集 `charset_normalizer`，并通过仓库内 PyInstaller hook 动态补齐它的发行版级 `__mypyc` 顶层模块；否则 frozen 包里 `requests` 会把真实导入失败降级成 `RequestsDependencyWarning`。
+如果 packaged backend 的 `--check-tts-deps` 仍然打出 `RequestsDependencyWarning`，构建脚本现在会直接失败，不再把这种 warning 当成“可以先忍”的噪音。
 
 ## 常见误判
 

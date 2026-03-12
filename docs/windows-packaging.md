@@ -165,10 +165,14 @@ tts failed backend=doubao error=No module named 'websockets'
 ```text
 --collect-submodules websockets
 --collect-submodules tencentcloud
+--collect-all charset_normalizer
 ```
+
+另外还会通过仓库内 PyInstaller hook 动态补齐 `charset_normalizer` 的发行版级 `__mypyc` 顶层模块；只 `--collect-all` 还不够，漏掉这层时 packaged `requests` 仍会打 `RequestsDependencyWarning`。
 
 并且在真正打包前就会先跑源码态 `--check-tts-deps` 预检。
 如果这一步已经报 `No module named 'tencentcloud'`，别再怀疑 PyInstaller；先把运行时依赖装对。
+如果 packaged 主程序的 `--check-tts-deps` 仍然打出 `RequestsDependencyWarning`，当前脚本会直接把构建判成失败。
 
 并且会在构建后自动跑：
 
