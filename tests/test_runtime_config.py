@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest import mock
 
 from listener_app.runtime_config import load_runtime_config
-from listener_app.sidebar_translate_listener import load_legacy_sidebar_ui_settings
 
 
 class RuntimeConfigTest(unittest.TestCase):
@@ -125,7 +124,7 @@ class RuntimeConfigTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "DEEPLX_URL"):
                 load_runtime_config(config_path)
 
-    def test_legacy_sidebar_ui_settings_is_thin_adapter(self):
+    def test_load_runtime_config_keeps_legacy_display_fields_in_raw_payload_only(self):
         config_path = self._write_config(
             {
                 "listen": {
@@ -146,10 +145,10 @@ class RuntimeConfigTest(unittest.TestCase):
         )
 
         runtime_config = load_runtime_config(config_path)
-        ui_settings = load_legacy_sidebar_ui_settings(runtime_config)
 
-        self.assertEqual(ui_settings.width, 540)
-        self.assertEqual(ui_settings.side, "right")
+        self.assertEqual(runtime_config.raw_config["display"]["width"], 540)
+        self.assertEqual(runtime_config.raw_config["display"]["side"], "weird-side")
+        self.assertEqual(runtime_config.display.on_translate_fail, "show_cn_with_reason")
 
 
 if __name__ == "__main__":

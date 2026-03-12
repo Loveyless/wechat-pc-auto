@@ -18,9 +18,9 @@
 
 ## 4. Test separation and Tk removal
 
-- [ ] 4.1 Split `tests/test_sidebar_listener_helpers.py` into shared-runtime coverage versus Tk-specific UI coverage
-- [ ] 4.2 Remove Tk-only UI entrypoints and implementation files while preserving shared runtime/translate/TTS/helper modules still used by `backend_main.py + desktop-shell/`
-- [ ] 4.3 Remove the legacy Tk packaging script and delete Tk references from CI so the shipped desktop gate no longer exercises the legacy path
+- [x] 4.1 Split `tests/test_sidebar_listener_helpers.py` into shared-runtime coverage versus Tk-specific UI coverage
+- [x] 4.2 Remove Tk-only UI entrypoints and implementation files while preserving shared runtime/translate/TTS/helper modules still used by `backend_main.py + desktop-shell/`
+- [x] 4.3 Remove the legacy Tk packaging script and delete Tk references from CI so the shipped desktop gate no longer exercises the legacy path
 
 ## 5. Documentation and acceptance
 

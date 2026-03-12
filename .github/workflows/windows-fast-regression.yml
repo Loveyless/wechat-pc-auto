@@ -43,7 +43,9 @@ jobs:
           tests.test_backend_runtime
           tests.test_controls_helpers
           tests.test_group_listener_worker_helpers
+          tests.test_runtime_config
           tests.test_runtime_api
+          tests.test_runtime_shared_helpers
           tests.test_runtime_store
           tests.test_smoke_desktop_shell_release
 

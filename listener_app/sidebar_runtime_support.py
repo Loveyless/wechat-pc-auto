@@ -45,27 +45,6 @@ _LOG_WRITE_LOCK = threading.Lock()
 _TARGET_LOCK_PATHS: list[str] = []
 
 
-def build_worker_status_text(state: str, detail: str, _target_count: int) -> str:
-    clean_state = str(state or "idle").strip() or "idle"
-    if clean_state == "running":
-        return ""
-    if clean_state == "starting":
-        return "启动中"
-    if clean_state == "waiting_wechat":
-        return "等待微信"
-    if clean_state == "connecting":
-        return "连接微信"
-    if clean_state == "window_lost":
-        return "微信窗口丢失"
-    if clean_state == "reconnecting":
-        return "重新连接中"
-    if clean_state == "worker_backoff":
-        return "监听中断，稍后重试"
-    if clean_state == "stopped":
-        return "已停止"
-    return str(detail or "").strip()
-
-
 def compute_worker_restart_delay(attempt: int) -> float:
     safe_attempt = max(1, int(attempt))
     delay = WORKER_RESTART_INITIAL_BACKOFF_SECONDS * (2 ** (safe_attempt - 1))

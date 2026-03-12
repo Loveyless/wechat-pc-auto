@@ -58,9 +58,5 @@ jobs:
         working-directory: desktop-shell/src-tauri
         run: cargo test
 
-      - name: Run legacy Windows packaging smoke
-        shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_exe.ps1
-
       - name: Run desktop-shell release smoke
         run: python scripts/smoke_desktop_shell_release.py
