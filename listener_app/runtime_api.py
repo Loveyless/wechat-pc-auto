@@ -116,7 +116,16 @@ class RuntimeApiServer:
                 parsed = urlparse(self.path)
                 path = parsed.path
                 if path == "/healthz":
-                    self._send_json(HTTPStatus.OK, {"status": "ok"})
+                    payload_getter = getattr(service, "get_health_snapshot", None)
+                    if callable(payload_getter):
+                        payload = payload_getter()
+                    else:
+                        payload = {
+                            "status": "startup_failed",
+                            "detail": "health snapshot unavailable",
+                            "worker_state": "unknown",
+                        }
+                    self._send_json(HTTPStatus.OK, payload)
                     return
                 if path == "/api/runtime":
                     self._send_json(HTTPStatus.OK, service.snapshot())

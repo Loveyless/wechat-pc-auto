@@ -12,6 +12,7 @@ from listener_app.runtime_engine import ListenerRuntime
 class FakeService:
     def __init__(self):
         self.runtime = ListenerRuntime(message_limit=20)
+        self._health = {"status": "starting", "detail": "booting", "worker_state": "idle"}
         self._config = {
             "listen": {"mode": "session", "targets": ["测试群"], "interval_seconds": 0.6},
             "translate": {"enabled": False, "provider": "passthrough"},
@@ -30,6 +31,9 @@ class FakeService:
 
     def get_config_snapshot(self):
         return dict(self._config)
+
+    def get_health_snapshot(self):
+        return dict(self._health)
 
     def set_active_session(self, session_id: str):
         self.runtime.set_active_session(session_id)
@@ -81,6 +85,50 @@ class RuntimeApiServerTest(unittest.TestCase):
         self.assertEqual(len(sessions_payload["items"]), 1)
         self.assertEqual(len(messages_payload["items"]), 1)
         self.assertEqual(config_payload["listen"]["mode"], "session")
+
+    def test_http_health_endpoint_uses_service_snapshot(self):
+        self.service._health = {
+            "status": "startup_failed",
+            "detail": "missing config",
+            "worker_state": "startup_failed",
+        }
+        health_payload = self._json_get("/healthz")
+        self.assertEqual(health_payload["status"], "startup_failed")
+        self.assertEqual(health_payload["detail"], "missing config")
+
+    def test_http_health_endpoint_fails_closed_when_service_has_no_health_snapshot(self):
+        class MissingHealthService:
+            def __init__(self):
+                self.runtime = ListenerRuntime(message_limit=20)
+
+            def snapshot(self):
+                return self.runtime.snapshot()
+
+            def list_sessions(self):
+                return []
+
+            def get_session_messages(self, _session_id: str):
+                return []
+
+            def get_config_snapshot(self):
+                return {}
+
+            def set_active_session(self, session_id: str):
+                self.runtime.set_active_session(session_id)
+
+            def _log_line(self, _line: str):
+                return None
+
+        server = RuntimeApiServer(MissingHealthService(), host="127.0.0.1", http_port=0, ws_port=0)
+        server.start()
+        try:
+            with request.urlopen(f"{server.http_base_url}/healthz", timeout=3) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.stop()
+
+        self.assertEqual(payload["status"], "startup_failed")
+        self.assertEqual(payload["detail"], "health snapshot unavailable")
 
     def test_http_active_session_control(self):
         payload = self._json_post("/api/runtime/active-session", {"session_id": "测试群"})

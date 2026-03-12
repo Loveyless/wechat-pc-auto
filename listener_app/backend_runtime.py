@@ -108,6 +108,12 @@ else:
         normalize_tts_provider,
     )
 
+HEALTH_STATUS_STARTING = "starting"
+HEALTH_STATUS_OK = "ok"
+HEALTH_STATUS_STARTUP_FAILED = "startup_failed"
+HEALTH_STATUS_DEGRADED = "degraded"
+DEGRADED_WORKER_STATES = {"worker_backoff", "stopped"}
+
 
 @dataclass(slots=True)
 class BackendSettings:
@@ -130,6 +136,70 @@ class BackendSettings:
     translator_runtime_text: str
     tts_runtime_text: str
     english_only: bool
+
+
+class BackendHealthState:
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._startup_complete = False
+        self._startup_failed = False
+        self._startup_detail = "backend startup pending"
+        self._runtime_state = "idle"
+        self._runtime_detail = ""
+
+    def mark_starting(self, detail: str) -> None:
+        with self._lock:
+            self._startup_complete = False
+            self._startup_failed = False
+            self._startup_detail = str(detail or "").strip() or "backend startup pending"
+
+    def mark_ready(self) -> None:
+        with self._lock:
+            self._startup_complete = True
+            self._startup_failed = False
+            if not self._startup_detail:
+                self._startup_detail = "backend runtime ready"
+
+    def mark_startup_failed(self, detail: str) -> None:
+        with self._lock:
+            self._startup_complete = False
+            self._startup_failed = True
+            self._startup_detail = str(detail or "").strip() or "backend startup failed"
+            self._runtime_state = HEALTH_STATUS_STARTUP_FAILED
+            self._runtime_detail = self._startup_detail
+
+    def update_runtime(self, worker_state: str, detail: str) -> None:
+        with self._lock:
+            clean_state = str(worker_state or "").strip()
+            if clean_state:
+                self._runtime_state = clean_state
+            self._runtime_detail = str(detail or "")
+
+    def snapshot(self) -> dict[str, str]:
+        with self._lock:
+            status = self._status_locked()
+            detail = self._detail_locked(status)
+            return {
+                "status": status,
+                "detail": detail,
+                "worker_state": self._runtime_state,
+            }
+
+    def _status_locked(self) -> str:
+        if self._startup_failed:
+            return HEALTH_STATUS_STARTUP_FAILED
+        if not self._startup_complete:
+            return HEALTH_STATUS_STARTING
+        if self._runtime_state in DEGRADED_WORKER_STATES:
+            return HEALTH_STATUS_DEGRADED
+        return HEALTH_STATUS_OK
+
+    def _detail_locked(self, status: str) -> str:
+        if status == HEALTH_STATUS_STARTUP_FAILED:
+            return self._startup_detail
+        if status == HEALTH_STATUS_STARTING:
+            return self._startup_detail or self._runtime_detail or "backend startup pending"
+        return self._runtime_detail or "backend runtime ready"
 
 
 def cleanup_dedupe_cache(cache: dict[str, float], now_ts: float) -> None:
@@ -229,6 +299,7 @@ class BackendRuntimeService:
     def __init__(self, config_path: str = DEFAULT_CONFIG_PATH, *, message_limit: int = CHAT_CACHE_LIMIT):
         self.config_path = os.path.abspath(config_path)
         self.runtime = ListenerRuntime(message_limit=message_limit)
+        self.health = BackendHealthState()
         self.settings: BackendSettings | None = None
         self.event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
         self.translate_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=TRANSLATE_QUEUE_MAXSIZE)
@@ -291,9 +362,16 @@ class BackendRuntimeService:
             },
         }
 
+    def get_health_snapshot(self) -> dict[str, str]:
+        return self.health.snapshot()
+
+    def mark_startup_failed(self, detail: str) -> None:
+        self.health.mark_startup_failed(detail)
+
     def start(self) -> None:
         if self._runtime_thread and self._runtime_thread.is_alive():
             return
+        self.health.mark_starting("initializing backend runtime")
         self.settings = load_backend_settings(self.config_path)
         stale_count = cleanup_stale_target_locks()
         if stale_count > 0:
@@ -323,7 +401,7 @@ class BackendRuntimeService:
             monitor_scope="all_sessions",
             message_fidelity="preview_only",
         )
-        self.runtime.publish_status("starting", "starting worker")
+        self._publish_runtime_status("starting", "starting worker")
         self._log_line(self.settings.translator_runtime_text)
         self._log_line(self.settings.tts_runtime_text)
         self._log_line(
@@ -340,6 +418,8 @@ class BackendRuntimeService:
         self._launch_worker("starting worker")
         self._runtime_thread = threading.Thread(target=self._runtime_loop, daemon=True)
         self._runtime_thread.start()
+        self.health.mark_ready()
+        self._sync_health_from_runtime()
 
     def stop(self) -> None:
         self._closing.set()
@@ -360,7 +440,7 @@ class BackendRuntimeService:
             if thread.is_alive():
                 thread.join(timeout=1)
         release_managed_target_locks()
-        self.runtime.publish_status("stopped", "backend stopped")
+        self._publish_runtime_status("stopped", "backend stopped")
 
     def wait(self, timeout: float | None = None) -> None:
         thread = self._runtime_thread
@@ -394,7 +474,7 @@ class BackendRuntimeService:
 
         self._worker_last_handled_exit_pid = 0
         self._worker_restart_deadline = 0.0
-        self.runtime.publish_status("starting", reason)
+        self._publish_runtime_status("starting", reason)
         self._log_line(f"worker start pid={getattr(self._worker, 'pid', 0)} reason={reason}")
         stdout_thread = threading.Thread(
             target=stdout_reader,
@@ -415,8 +495,19 @@ class BackendRuntimeService:
         delay = compute_worker_restart_delay(attempt)
         self._worker_restart_attempt = attempt
         self._worker_restart_deadline = time.time() + delay
-        self.runtime.publish_status("worker_backoff", f"{reason}, retry in {delay:.1f}s")
+        self._publish_runtime_status("worker_backoff", f"{reason}, retry in {delay:.1f}s")
         self._log_line(f"worker backoff attempt={attempt} delay={delay:.1f}s reason={reason}")
+
+    def _publish_runtime_status(self, state: str, detail: str) -> None:
+        self.runtime.publish_status(state, detail)
+        self._sync_health_from_runtime()
+
+    def _sync_health_from_runtime(self) -> None:
+        snapshot = self.runtime.snapshot().get("runtime", {})
+        self.health.update_runtime(
+            str(snapshot.get("worker_state", "")),
+            str(snapshot.get("worker_detail", "")),
+        )
 
     def _runtime_loop(self) -> None:
         while not self._closing.is_set():
@@ -460,7 +551,7 @@ class BackendRuntimeService:
             if state == "running":
                 self._worker_restart_attempt = 0
                 self._worker_restart_deadline = 0.0
-            self.runtime.publish_status(state, detail)
+            self._publish_runtime_status(state, detail)
             self._log_line(f"status: {detail}")
             return
 

@@ -15,6 +15,8 @@ else:
     from sidebar_shared import load_json_config
     from sidebar_tts import check_tts_dependency_packaging
 
+STARTUP_FAILURE_GRACE_SECONDS = 5.0
+
 
 def main() -> None:
     parser = build_arg_parser()
@@ -52,11 +54,21 @@ def main() -> None:
         http_port=args.http_port,
         ws_port=args.ws_port,
     )
-    service.start()
     api_server.start()
+    startup_failed_exit_code = 0
+    startup_failure_deadline = 0.0
+    try:
+        service.start()
+    except Exception as exc:
+        startup_failed_exit_code = 2
+        service.mark_startup_failed(str(exc))
+        print(f"[backend] startup failed: {exc}", file=sys.stderr, flush=True)
+        startup_failure_deadline = time.time() + STARTUP_FAILURE_GRACE_SECONDS
     try:
         while True:
             time.sleep(0.5)
+            if startup_failed_exit_code and time.time() >= startup_failure_deadline:
+                raise SystemExit(startup_failed_exit_code)
     except KeyboardInterrupt:
         pass
     finally:

@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from listener_app.backend_runtime import BackendRuntimeService
+from listener_app.backend_runtime import (
+    BackendRuntimeService,
+    HEALTH_STATUS_DEGRADED,
+    HEALTH_STATUS_OK,
+    HEALTH_STATUS_STARTUP_FAILED,
+)
 
 
 class FakeWorkerProcess:
@@ -146,6 +151,28 @@ class BackendRuntimeTest(unittest.TestCase):
         event = q.get(timeout=1)
         self.assertEqual(event.event_type, "tts.updated")
         self.assertEqual(player.spoken, ["HELLO"])
+
+    def test_health_snapshot_reports_ok_when_worker_waits_for_wechat(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        service.health.mark_ready()
+        service.health.update_runtime("waiting_wechat", "wechat not ready")
+        health = service.get_health_snapshot()
+        self.assertEqual(health["status"], HEALTH_STATUS_OK)
+        self.assertEqual(health["worker_state"], "waiting_wechat")
+
+    def test_health_snapshot_degrades_on_worker_backoff(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        service.health.mark_ready()
+        service.health.update_runtime("worker_backoff", "retry in 3.0s")
+        health = service.get_health_snapshot()
+        self.assertEqual(health["status"], HEALTH_STATUS_DEGRADED)
+
+    def test_mark_startup_failed_exposes_failed_health(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        service.mark_startup_failed("missing deeplx url")
+        health = service.get_health_snapshot()
+        self.assertEqual(health["status"], HEALTH_STATUS_STARTUP_FAILED)
+        self.assertEqual(health["detail"], "missing deeplx url")
 
 
 if __name__ == "__main__":
