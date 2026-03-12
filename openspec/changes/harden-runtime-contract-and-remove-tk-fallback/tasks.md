@@ -6,9 +6,9 @@
 
 ## 2. Shell bootstrap and release smoke alignment
 
-- [ ] 2.1 Update Tauri-side health parsing and bootstrap readiness checks to consume the structured `/healthz` contract
-- [ ] 2.2 Update release smoke validation to distinguish non-ready health states from healthy runtime availability and fail with actionable diagnostics
-- [ ] 2.3 Add or update Rust/bootstrap tests for the new readiness semantics
+- [x] 2.1 Update Tauri-side health parsing and bootstrap readiness checks to consume the structured `/healthz` contract
+- [x] 2.2 Update release smoke validation to distinguish non-ready health states from healthy runtime availability and fail with actionable diagnostics
+- [x] 2.3 Add or update Rust/bootstrap tests for the new readiness semantics
 
 ## 3. Fast regression gate and config schema ownership
 

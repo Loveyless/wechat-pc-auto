@@ -104,15 +104,60 @@ def resolve_tool_path(tool: str) -> str:
     raise RuntimeError(f"required tool not found on PATH: {tool}")
 
 
-def is_backend_healthy(health_url: str) -> bool:
+def fetch_backend_health(health_url: str) -> dict[str, str] | None:
     try:
         with urllib.request.urlopen(health_url, timeout=1.5) as response:
             if response.status != 200:
-                return False
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        return False
-    return payload.get("status") == "ok"
+                return {
+                    "status": "_http_error",
+                    "detail": f"unexpected http status {response.status}",
+                    "worker_state": "",
+                }
+            raw = response.read().decode("utf-8")
+    except (OSError, urllib.error.URLError):
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "status": "_invalid_payload",
+            "detail": "health payload is not valid JSON",
+            "worker_state": "",
+        }
+    if not isinstance(payload, dict):
+        return {
+            "status": "_invalid_payload",
+            "detail": "health payload must be a JSON object",
+            "worker_state": "",
+        }
+    status = str(payload.get("status", "")).strip()
+    if not status:
+        return {
+            "status": "_invalid_payload",
+            "detail": "health payload missing status",
+            "worker_state": "",
+        }
+    return {
+        "status": status,
+        "detail": str(payload.get("detail", "")).strip(),
+        "worker_state": str(payload.get("worker_state", "")).strip(),
+    }
+
+
+def is_backend_healthy(health_url: str) -> bool:
+    payload = fetch_backend_health(health_url)
+    return payload is not None and payload.get("status") == "ok"
+
+
+def describe_health_payload(payload: dict[str, str]) -> str:
+    parts = [f"status={payload.get('status', '').strip() or 'unknown'}"]
+    detail = str(payload.get("detail", "")).strip()
+    worker_state = str(payload.get("worker_state", "")).strip()
+    if detail:
+        parts.append(f"detail={detail}")
+    if worker_state:
+        parts.append(f"worker_state={worker_state}")
+    return " ".join(parts)
 
 
 def summarize_log_delta(log_delta: str, *, max_lines: int = 20) -> str:
@@ -130,16 +175,45 @@ def wait_for_backend_ready(
     start_offset: int,
 ) -> None:
     deadline = time.time() + timeout
+    last_health: dict[str, str] | None = None
     while time.time() < deadline:
-        if is_backend_healthy(health_url):
-            return
+        health = fetch_backend_health(health_url)
+        if health is not None:
+            if health.get("status") == "ok":
+                return
+            last_health = health
+            if health.get("status") != "starting":
+                raise RuntimeError(
+                    f"backend reported non-ready health before timeout: {describe_health_payload(health)}"
+                )
         time.sleep(0.5)
     log_delta = read_log_delta(log_path, start_offset)
     fail_on_forbidden_log_patterns(log_delta)
+    if last_health is not None:
+        raise RuntimeError(
+            f"backend never became healthy within {timeout:.1f}s: {health_url}\n"
+            f"last health: {describe_health_payload(last_health)}\n"
+            f"bootstrap log tail:\n{summarize_log_delta(log_delta)}"
+        )
     raise RuntimeError(
         f"backend never became healthy within {timeout:.1f}s: {health_url}\n"
         f"bootstrap log tail:\n{summarize_log_delta(log_delta)}"
     )
+
+
+def ensure_backend_stays_healthy(health_url: str, *, step: str) -> None:
+    health = fetch_backend_health(health_url)
+    if health is None:
+        raise RuntimeError(f"{step}: health endpoint unavailable")
+    if health.get("status") != "ok":
+        raise RuntimeError(f"{step}: {describe_health_payload(health)}")
+
+
+def summarize_non_clean_start(health_url: str) -> str:
+    health = fetch_backend_health(health_url)
+    if health is None:
+        return "health endpoint unavailable"
+    return describe_health_payload(health)
 
 
 def bootstrap_log_path(runtime_root: Path) -> Path:
@@ -184,9 +258,10 @@ def force_kill_process_tree(process: subprocess.Popen[bytes]) -> None:
 
 
 def ensure_clean_start(health_url: str) -> None:
-    if is_backend_healthy(health_url):
+    if fetch_backend_health(health_url) is not None:
         raise RuntimeError(
-            "health endpoint is already up before smoke test; stop the existing shell/backend first"
+            "health endpoint is already reachable before smoke test; "
+            f"stop the existing shell/backend first ({summarize_non_clean_start(health_url)})"
         )
 
 
@@ -255,8 +330,10 @@ def main() -> None:
 
         if log_delta.count("spawning backend sidecar") != 1:
             raise RuntimeError("expected exactly one backend sidecar spawn during smoke test")
-        if not is_backend_healthy(args.health_url):
-            raise RuntimeError("backend lost readiness after second launch")
+        ensure_backend_stays_healthy(
+            args.health_url,
+            step="backend lost readiness after second launch",
+        )
         log_delta = read_log_delta(log_path, log_offset)
         fail_on_forbidden_log_patterns(log_delta)
 

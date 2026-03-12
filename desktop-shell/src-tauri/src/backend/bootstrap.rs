@@ -23,7 +23,9 @@ use tauri_plugin_shell::{
 use crate::backend::win32::{
     acquire_bootstrap_lock, process_is_alive, process_start_token, BackendBootstrapLock,
 };
-use crate::backend_health::probe_backend_health;
+use crate::backend_health::{
+    describe_health_snapshot, probe_backend_health, BackendHealthProbe,
+};
 
 const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_HTTP_PORT: u16 = 8765;
@@ -93,7 +95,8 @@ impl ManagedBackendState {
 enum BackendWaitResult {
     Ready,
     Exited,
-    StillStarting,
+    StillStarting(Option<String>),
+    Failed(String),
 }
 
 #[tauri::command]
@@ -121,15 +124,8 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
         &format!("bootstrap start runtime_root={}", runtime_root.display()),
     );
 
-    if probe_backend_health(BACKEND_HTTP_PORT) {
-        append_bootstrap_log(&runtime_root, "reuse existing backend on fixed ports");
-        return ManagedBackendState::new(
-            build_backend_info(&runtime_root, false, String::new()),
-            None,
-            false,
-            runtime_root,
-            None,
-        );
+    if let Some(state) = resolve_existing_fixed_port_backend(&runtime_root) {
+        return state;
     }
 
     let _bootstrap_lock = match acquire_backend_bootstrap_lock(&runtime_root) {
@@ -147,15 +143,8 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
         }
     };
 
-    if probe_backend_health(BACKEND_HTTP_PORT) {
-        append_bootstrap_log(&runtime_root, "reuse existing backend after bootstrap lock");
-        return ManagedBackendState::new(
-            build_backend_info(&runtime_root, false, String::new()),
-            None,
-            false,
-            runtime_root,
-            None,
-        );
+    if let Some(state) = resolve_existing_fixed_port_backend(&runtime_root) {
+        return state;
     }
 
     if let Some(marker) = read_backend_marker(&runtime_root) {
@@ -170,9 +159,22 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
                         None,
                     );
                 }
-                BackendWaitResult::StillStarting => {
+                BackendWaitResult::StillStarting(_) => {
                     return ManagedBackendState::new(
                         build_backend_info(&runtime_root, true, String::new()),
+                        None,
+                        false,
+                        runtime_root,
+                        None,
+                    );
+                }
+                BackendWaitResult::Failed(error) => {
+                    append_bootstrap_log(
+                        &runtime_root,
+                        &format!("existing backend health failed: {error}"),
+                    );
+                    return ManagedBackendState::new(
+                        build_backend_info(&runtime_root, false, error),
                         None,
                         false,
                         runtime_root,
@@ -340,14 +342,122 @@ fn clear_backend_marker_if_matches(runtime_root: &Path, expected: Option<&Backen
     let _ = fs::remove_file(marker_path);
 }
 
+fn build_fixed_port_failure_state(runtime_root: &Path, error: String) -> ManagedBackendState {
+    append_bootstrap_log(&runtime_root, &format!("bootstrap failed: {error}"));
+    ManagedBackendState::new(
+        build_backend_info(runtime_root, false, error),
+        None,
+        false,
+        runtime_root.to_path_buf(),
+        None,
+    )
+}
+
+fn resolve_existing_fixed_port_backend(runtime_root: &Path) -> Option<ManagedBackendState> {
+    match probe_backend_health(BACKEND_HTTP_PORT) {
+        BackendHealthProbe::Unreachable => None,
+        BackendHealthProbe::Invalid(error) => Some(build_fixed_port_failure_state(
+            runtime_root,
+            format!("existing backend health probe invalid: {error}"),
+        )),
+        BackendHealthProbe::Reachable(snapshot) if snapshot.status.is_ready() => {
+            append_bootstrap_log(&runtime_root, "reuse existing backend on fixed ports");
+            Some(ManagedBackendState::new(
+                build_backend_info(runtime_root, false, String::new()),
+                None,
+                false,
+                runtime_root.to_path_buf(),
+                None,
+            ))
+        }
+        BackendHealthProbe::Reachable(snapshot) if snapshot.status.is_retryable() => {
+            append_bootstrap_log(
+                runtime_root,
+                &format!(
+                    "existing backend on fixed ports not ready yet, wait for readiness {}",
+                    describe_health_snapshot(&snapshot)
+                ),
+            );
+            match wait_for_backend_ready(|| false) {
+                BackendWaitResult::Ready => Some(ManagedBackendState::new(
+                    build_backend_info(runtime_root, false, String::new()),
+                    None,
+                    false,
+                    runtime_root.to_path_buf(),
+                    None,
+                )),
+                BackendWaitResult::StillStarting(detail) => {
+                    if let Some(summary) = detail {
+                        append_bootstrap_log(
+                            runtime_root,
+                            &format!(
+                                "existing backend on fixed ports still starting after {}s {}",
+                                BACKEND_READY_TIMEOUT_SECONDS, summary
+                            ),
+                        );
+                    } else {
+                        append_bootstrap_log(
+                            runtime_root,
+                            &format!(
+                                "existing backend on fixed ports still starting after {}s",
+                                BACKEND_READY_TIMEOUT_SECONDS
+                            ),
+                        );
+                    }
+                    Some(ManagedBackendState::new(
+                        build_backend_info(runtime_root, true, String::new()),
+                        None,
+                        false,
+                        runtime_root.to_path_buf(),
+                        None,
+                    ))
+                }
+                BackendWaitResult::Failed(error) => {
+                    Some(build_fixed_port_failure_state(runtime_root, error))
+                }
+                BackendWaitResult::Exited => Some(build_fixed_port_failure_state(
+                    runtime_root,
+                    "existing backend on fixed ports exited before /healthz became ready"
+                        .to_string(),
+                )),
+            }
+        }
+        BackendHealthProbe::Reachable(snapshot) => Some(build_fixed_port_failure_state(
+            runtime_root,
+            format!(
+                "existing backend on fixed ports is not ready: {}",
+                describe_health_snapshot(&snapshot)
+            ),
+        )),
+    }
+}
+
 fn wait_for_backend_ready<F>(mut is_exited: F) -> BackendWaitResult
 where
     F: FnMut() -> bool,
 {
     let deadline = Instant::now() + Duration::from_secs(BACKEND_READY_TIMEOUT_SECONDS);
+    let mut last_starting_detail: Option<String> = None;
     while Instant::now() < deadline {
-        if probe_backend_health(BACKEND_HTTP_PORT) {
-            return BackendWaitResult::Ready;
+        match probe_backend_health(BACKEND_HTTP_PORT) {
+            BackendHealthProbe::Reachable(snapshot) if snapshot.status.is_ready() => {
+                return BackendWaitResult::Ready;
+            }
+            BackendHealthProbe::Reachable(snapshot) if snapshot.status.is_retryable() => {
+                last_starting_detail = Some(describe_health_snapshot(&snapshot));
+            }
+            BackendHealthProbe::Reachable(snapshot) => {
+                return BackendWaitResult::Failed(format!(
+                    "backend /healthz reported {}",
+                    describe_health_snapshot(&snapshot)
+                ));
+            }
+            BackendHealthProbe::Invalid(error) => {
+                return BackendWaitResult::Failed(format!(
+                    "backend /healthz returned invalid response: {error}"
+                ));
+            }
+            BackendHealthProbe::Unreachable => {}
         }
         if is_exited() {
             return BackendWaitResult::Exited;
@@ -355,13 +465,30 @@ where
         thread::sleep(Duration::from_millis(BACKEND_READY_POLL_INTERVAL_MS));
     }
 
-    if probe_backend_health(BACKEND_HTTP_PORT) {
-        return BackendWaitResult::Ready;
+    match probe_backend_health(BACKEND_HTTP_PORT) {
+        BackendHealthProbe::Reachable(snapshot) if snapshot.status.is_ready() => {
+            return BackendWaitResult::Ready;
+        }
+        BackendHealthProbe::Reachable(snapshot) if snapshot.status.is_retryable() => {
+            last_starting_detail = Some(describe_health_snapshot(&snapshot));
+        }
+        BackendHealthProbe::Reachable(snapshot) => {
+            return BackendWaitResult::Failed(format!(
+                "backend /healthz reported {}",
+                describe_health_snapshot(&snapshot)
+            ));
+        }
+        BackendHealthProbe::Invalid(error) => {
+            return BackendWaitResult::Failed(format!(
+                "backend /healthz returned invalid response: {error}"
+            ));
+        }
+        BackendHealthProbe::Unreachable => {}
     }
     if is_exited() {
         return BackendWaitResult::Exited;
     }
-    BackendWaitResult::StillStarting
+    BackendWaitResult::StillStarting(last_starting_detail)
 }
 
 fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> BackendWaitResult {
@@ -388,15 +515,26 @@ fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> 
             clear_backend_marker_if_matches(runtime_root, Some(marker));
             BackendWaitResult::Exited
         }
-        BackendWaitResult::StillStarting => {
+        BackendWaitResult::StillStarting(detail) => {
+            let suffix = detail
+                .as_ref()
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default();
             append_bootstrap_log(
                 runtime_root,
                 &format!(
-                    "existing backend still starting after {}s pid={}, skip duplicate spawn",
-                    BACKEND_READY_TIMEOUT_SECONDS, marker.pid
+                    "existing backend still starting after {}s pid={}, skip duplicate spawn{}",
+                    BACKEND_READY_TIMEOUT_SECONDS, marker.pid, suffix
                 ),
             );
-            BackendWaitResult::StillStarting
+            BackendWaitResult::StillStarting(detail)
+        }
+        BackendWaitResult::Failed(error) => {
+            append_bootstrap_log(
+                runtime_root,
+                &format!("existing backend failed health readiness: {error}"),
+            );
+            BackendWaitResult::Failed(error)
         }
     }
 }
@@ -517,15 +655,24 @@ fn spawn_backend_sidecar<R: Runtime>(
             let _ = child.kill();
             Err("backend sidecar exited before /healthz became ready".to_string())
         }
-        BackendWaitResult::StillStarting => {
+        BackendWaitResult::StillStarting(detail) => {
+            let suffix = detail
+                .as_ref()
+                .map(|value| format!(" {value}"))
+                .unwrap_or_default();
             append_bootstrap_log(
                 runtime_root,
                 &format!(
-                    "backend sidecar still starting after {}s pid={}, continue without duplicate spawn",
-                    BACKEND_READY_TIMEOUT_SECONDS, marker.pid
+                    "backend sidecar still starting after {}s pid={}, continue without duplicate spawn{}",
+                    BACKEND_READY_TIMEOUT_SECONDS, marker.pid, suffix
                 ),
             );
             Ok((child, marker))
+        }
+        BackendWaitResult::Failed(error) => {
+            clear_backend_marker_if_matches(runtime_root, Some(&marker));
+            let _ = child.kill();
+            Err(error)
         }
     }
 }
