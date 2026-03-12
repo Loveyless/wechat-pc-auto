@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 if __package__:
+    from .runtime_config import DesktopRuntimeConfig, load_runtime_config
     from .runtime_engine import ListenerRuntime
     from .sidebar_runtime_support import (
         acquire_target_lock,
@@ -59,6 +60,7 @@ if __package__:
         normalize_tts_provider,
     )
 else:
+    from runtime_config import DesktopRuntimeConfig, load_runtime_config
     from runtime_engine import ListenerRuntime
     from sidebar_runtime_support import (
         acquire_target_lock,
@@ -215,83 +217,45 @@ def cleanup_dedupe_cache(cache: dict[str, float], now_ts: float) -> None:
 
 
 def load_backend_settings(config_path: str) -> BackendSettings:
-    normalized_path = os.path.abspath(config_path)
-    config = load_json_config(normalized_path)
-    config_dir = os.path.dirname(normalized_path)
-    listen_cfg = config.get("listen", {}) if isinstance(config.get("listen", {}), dict) else {}
-    translate_cfg = config.get("translate", {}) if isinstance(config.get("translate", {}), dict) else {}
-    display_cfg = config.get("display", {}) if isinstance(config.get("display", {}), dict) else {}
-    tts_cfg = config.get("tts", {}) if isinstance(config.get("tts", {}), dict) else {}
-    logging_cfg = config.get("logging", {}) if isinstance(config.get("logging", {}), dict) else {}
-
-    targets = normalize_targets(listen_cfg.get("targets"))
-
-    listen_mode = str(listen_cfg.get("mode", "session")).strip().lower()
-    if listen_mode and listen_mode != "session":
-        raise RuntimeError("session-only branch only supports listen.mode=session")
-
-    focus_refresh = as_bool(listen_cfg.get("focus_refresh"), False)
-    worker_debug = as_bool(listen_cfg.get("worker_debug"), False)
-    load_retry_seconds = as_non_negative_float(listen_cfg.get("load_retry_seconds"), 10.0)
-    session_preview_dedupe_window_seconds = as_non_negative_float(
-        listen_cfg.get("session_preview_dedupe_window_seconds"),
-        SESSION_PREVIEW_DEDUPE_WINDOW_SECONDS,
-    )
-    translate_enabled = as_bool(translate_cfg.get("enabled"), True)
-    translate_provider = normalize_translate_provider(translate_cfg.get("provider", "deeplx"))
-    deeplx_url = str(translate_cfg.get("deeplx_url") or os.getenv("DEEPLX_URL", "")).strip()
-    source_lang = str(translate_cfg.get("source_lang", "auto"))
-    target_lang = str(translate_cfg.get("target_lang", "EN"))
-    english_only = as_bool(display_cfg.get("english_only"), True)
-    tts_auto_read_active_chat = as_bool(display_cfg.get("tts_auto_read_active_chat"), True)
-    translate_fail_behavior = str(display_cfg.get("on_translate_fail", "show_cn_with_reason"))
-    if translate_fail_behavior not in ("show_cn_with_reason", "show_cn", "show_reason"):
-        translate_fail_behavior = "show_cn_with_reason"
-
-    listen_interval = read_config_float(
-        listen_cfg,
-        "interval_seconds",
-        DEFAULT_LISTEN_INTERVAL_SECONDS,
-    )
-    listen_interval = validate_positive_float("listen.interval_seconds", listen_interval)
-    listen_interval = validate_float_min(
-        "listen.interval_seconds",
-        listen_interval,
-        MIN_LISTEN_INTERVAL_SECONDS,
-    )
-    load_retry_seconds = validate_positive_float("listen.load_retry_seconds", load_retry_seconds)
-    validate_translate_config(translate_enabled, translate_provider, deeplx_url)
+    runtime_config = load_runtime_config(config_path)
     translator = create_translator(
-        enabled=translate_enabled,
-        provider=translate_provider,
-        deeplx_url=deeplx_url,
-        source_lang=source_lang,
-        target_lang=target_lang,
-        timeout_seconds=read_config_float(translate_cfg, "timeout_seconds", 8.0),
+        enabled=runtime_config.translate.enabled,
+        provider=runtime_config.translate.provider,
+        deeplx_url=runtime_config.translate.deeplx_url,
+        source_lang=runtime_config.translate.source_lang,
+        target_lang=runtime_config.translate.target_lang,
+        timeout_seconds=runtime_config.translate.timeout_seconds,
     )
-    tts_provider = normalize_tts_provider(tts_cfg.get("provider"))
-    tts_player, tts_runtime_text = create_tts_player(tts_cfg, config_dir=config_dir)
+    tts_player, tts_runtime_text = create_tts_player(
+        runtime_config.tts.raw_config,
+        config_dir=runtime_config.config_dir,
+    )
 
     return BackendSettings(
-        config_path=normalized_path,
-        config_dir=config_dir,
-        log_file=resolve_log_file_path(logging_cfg.get("file", "")),
-        targets=targets,
-        listen_interval=listen_interval,
-        focus_refresh=focus_refresh,
-        worker_debug=worker_debug,
-        load_retry_seconds=load_retry_seconds,
-        session_preview_dedupe_window_seconds=session_preview_dedupe_window_seconds,
-        translate_enabled=translate_enabled,
-        translate_provider=translate_provider,
-        translate_fail_behavior=translate_fail_behavior,
+        config_path=runtime_config.config_path,
+        config_dir=runtime_config.config_dir,
+        log_file=runtime_config.log_file,
+        targets=list(runtime_config.listen.targets),
+        listen_interval=runtime_config.listen.interval_seconds,
+        focus_refresh=runtime_config.listen.focus_refresh,
+        worker_debug=runtime_config.listen.worker_debug,
+        load_retry_seconds=runtime_config.listen.load_retry_seconds,
+        session_preview_dedupe_window_seconds=(
+            runtime_config.listen.session_preview_dedupe_window_seconds
+        ),
+        translate_enabled=runtime_config.translate.enabled,
+        translate_provider=runtime_config.translate.provider,
+        translate_fail_behavior=runtime_config.display.on_translate_fail,
         translator=translator,
-        tts_auto_read_active_chat=tts_auto_read_active_chat,
-        tts_provider=tts_provider,
+        tts_auto_read_active_chat=runtime_config.display.tts_auto_read_active_chat,
+        tts_provider=runtime_config.tts.provider,
         tts_player=tts_player,
-        translator_runtime_text=build_translator_runtime_text(translate_enabled, translate_provider),
+        translator_runtime_text=build_translator_runtime_text(
+            runtime_config.translate.enabled,
+            runtime_config.translate.provider,
+        ),
         tts_runtime_text=tts_runtime_text,
-        english_only=english_only,
+        english_only=runtime_config.display.english_only,
     )
 
 

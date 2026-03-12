@@ -6,10 +6,12 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict
 
 if __package__:
+    from .runtime_config import DesktopRuntimeConfig, load_runtime_config
     from .sidebar_shared import (
         CHAT_CACHE_LIMIT,
         DEDUPE_CACHE_MAX_KEYS,
@@ -67,6 +69,7 @@ if __package__:
     )
     from .sidebar_ui import SidebarMessage, SidebarUI
 else:
+    from runtime_config import DesktopRuntimeConfig, load_runtime_config
     from sidebar_shared import (
         CHAT_CACHE_LIMIT,
         DEDUPE_CACHE_MAX_KEYS,
@@ -152,6 +155,24 @@ def exit_startup_error(message: str, exit_code: int = 2):
     maybe_show_frozen_error_dialog(message)
     raise SystemExit(exit_code)
 
+
+@dataclass(slots=True)
+class LegacySidebarUISettings:
+    width: int
+    side: str
+
+
+def load_legacy_sidebar_ui_settings(runtime_config: DesktopRuntimeConfig) -> LegacySidebarUISettings:
+    display_cfg = runtime_config.raw_config.get("display", {})
+    if not isinstance(display_cfg, dict):
+        display_cfg = {}
+    width = read_config_int(display_cfg, "width", DEFAULT_SIDEBAR_WIDTH)
+    width = validate_int_min("display.width", width, MIN_SIDEBAR_WIDTH)
+    side = str(display_cfg.get("side", "right")).strip().lower()
+    if side not in ("left", "right"):
+        side = "right"
+    return LegacySidebarUISettings(width=width, side=side)
+
 def main():
     parser = argparse.ArgumentParser(
         description="Legacy Tk rollback entry for the sidebar listener; no longer the primary desktop UI path."
@@ -167,22 +188,16 @@ def main():
 
     config_path = os.path.abspath(args.config)
     try:
-        config = load_json_config(config_path)
+        runtime_config = load_runtime_config(config_path)
     except Exception as e:
-        exit_startup_error(f"load config failed: {e}")
+        exit_startup_error(f"invalid config: {e}")
 
-    config_dir = os.path.dirname(config_path)
-    listen_cfg = config.get("listen", {}) if isinstance(config.get("listen", {}), dict) else {}
-    translate_cfg = (
-        config.get("translate", {}) if isinstance(config.get("translate", {}), dict) else {}
-    )
-    display_cfg = config.get("display", {}) if isinstance(config.get("display", {}), dict) else {}
-    tts_cfg = config.get("tts", {}) if isinstance(config.get("tts", {}), dict) else {}
-    logging_cfg = config.get("logging", {}) if isinstance(config.get("logging", {}), dict) else {}
+    config = runtime_config.raw_config
+    config_dir = runtime_config.config_dir
 
     if args.check_tts_deps:
         try:
-            ok, detail = check_tts_dependency_packaging(tts_cfg)
+            ok, detail = check_tts_dependency_packaging(runtime_config.tts.raw_config)
         except RuntimeError as e:
             print(f"[sidebar] tts dependency check failed: {e}", file=sys.stderr)
             raise SystemExit(2)
@@ -190,7 +205,7 @@ def main():
         print(f"[sidebar] {detail}", file=stream, flush=True)
         raise SystemExit(0 if ok else 2)
 
-    targets = normalize_targets(listen_cfg.get("targets"))
+    targets = list(runtime_config.listen.targets)
     if not targets:
         exit_startup_error("config listen.targets is empty")
     if str(args.target or "").strip():
@@ -202,54 +217,29 @@ def main():
             )
         targets = [forced_target]
 
-    listen_mode = str(listen_cfg.get("mode", "session")).strip().lower()
-    if listen_mode and listen_mode != "session":
-        exit_startup_error("session-only branch only supports listen.mode=session")
-    focus_refresh = as_bool(listen_cfg.get("focus_refresh"), False)
-    worker_debug = as_bool(listen_cfg.get("worker_debug"), False)
-    load_retry_seconds = as_non_negative_float(listen_cfg.get("load_retry_seconds"), 10.0)
-    session_preview_dedupe_window_seconds = as_non_negative_float(
-        listen_cfg.get("session_preview_dedupe_window_seconds"),
-        SESSION_PREVIEW_DEDUPE_WINDOW_SECONDS,
+    focus_refresh = runtime_config.listen.focus_refresh
+    worker_debug = runtime_config.listen.worker_debug
+    load_retry_seconds = runtime_config.listen.load_retry_seconds
+    session_preview_dedupe_window_seconds = (
+        runtime_config.listen.session_preview_dedupe_window_seconds
     )
 
-    translate_enabled = as_bool(translate_cfg.get("enabled"), True)
-    translate_provider = str(translate_cfg.get("provider", "deeplx"))
-    deeplx_url = str(translate_cfg.get("deeplx_url") or os.getenv("DEEPLX_URL", "")).strip()
-    source_lang = str(translate_cfg.get("source_lang", "auto"))
-    target_lang = str(translate_cfg.get("target_lang", "EN"))
+    translate_enabled = runtime_config.translate.enabled
+    translate_provider = runtime_config.translate.provider
+    deeplx_url = runtime_config.translate.deeplx_url
+    source_lang = runtime_config.translate.source_lang
+    target_lang = runtime_config.translate.target_lang
+    translate_timeout = runtime_config.translate.timeout_seconds
 
-    english_only = as_bool(display_cfg.get("english_only"), True)
-    tts_auto_read_active_chat = as_bool(display_cfg.get("tts_auto_read_active_chat"), True)
-    translate_fail_behavior = str(display_cfg.get("on_translate_fail", "show_cn_with_reason"))
-    if translate_fail_behavior not in ("show_cn_with_reason", "show_cn", "show_reason"):
-        translate_fail_behavior = "show_cn_with_reason"
-    side = str(display_cfg.get("side", "right"))
-    if side not in ("left", "right"):
-        side = "right"
+    english_only = runtime_config.display.english_only
+    tts_auto_read_active_chat = runtime_config.display.tts_auto_read_active_chat
+    translate_fail_behavior = runtime_config.display.on_translate_fail
+    legacy_ui_settings = load_legacy_sidebar_ui_settings(runtime_config)
+    side = legacy_ui_settings.side
 
     try:
-        listen_interval = read_config_float(
-            listen_cfg,
-            "interval_seconds",
-            DEFAULT_LISTEN_INTERVAL_SECONDS,
-        )
-        translate_timeout = read_config_float(translate_cfg, "timeout_seconds", 8.0)
-        width = read_config_int(display_cfg, "width", DEFAULT_SIDEBAR_WIDTH)
-        listen_interval = validate_positive_float("listen.interval_seconds", listen_interval)
-        listen_interval = validate_float_min(
-            "listen.interval_seconds",
-            listen_interval,
-            MIN_LISTEN_INTERVAL_SECONDS,
-        )
-        translate_timeout = validate_positive_float("translate.timeout_seconds", translate_timeout)
-        width = validate_int_min("display.width", width, MIN_SIDEBAR_WIDTH)
-        load_retry_seconds = validate_positive_float(
-            "listen.load_retry_seconds",
-            load_retry_seconds,
-        )
-        translate_provider = normalize_translate_provider(translate_provider)
-        validate_translate_config(translate_enabled, translate_provider, deeplx_url)
+        listen_interval = runtime_config.listen.interval_seconds
+        width = legacy_ui_settings.width
         translator = create_translator(
             enabled=translate_enabled,
             provider=translate_provider,
@@ -263,13 +253,13 @@ def main():
             translate_provider,
         )
         tts_player, tts_runtime_text = create_tts_player(
-            tts_cfg,
+            runtime_config.tts.raw_config,
             config_dir=config_dir,
         )
     except RuntimeError as e:
         exit_startup_error(f"invalid config: {e}")
 
-    log_file = resolve_log_file_path(logging_cfg.get("file", ""))
+    log_file = runtime_config.log_file
     cleaned_stale_locks = cleanup_stale_target_locks()
     if cleaned_stale_locks > 0:
         print(f"[sidebar] cleaned stale locks: {cleaned_stale_locks}", flush=True)
