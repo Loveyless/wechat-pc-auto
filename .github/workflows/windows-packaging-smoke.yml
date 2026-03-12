@@ -48,6 +48,10 @@ jobs:
         working-directory: desktop-shell
         run: npm test
 
+      - name: Build desktop-shell frontend dist
+        working-directory: desktop-shell
+        run: npm run build
+
       - name: Run desktop-shell Rust tests
         working-directory: desktop-shell/src-tauri
         run: cargo test
