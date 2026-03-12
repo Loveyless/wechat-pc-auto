@@ -7,7 +7,7 @@
 - `desktop-shell/`
 
 这份文档只讲当前主路径：`Python backend + React/Tauri 桌面壳`。
-旧 Tk 路径的 Windows 打包仍看 `docs/windows-packaging.md`。
+Tk 回退打包链已经下线，不要再把仓库理解成“双桌面入口并存”。
 
 ## 结论
 
@@ -223,5 +223,5 @@ Windows 下常见表现就是：
 ## 回滚边界
 
 - release 壳如果回归，优先回退到当前源码态主路径：`backend_main.py + npm run dev`，或者 `npm run tauri dev` 做开发期排障。
-- 旧 Tk 入口 `listener_app/sidebar_translate_listener.py` 只保留开发回退价值，不再是正式交付降级路径。
-- 不要把“旧 Tk 还能跑”误写成“桌面壳发布失败后的官方 fallback”；那会直接把交付边界写坏。
+- 当前正式桌面 UI 只有 `desktop-shell/`；不要再发明历史 UI fallback。
+- 如果回归来自打包链，先修 sidecar / smoke / single-instance，再谈重新发包；不要靠 resurrect 已删除路径掩盖问题。

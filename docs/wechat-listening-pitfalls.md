@@ -5,13 +5,12 @@
 - `listener_app/backend_main.py`
 - `listener_app/backend_runtime.py`
 - `listener_app/runtime_api.py`
+- `listener_app/runtime_config.py`
 - `listener_app/runtime_engine.py`
 - `listener_app/runtime_store.py`
 - `listener_app/group_listener_worker.py`
-- `listener_app/sidebar_translate_listener.py`
 - `listener_app/sidebar_translate_runtime.py`
 - `listener_app/sidebar_runtime_support.py`
-- `listener_app/sidebar_ui.py`
 - `listener_app/sidebar_tts.py`
 - `listener_app/sidebar_shared.py`
 - `desktop-shell/src/**`
@@ -20,26 +19,23 @@
 
 目标：在不改微信客户端的前提下，稳定监听左侧会话列表的预览消息并在桌面前端展示（可接 DeepLX 翻译）。
 
-当前存在两条运行路径：
-- 新主路径：`listener_app/backend_main.py` + `desktop-shell/`，默认按 `all_sessions` 方式扫描左侧可见会话列表，不再依赖 `listen.targets` 做主路径筛选。
-- 旧 Tk 开发回退路径：`listener_app/sidebar_translate_listener.py`，仍沿用 `listen.targets` 和 target 编辑能力；仅用于开发期回退，不再是长期主路径。
+当前只有一条受支持运行路径：
+- `listener_app/backend_main.py` + `desktop-shell/`，默认按 `all_sessions` 方式扫描左侧可见会话列表，不再依赖 `listen.targets` 做主路径筛选。
 
 ## 架构结论
-- 监听与 UI 必须分离：`group_listener_worker.py` 负责抓消息，`sidebar_translate_listener.py` 负责展示与翻译。
-- 当前侧边栏主进程已经按职责拆分：
-  - `sidebar_translate_listener.py` 只保留主入口编排、配置校验、翻译线程和事件分发。
-  - `sidebar_translate_runtime.py` 专管 translate provider、DeepLX runtime 与失败 fallback。
-  - `sidebar_runtime_support.py` 专管日志轮转、worker 启停支撑、运行时锁与 stdout/stderr reader。
-  - `sidebar_ui.py` 专管 Tk UI、消息缓存、快捷键和 TTS 交互入口。
-  - `sidebar_tts.py` 专管 TTS runtime、依赖探测与播放器工厂。
-  - `sidebar_shared.py` 收敛共享常量、路径/配置工具、文本归一化与通用校验。
-  - UI 私有常量/快捷键节流与 TTS 私有 provider/config helper 不应继续堆进 `sidebar_shared.py`；否则 shared 会再次退化成垃圾桶。
-  - 拆分后也不要再假设“所有 helper 都挂在 `sidebar_translate_listener.py`”；翻译 helper 的归属是 `sidebar_translate_runtime.py`，worker/runtime helper 的归属是 `sidebar_runtime_support.py`。
+- 监听、runtime 和桌面 UI 必须分离：`group_listener_worker.py` 负责抓消息，`backend_runtime.py` 负责 supervisor / 翻译 / TTS / 健康状态，`desktop-shell/` 负责展示和交互。
+- 当前主路径已经按职责拆分：
+  - `runtime_config.py` 负责主路径唯一配置 schema
+  - `sidebar_translate_runtime.py` 专管 translate provider、DeepLX runtime 与失败 fallback
+  - `sidebar_runtime_support.py` 专管日志轮转、worker 启停支撑、运行时锁与 stdout/stderr reader
+  - `sidebar_tts.py` 专管 TTS runtime、依赖探测与播放器工厂
+  - `sidebar_shared.py` 收敛共享常量、路径/配置工具、文本归一化与通用校验
+  - `runtime_api.py` 负责 `/healthz`、HTTP API 和 WebSocket 契约
+  - `desktop-shell/` 只消费本地 `HTTP + WebSocket`，不直连 worker stdout
+- UI 私有状态、provider 私有配置和 shared helper 不应再混堆；否则 shared 很快又会退化成垃圾桶。
 - 当前监听主链路已收敛为 `session-only + preview-only`。
 - 新主路径 worker 为单进程全会话预览扫描：一次扫描微信主窗口左侧会话列表，覆盖当前可见的群聊和私聊会话。
-- 新主路径 UI 已切到 `desktop-shell/`；前端只消费本地 `HTTP + WebSocket` 契约，不再直连 worker stdout。
 - 新主路径桌面壳必须保持 `single-instance`：第二次启动只聚焦已有窗口，不允许额外拉起第二个壳窗口。
-- 旧 Tk 回退路径仍保留“单 worker 一次扫描全部 target”的 target 模式；运行时 target 变更不走 IPC 热更新，仍是“UI 显式增删 -> 回写 `listener.json` -> 先停旧 worker -> 确认退出后再启动新 worker”。
 - 当前主路径不再维护 `chat` / `mixed` 监听模式；相关复杂度已从主链路删除。
 - 当前分支不再维护任何主动操作微信的能力（发送消息、发送文件、自动回复、写输入框）。
 - 新主路径运行时会显式暴露 `runtime.monitor_scope=all_sessions`、`runtime.message_fidelity=preview_only`；消息事件继续通过 `capture_level=preview|full` 区分语义，禁止把预览事件冒充完整正文。
@@ -160,10 +156,10 @@
 
 ### 10) 重复启动导致监听实例重叠
 现象：
-- 误重复执行启动命令后，旧 Tk 回退路径可能出现同一个 target 被多个进程重复监听；新后端主路径若并行启动多份，也会造成重复事件。
+- 误重复执行启动命令后，后端主路径若并行启动多份，会造成重复事件或锁冲突。
 
 处理：
-- 旧 Tk 路径继续为每个 target 增加运行时锁（`logs/.runtime/target_*.lock`）。
+- 主路径继续为兼容性 target 元数据维护运行时锁（`logs/.runtime/target_*.lock`）。
 - 启动阶段会先扫描 `logs/.runtime`，仅清理 `pid/start_token` 已失效或格式异常的陈旧锁。
 - 仍存活的锁必须保留，禁止“启动即全删锁”，否则会破坏单实例约束并造成重复监听。
 
@@ -222,15 +218,13 @@
 ### 17) 配置脏值导致运行中崩溃
 现象：
 - `listen.interval_seconds<0.2` 或 `translate.timeout_seconds<=0` 时，worker/翻译线程会在运行期报错。
-- `display.width` 过小会导致窗口布局异常。
 - `translate.enabled=true` 但未配置 `translate.deeplx_url` / `DEEPLX_URL` 时，旧逻辑会静默降级成原文透传，用户误以为翻译正常。
 
 处理：
-- 侧边栏主进程启动时对关键配置做 fail-fast 校验，不合法直接退出并打印错误：
+- 主路径后端启动时对关键配置做 fail-fast 校验，不合法直接退出并打印错误：
   - `listen.interval_seconds >= 0.2`
   - `listen.load_retry_seconds > 0`
   - `translate.timeout_seconds > 0`
-  - `display.width >= 280`
   - `translate.enabled=true and provider=deeplx` 时必须存在 `translate.deeplx_url` 或 `DEEPLX_URL`
 
 ### 18) 监听体感慢，不一定是 UIA 本身
@@ -260,7 +254,7 @@
 
 处理：
 - 打包产物必须包含两个 exe：
-  - 主程序 `wechat_sidebar.exe`
+  - 主程序 `wechat-auto-shell.exe`
   - 同目录 worker `group_listener_worker.exe`
 - 主程序在 frozen 环境下不再拉 `.py` 文件，而是直接拉同目录的 `group_listener_worker.exe`。
 - 打包态默认配置、日志、`.env.local`、运行时锁都按主程序目录解析，不再写回源码目录。
@@ -370,7 +364,7 @@
 - 这些打包依赖和 smoke 脏告警规则现在统一收口到 `scripts/packaging_manifest.json`；如果以后再补动态依赖，先改清单，不要分头改两套脚本。
 - 打包脚本在真正调用 PyInstaller 前，会先用源码态主程序跑一次 `--check-tts-deps`。当前默认 `tts.provider=tencent_cloud`，缺 `tencentcloud` SDK 时必须在这里直接失败，不能等 PyInstaller 白跑完才补刀。
 - 主程序启动创建 TTS 时，会先做一次 provider 对应依赖探测；若缺依赖，不再伪装成 `tts configured ...`，而是直接记成 `tts unavailable ... reason=...`。
-- 构建后额外执行 `wechat_sidebar.exe --check-tts-deps` 做最小冒烟；这一步失败，或者打出 `RequestsDependencyWarning`，都说明产物里的 TTS 朗读链路根本不完整，不该继续分发。
+- 构建后额外执行 `wechat-auto-backend.exe --check-tts-deps` 做最小冒烟；这一步失败，或者打出 `RequestsDependencyWarning`，都说明产物里的 TTS 朗读链路根本不完整，不该继续分发。
 
 ### 26) 收起左侧菜单后，看不出当前正在看哪个群
 现象：
@@ -510,13 +504,6 @@ npm run tauri build
 这一步现在能产出一体化 Windows 桌面壳，并把 backend sidecar 一起带上。
 更具体的产物路径和验收边界看 `docs/desktop-shell-build.md`。
 
-### 旧 Tk 开发回退路径
-
-```bash
-python listener_app/sidebar_translate_listener.py ^
-  --config ".\config\listener.json"
-```
-
 ### 接入 DeepLX
 在 `config/listener.json` 设置 `translate.enabled=true` 且配置 `translate.deeplx_url`。
 
@@ -542,7 +529,7 @@ python listener_app/sidebar_translate_listener.py ^
 - 同一 target 只允许一个活动侧边栏实例（由运行时锁保证）。
 - 去重必须是“时间窗策略”，禁止恢复为全生命周期永久 `set` 去重。
 - 每个 target 的消息缓存上限固定 `100` 条，禁止无限增长。
-- 启动阶段必须对 `listen.interval_seconds`、`listen.load_retry_seconds`、`translate.timeout_seconds`、`display.width` 做 fail-fast 校验。
+- 启动阶段必须对 `listen.interval_seconds`、`listen.load_retry_seconds`、`translate.timeout_seconds` 做 fail-fast 校验。
 - 运行时锁活性判断必须包含 `pid` 与进程启动时间 token，禁止仅靠 `pid` 判断。
 - 翻译任务队列必须有上限并具备溢出日志，禁止无界增长。
 - TTS 运行期必须输出可定位日志，至少覆盖触发、跳过/拒绝、合成开始、播放成功、失败原因，禁止把错误只留在对象内部状态。

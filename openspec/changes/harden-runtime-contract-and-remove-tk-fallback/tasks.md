@@ -24,6 +24,6 @@
 
 ## 5. Documentation and acceptance
 
-- [ ] 5.1 Update README, `config/listener.md`, and `docs/wechat-listening-pitfalls.md` so the supported desktop path, config contract, and rollback wording match the post-Tk boundary
-- [ ] 5.2 Remove legacy Tk packaging documentation and replace it with Tauri-only delivery guidance where needed
-- [ ] 5.3 Re-run the documented fast checks and release smoke commands, then record any environment-limited acceptance gaps before treating the change as complete
+- [x] 5.1 Update README, `config/listener.md`, and `docs/wechat-listening-pitfalls.md` so the supported desktop path, config contract, and rollback wording match the post-Tk boundary
+- [x] 5.2 Remove legacy Tk packaging documentation and replace it with Tauri-only delivery guidance where needed
+- [x] 5.3 Re-run the documented fast checks and release smoke commands, then record any environment-limited acceptance gaps before treating the change as complete
