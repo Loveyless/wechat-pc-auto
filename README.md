@@ -110,7 +110,7 @@ python listener_app/sidebar_translate_listener.py --config ".\config\listener.js
 
 - 开发运行：`backend_main.py + npm run dev`
 - sidecar 构建：`python scripts/build_desktop_shell_sidecars.py`
-- 前端/Rust 回归：`npm test` + `cargo test`
+- 前端/Rust 回归：`npm test` + `npm run build` + `cargo test`
 - 桌面壳调试：`npm run tauri dev`
 - 桌面壳构建：`npm run tauri build`
 
@@ -137,11 +137,15 @@ release 壳真正的最小交付闸口不是 “build 过了”，而是：
 python scripts/build_desktop_shell_sidecars.py --python python
 cd desktop-shell
 npm test
+npm run build
 cd src-tauri
 cargo test
 cd ..\..
 python scripts/smoke_desktop_shell_release.py
 ```
+
+`cargo test` 在干净环境里会读取 `desktop-shell/src-tauri/tauri.conf.json` 的 `frontendDist=../dist`。
+所以别再跳过 `npm run build`；你本地之所以偶尔“直接 cargo test 也能过”，通常只是因为上一次构建残留了 `desktop-shell/dist`。
 
 只有这套命令都过，才说明桌面壳的 `/healthz`、bootstrap log 和 single-instance 复用没有当场回归。
 

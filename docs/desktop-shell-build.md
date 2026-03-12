@@ -75,10 +75,14 @@ npm run tauri build
 ```bash
 cd desktop-shell
 npm test
+npm run build
 
 cd src-tauri
 cargo test
 ```
+
+别把 `npm run build` 省掉。
+`desktop-shell/src-tauri/tauri.conf.json` 把 `frontendDist` 固定指到 `../dist`；在干净环境里不先产出这个目录，`cargo test` 会直接在 `tauri::generate_context!()` 这里炸掉。
 
 ## 产物
 
@@ -144,9 +148,10 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 
 1. 执行 `python scripts/build_desktop_shell_sidecars.py --python python`
 2. 执行 `cd desktop-shell && npm test`
-3. 执行 `cd desktop-shell/src-tauri && cargo test`
-4. 执行 `python scripts/smoke_desktop_shell_release.py`
-5. 只有这四步都过，才允许把 release 壳当成可交付产物
+3. 执行 `cd desktop-shell && npm run build`
+4. 执行 `cd desktop-shell/src-tauri && cargo test`
+5. 执行 `python scripts/smoke_desktop_shell_release.py`
+6. 只有这五步都过，才允许把 release 壳当成可交付产物
 
 `scripts/smoke_desktop_shell_release.py` 会实际做这些事：
 
@@ -163,6 +168,7 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 - `python scripts/build_desktop_shell_sidecars.py --python python`
 - `cd desktop-shell && npm install`
 - `cd desktop-shell && npm test`
+- `cd desktop-shell && npm run build`
 - `cd desktop-shell/src-tauri && cargo test`
 - `python scripts/smoke_desktop_shell_release.py`
 
