@@ -1,6 +1,5 @@
 {
   "listen": {
-    "mode": "session",
     "targets": [
       "ssh 前端进阶交流群3群「禁广告」",
       "三元 AI 俱乐部",
@@ -8,13 +7,12 @@
       "产品出海交流群",
       "怂弟三角洲1群",
       "街道工作者交流群",
-      "哈佛"
+      "哈佛",
+      "霖"
     ],
-    "interval_seconds": 1.0,
+    "interval_seconds": 0.6,
     "load_retry_seconds": 10.0,
-    "dedupe_window_seconds": 2.5,
     "session_preview_dedupe_window_seconds": 20.0,
-    "cross_source_merge_window_seconds": 3.0,
     "focus_refresh": false,
     "worker_debug": false
   },
@@ -27,9 +25,14 @@
   },
   "display": {
     "english_only": true,
+    "tts_auto_read_active_chat": true,
     "on_translate_fail": "show_cn_with_reason",
-    "width": 420,
+    "width": 470,
     "side": "right"
+  },
+  "tts": {
+    "provider": "tencent_cloud",
+    "config_path": "config/tencent_tts.json"
   },
   "logging": {
     "file": "logs/sidebar_listener.log"

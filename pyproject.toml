@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wechat-pc-auto"                
 version = "1.1.2"
-description = "Stable WeChat PC automation tool: send messages, files, and auto-reply"
+description = "Stable WeChat PC session-preview listener with sidebar translation"
 readme = "README.md"
 authors = [{name = "YourName", email = "your@email.com"}]
 license = {text = "MIT"}
@@ -14,11 +14,12 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: Microsoft :: Windows",
 ]
-keywords = ["wechat", "automation", "uiautomation", "windows", "messaging", "auto-reply"]
+keywords = ["wechat", "listener", "uiautomation", "windows", "translation", "sidebar"]
 requires-python = ">=3.8"
 dependencies = [
     "uiautomation>=2.0.18",
-    "pyperclip>=1.8.2",
+    "websockets>=14.0",
+    "tencentcloud-sdk-python-tts>=3.0.0",
 ]
 
 [project.urls]

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "rig": {
+      "source": "0xplaygrounds/rig",
+      "sourceType": "github",
+      "computedHash": "06481901b2784d52c136bfc489e4c5bb903da502e268f9990f34052b9b094db3"
+    }
+  }
+}

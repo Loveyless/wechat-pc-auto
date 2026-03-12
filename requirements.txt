@@ -1,2 +1,3 @@
 uiautomation>=2.0.18
-pyperclip>=1.8.2
+websockets>=14.0
+tencentcloud-sdk-python-tts>=3.0.0

@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-background: hsl(225 15% 95%);
+  --color-foreground: hsl(224 20% 14%);
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(224 20% 14%);
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(224 20% 14%);
+  --color-primary: hsl(152 55% 42%);
+  --color-primary-foreground: hsl(0 0% 100%);
+  --color-secondary: hsl(220 14% 92%);
+  --color-secondary-foreground: hsl(224 12% 30%);
+  --color-muted: hsl(220 14% 92%);
+  --color-muted-foreground: hsl(220 8% 50%);
+  --color-accent: hsl(220 14% 92%);
+  --color-accent-foreground: hsl(224 12% 20%);
+  --color-destructive: hsl(0 72% 56%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+  --color-border: hsl(220 13% 88%);
+  --color-input: hsl(220 13% 88%);
+  --color-ring: hsl(152 55% 42%);
+  --radius: 0.625rem;
+
+  --color-sidebar-bg: hsl(224 22% 13%);
+  --color-sidebar-foreground: hsl(220 14% 72%);
+  --color-sidebar-active: hsl(152 55% 42%);
+  --color-sidebar-hover: hsl(224 18% 18%);
+
+  --color-sidebar-background: hsl(0 0% 98%);
+  --color-sidebar-primary: hsl(152 55% 42%);
+  --color-sidebar-primary-foreground: hsl(0 0% 100%);
+  --color-sidebar-accent: hsl(220 14% 92%);
+  --color-sidebar-accent-foreground: hsl(224 12% 20%);
+  --color-sidebar-border: hsl(220 13% 88%);
+  --color-sidebar-ring: hsl(152 55% 42%);
+
+  --sidebar-window-bg: rgba(255, 255, 255, 0.82);
+  --sidebar-window-bg-blurred: rgba(247, 248, 250, 0.92);
+  --sidebar-titlebar-bg: rgba(255, 255, 255, 0.72);
+  --sidebar-titlebar-bg-blurred: rgba(250, 250, 252, 0.88);
+  --sidebar-window-border: rgba(0, 0, 0, 0.06);
+  --sidebar-mode-switch-bg: rgba(0, 0, 0, 0.04);
+  --sidebar-mode-button-fg: rgba(107, 114, 128, 1);
+  --sidebar-mode-button-hover-fg: rgba(75, 85, 99, 1);
+  --sidebar-mode-button-active-bg: rgba(255, 255, 255, 0.94);
+  --sidebar-mode-button-active-fg: rgba(55, 65, 81, 1);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .dark {
+    --color-background: hsl(224 12% 8%);
+    --color-foreground: hsl(0 0% 93%);
+    --color-card: hsl(224 14% 12%);
+    --color-card-foreground: hsl(0 0% 93%);
+    --color-popover: hsl(224 14% 14%);
+    --color-popover-foreground: hsl(0 0% 93%);
+    --color-secondary: hsl(224 12% 16%);
+    --color-secondary-foreground: hsl(220 8% 75%);
+    --color-muted: hsl(224 12% 16%);
+    --color-muted-foreground: hsl(220 8% 55%);
+    --color-accent: hsl(224 12% 16%);
+    --color-accent-foreground: hsl(220 8% 80%);
+    --color-border: hsl(224 10% 18%);
+    --color-input: hsl(224 10% 18%);
+    --sidebar-window-bg: rgba(18, 20, 26, 0.92);
+    --sidebar-window-bg-blurred: rgba(20, 22, 28, 0.95);
+    --sidebar-titlebar-bg: rgba(28, 30, 38, 0.78);
+    --sidebar-titlebar-bg-blurred: rgba(24, 26, 34, 0.9);
+    --sidebar-window-border: rgba(255, 255, 255, 0.08);
+    --sidebar-mode-switch-bg: rgba(255, 255, 255, 0.06);
+    --sidebar-mode-button-fg: rgba(156, 163, 175, 1);
+    --sidebar-mode-button-hover-fg: rgba(209, 213, 219, 1);
+    --sidebar-mode-button-active-bg: rgba(255, 255, 255, 0.14);
+    --sidebar-mode-button-active-fg: rgba(229, 231, 235, 1);
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+  }
+  .dark .glass-card {
+    background: rgba(28, 30, 38, 0.82);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .sidebar-msg-card {
+    background: rgba(245, 246, 248, 0.7);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+  }
+  .sidebar-msg-card:hover {
+    background: rgba(240, 241, 244, 0.85);
+  }
+  .dark .sidebar-msg-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.04);
+  }
+  .dark .sidebar-msg-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .sidebar-msg-card-self {
+    background: rgba(52, 211, 153, 0.06);
+    border: 1px solid rgba(52, 211, 153, 0.1);
+  }
+  .sidebar-msg-card-self:hover {
+    background: rgba(52, 211, 153, 0.1);
+  }
+  .dark .sidebar-msg-card-self {
+    background: rgba(52, 211, 153, 0.04);
+    border-color: rgba(52, 211, 153, 0.08);
+  }
+  .dark .sidebar-msg-card-self:hover {
+    background: rgba(52, 211, 153, 0.07);
+  }
+
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 3px;
+  }
+  .sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 3px;
+  }
+  .dark .sidebar-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+
+@layer utilities {
+  .sidebar-shell {
+    background: var(--sidebar-window-bg);
+    border: 1px solid var(--sidebar-window-border);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+  .sidebar-shell[data-window-focus="false"] {
+    background: var(--sidebar-window-bg-blurred);
+  }
+  .sidebar-titlebar {
+    background: var(--sidebar-titlebar-bg);
+    border-bottom: 1px solid var(--sidebar-window-border);
+    backdrop-filter: blur(14px) saturate(180%);
+    -webkit-backdrop-filter: blur(14px) saturate(180%);
+  }
+  .sidebar-titlebar[data-window-focus="false"] {
+    background: var(--sidebar-titlebar-bg-blurred);
+  }
+  .sidebar-mode-switch {
+    background: var(--sidebar-mode-switch-bg);
+  }
+  .sidebar-mode-button {
+    color: var(--sidebar-mode-button-fg);
+  }
+  .sidebar-mode-button:hover {
+    color: var(--sidebar-mode-button-hover-fg);
+  }
+  .sidebar-mode-button-active {
+    background: var(--sidebar-mode-button-active-bg);
+    color: var(--sidebar-mode-button-active-fg);
+  }
+}

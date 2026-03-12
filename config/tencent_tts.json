@@ -1,0 +1,20 @@
+{
+  "provider": "tencent_cloud",
+  "secret_id": "",
+  "secret_key": "",
+  "secret_id_env": "TENCENTCLOUD_SECRET_ID",
+  "secret_key_env": "TENCENTCLOUD_SECRET_KEY",
+  "endpoint": "tts.tencentcloudapi.com",
+  "region": "",
+  "voice_type": 501008,
+  "codec": "wav",
+  "sample_rate": 16000,
+  "speed": 0.0,
+  "volume": 0.0,
+  "primary_language": 2,
+  "model_type": 1,
+  "project_id": 0,
+  "segment_rate": 0,
+  "enable_subtitle": false,
+  "request_timeout_seconds": 15.0
+}
