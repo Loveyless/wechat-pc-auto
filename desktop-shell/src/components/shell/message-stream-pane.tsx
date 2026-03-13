@@ -1,5 +1,4 @@
-import { StatusBadge } from "@/components/ui/status-badge"
-import { resolveMessagePresentation } from "@/components/shell/shell-view-model"
+import { MessageCard } from "@/components/shell/message-card"
 import type { ShellMessage, ShellSession } from "@/lib/shell-types"
 
 type MessageStreamPaneProps = {
@@ -29,43 +28,18 @@ export function MessageStreamPane({
             按会话分组，点左侧切换消息流并同步 active session。
           </p>
         </div>
+        <div className="rounded-[1rem] border border-border-subtle bg-workspace-canvas-strong/75 px-3 py-2 text-right">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
+            Messages
+          </p>
+          <p className="text-lg font-semibold text-text-primary">{selectedMessages.length}</p>
+        </div>
       </div>
 
       <div className="grid gap-4">
-        {selectedMessages.map((message) => {
-          const presentation = resolveMessagePresentation(message)
-
-          return (
-            <article
-              key={message.id}
-              className="rounded-[1.45rem] border border-border-subtle bg-surface-panel-strong/95 p-4"
-            >
-              <div className="mb-3 flex items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-text-primary">{message.sender}</p>
-                  <p className="text-xs text-text-muted">{message.time}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge tone={presentation.fidelityTone}>
-                    {presentation.fidelityLabel}
-                  </StatusBadge>
-                  {presentation.translationLabel && presentation.translationTone ? (
-                    <StatusBadge tone={presentation.translationTone}>
-                      {presentation.translationLabel}
-                    </StatusBadge>
-                  ) : null}
-                </div>
-              </div>
-
-              <p className="text-lg font-semibold leading-8 text-text-primary">
-                {presentation.primaryText}
-              </p>
-              <p className="mt-3 text-sm leading-6 text-text-secondary">
-                原始预览：{message.original}
-              </p>
-            </article>
-          )
-        })}
+        {selectedMessages.map((message) => (
+          <MessageCard key={message.id} message={message} />
+        ))}
       </div>
     </section>
   )
