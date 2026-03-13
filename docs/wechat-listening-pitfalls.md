@@ -416,6 +416,27 @@
 - `desktop-shell/src-tauri/src/backend_health.rs` 必须按“HTTP 200 + JSON `status == ok`”判活。
 - 这个协议是桌面壳 bootstrap 的硬契约，不允许再退回字符串猜测。
 
+### 27.2) 桌面壳信息层级如果还是一坨卡片，状态再全也会被用废
+现象：
+- 后端状态、会话导航、消息阅读都能渲染，但如果页面还是“同权重卡片墙”，用户会继续把 `starting` / `degraded` / `preview_only` 看漏。
+- 没有会话或没有消息时，如果页面只剩空白容器，用户会误判成前端挂了。
+
+处理：
+- 当前桌面壳首页必须稳定分成三层：
+  - `Runtime Overview`
+  - `Session Navigation`
+  - `Message Reading`
+- 当前连接态除了 overview 徽标，还会在非 `ready` 时额外显示页面级 connection banner；`startup_failed`、`degraded`、`reconnecting` 不能再共用一套模糊提示。
+- 当前会话导航行必须同时暴露这些信息，而且主次分明：
+  - 选中态
+  - 会话名
+  - 会话类型
+  - `preview_only` cue（非错误态）
+  - 最近更新时间
+  - 未读数
+- 当前消息卡必须把 `display/translated` 作为第一阅读层；原始预览只留在次级区块；`captureLevel=preview` 和 `pendingTranslation=true` 继续显示，但只能作为次级状态提示。
+- 当前桌面壳必须显式区分 `no sessions` 和 `no messages` 两种空态，且这两种空态的优先级低于 `startup_failed` / `degraded` / `reconnecting` 这类异常态。
+
 ### 28) `npm run tauri build` 现在已经能做一体化桌面壳，但密钥仍然必须外置
 现象：
 - `desktop-shell` 现在已经能产出 `wechat-auto-shell.exe`、`msi`、`nsis`，而且双击壳会自动拉起 backend sidecar。
@@ -533,6 +554,10 @@ npm run tauri build
 - 运行时锁活性判断必须包含 `pid` 与进程启动时间 token，禁止仅靠 `pid` 判断。
 - 翻译任务队列必须有上限并具备溢出日志，禁止无界增长。
 - TTS 运行期必须输出可定位日志，至少覆盖触发、跳过/拒绝、合成开始、播放成功、失败原因，禁止把错误只留在对象内部状态。
+- 桌面壳首页结构必须保持为 `Runtime Overview + Session Navigation + Message Reading` 三层，不允许再退回同权重的卡片墙。
+- `loading`、`starting`、`ready`、`startup_failed`、`degraded`、`reconnecting` 必须在桌面壳中被稳定区分；非 `ready` 状态必须有 overview 或页面级 banner 承接，禁止重新混成一类弱提示。
+- `preview_only` 必须在会话导航和消息阅读中作为非错误 fidelity cue 可见；禁止把预览态冒充完整正文，也禁止把它渲染成失败态。
+- `no sessions` 与 `no messages` 必须有显式空态，而且不能覆盖 `startup_failed` / `degraded` / `reconnecting` 这类更高优先级异常态。
 - 左侧消息（非自己消息）UI 头部展示格式为“`[时间] 发送人`”，正文只展示消息内容，不再重复 `发送人:` 前缀。
 - 消息正文字号比时间/昵称行大 `2px`；时间与昵称保持基础字号不变。
 - 时间与昵称颜色使用更深的灰色，避免在浅底主题下过淡难读。
