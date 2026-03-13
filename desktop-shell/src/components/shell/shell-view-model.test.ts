@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  resolveConnectionBannerState,
   resolveConnectionOverviewState,
   resolveDataEmptyState,
   resolveMessagePresentation,
@@ -32,6 +33,13 @@ describe("shell view model", () => {
     expect(resolveConnectionOverviewState("reconnecting", "")).toMatchObject({
       tone: "info",
     })
+    expect(resolveConnectionBannerState("degraded", "lagging")).toEqual({
+      label: "降级运行",
+      tone: "warning",
+      title: "Runtime 处于降级运行",
+      detail: "lagging",
+    })
+    expect(resolveConnectionBannerState("ready", "")).toBeNull()
   })
 
   it("maps session kind, unread, and preview fidelity to stable badge semantics", () => {

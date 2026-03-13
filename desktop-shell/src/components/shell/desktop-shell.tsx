@@ -1,4 +1,5 @@
 import { useDesktopShell } from "@/hooks/use-desktop-shell"
+import { ShellConnectionBanner } from "@/components/shell/shell-connection-banner"
 import { MessageStreamPane } from "@/components/shell/message-stream-pane"
 import { RuntimeOverviewPanel } from "@/components/shell/runtime-overview-panel"
 import { SessionListPane } from "@/components/shell/session-list-pane"
@@ -16,6 +17,11 @@ export function DesktopShell() {
           ttsState={shell.ttsState}
           backendInfo={shell.backendInfo}
           lastEvent={shell.lastEvent}
+          lastError={shell.lastError}
+        />
+
+        <ShellConnectionBanner
+          connectionState={shell.connectionState}
           lastError={shell.lastError}
         />
 

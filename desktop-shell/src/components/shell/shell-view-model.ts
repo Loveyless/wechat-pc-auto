@@ -15,6 +15,13 @@ export type ShellOverviewState = {
   detail: string
 }
 
+export type ShellConnectionBannerState = {
+  label: string
+  tone: StatusBadgeTone
+  title: string
+  detail: string
+}
+
 export type ShellDataEmptyState = "no-sessions" | "no-messages" | null
 
 export function resolveConnectionOverviewState(
@@ -64,6 +71,51 @@ export function resolveConnectionOverviewState(
         title: "正在恢复实时事件流",
         detail: lastError || "保留已知数据，同时等待 WebSocket 重新连回。",
       }
+  }
+}
+
+export function resolveConnectionBannerState(
+  connectionState: ShellConnectionState,
+  lastError: string,
+): ShellConnectionBannerState | null {
+  switch (connectionState) {
+    case "loading":
+      return {
+        label: "加载中",
+        tone: "neutral",
+        title: "正在拉取初始快照",
+        detail: "桌面壳正在等待 runtime snapshot 和首批会话，不应把这段时间误报成故障。",
+      }
+    case "starting":
+      return {
+        label: "启动中",
+        tone: "info",
+        title: "Backend 正在冷启动",
+        detail: "managed backend 冷启动阶段应稳定显示 starting，而不是提前掉进 reconnecting。",
+      }
+    case "startup_failed":
+      return {
+        label: "启动失败",
+        tone: "danger",
+        title: "Backend 启动失败",
+        detail: lastError || "启动失败必须在页面级明确暴露，不能只剩下角落里的错误字符串。",
+      }
+    case "degraded":
+      return {
+        label: "降级运行",
+        tone: "warning",
+        title: "Runtime 处于降级运行",
+        detail: lastError || "当前仍可看到已知快照，但链路并不完整，应该保留诊断线索。",
+      }
+    case "reconnecting":
+      return {
+        label: "重连中",
+        tone: "info",
+        title: "正在恢复实时事件流",
+        detail: lastError || "已知数据保留显示，同时等待事件流重新接上。",
+      }
+    case "ready":
+      return null
   }
 }
 
