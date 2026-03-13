@@ -2,12 +2,27 @@ import type { PropsWithChildren } from "react"
 
 import { cn } from "@/lib/utils"
 
-type StatusBadgeTone = "primary" | "neutral" | "accent"
+type StatusBadgeTone =
+  | "primary"
+  | "neutral"
+  | "accent"
+  | "success"
+  | "info"
+  | "warning"
+  | "danger"
+  | "preview"
+  | "unread"
 
 const toneClassName: Record<StatusBadgeTone, string> = {
-  primary: "border-primary/20 bg-primary/15 text-primary",
-  neutral: "border-border bg-muted/60 text-muted-foreground",
-  accent: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
+  primary: "border-state-progress/15 bg-state-progress-soft text-state-progress",
+  neutral: "border-border-subtle bg-surface-panel-muted/80 text-text-secondary",
+  accent: "border-state-info/15 bg-state-info-soft text-state-info",
+  success: "border-state-ready/15 bg-state-ready-soft text-state-ready",
+  info: "border-state-info/15 bg-state-info-soft text-state-info",
+  warning: "border-state-warning/15 bg-state-warning-soft text-state-warning",
+  danger: "border-state-danger/15 bg-state-danger-soft text-state-danger",
+  preview: "border-state-preview/20 bg-state-preview-soft text-state-preview",
+  unread: "border-state-progress/20 bg-state-progress text-text-inverse shadow-sm",
 }
 
 type StatusBadgeProps = PropsWithChildren<{
@@ -18,7 +33,7 @@ export function StatusBadge({ children, tone = "neutral" }: StatusBadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] uppercase",
         toneClassName[tone],
       )}
     >
