@@ -2,7 +2,7 @@ import type { PropsWithChildren } from "react"
 
 import { cn } from "@/lib/utils"
 
-type StatusBadgeTone =
+export type StatusBadgeTone =
   | "primary"
   | "neutral"
   | "accent"
