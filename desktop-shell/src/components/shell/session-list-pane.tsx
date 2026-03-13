@@ -1,15 +1,18 @@
+import { ShellEmptyState } from "@/components/shell/shell-empty-state"
 import { SessionRow } from "@/components/shell/session-row"
 import type { ShellSession } from "@/lib/shell-types"
 
 type SessionListPaneProps = {
   sessions: ShellSession[]
   selectedSessionId: string
+  showNoSessionsState: boolean
   onSelect: (sessionId: string) => void
 }
 
 export function SessionListPane({
   sessions,
   selectedSessionId,
+  showNoSessionsState,
   onSelect,
 }: SessionListPaneProps) {
   return (
@@ -37,18 +40,27 @@ export function SessionListPane({
         </p>
       </div>
 
-      <div className="space-y-2">
-        {sessions.map((session) => {
-          return (
-            <SessionRow
-              key={session.id}
-              session={session}
-              selected={session.id === selectedSessionId}
-              onSelect={onSelect}
-            />
-          )
-        })}
-      </div>
+      {showNoSessionsState ? (
+        <ShellEmptyState
+          eyebrow="No Sessions"
+          title="当前还没有可导航的会话"
+          detail="先确认 backend 已经产出会话快照，再看 session.list.updated 是否开始推送。"
+          icon="◎"
+        />
+      ) : (
+        <div className="space-y-2">
+          {sessions.map((session) => {
+            return (
+              <SessionRow
+                key={session.id}
+                session={session}
+                selected={session.id === selectedSessionId}
+                onSelect={onSelect}
+              />
+            )
+          })}
+        </div>
+      )}
     </aside>
   )
 }

@@ -1,16 +1,20 @@
 import { MessageCard } from "@/components/shell/message-card"
+import { ShellEmptyState } from "@/components/shell/shell-empty-state"
+import type { ShellDataEmptyState } from "@/components/shell/shell-view-model"
 import type { ShellMessage, ShellSession } from "@/lib/shell-types"
 
 type MessageStreamPaneProps = {
   sessions: ShellSession[]
   selectedSessionId: string
   selectedMessages: ShellMessage[]
+  emptyState: ShellDataEmptyState
 }
 
 export function MessageStreamPane({
   sessions,
   selectedSessionId,
   selectedMessages,
+  emptyState,
 }: MessageStreamPaneProps) {
   const selectedSession = sessions.find((session) => session.id === selectedSessionId)
 
@@ -36,11 +40,27 @@ export function MessageStreamPane({
         </div>
       </div>
 
-      <div className="grid gap-4">
-        {selectedMessages.map((message) => (
-          <MessageCard key={message.id} message={message} />
-        ))}
-      </div>
+      {emptyState === "no-sessions" ? (
+        <ShellEmptyState
+          eyebrow="No Sessions"
+          title="还没有会话可读"
+          detail="当前消息阅读区会跟随左侧会话导航；没有会话时，不应该继续显示空壳卡片。"
+          icon="◌"
+        />
+      ) : emptyState === "no-messages" ? (
+        <ShellEmptyState
+          eyebrow="No Messages"
+          title={`“${selectedSession?.name ?? "当前会话"}” 暂无消息`}
+          detail="会话已经选中，但当前还没有可展示的消息流；等下一次 hydrate 或事件推送即可。"
+          icon="◍"
+        />
+      ) : (
+        <div className="grid gap-4">
+          {selectedMessages.map((message) => (
+            <MessageCard key={message.id} message={message} />
+          ))}
+        </div>
+      )}
     </section>
   )
 }

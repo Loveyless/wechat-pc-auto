@@ -3,9 +3,16 @@ import { ShellConnectionBanner } from "@/components/shell/shell-connection-banne
 import { MessageStreamPane } from "@/components/shell/message-stream-pane"
 import { RuntimeOverviewPanel } from "@/components/shell/runtime-overview-panel"
 import { SessionListPane } from "@/components/shell/session-list-pane"
+import { resolveDataEmptyState } from "@/components/shell/shell-view-model"
 
 export function DesktopShell() {
   const shell = useDesktopShell()
+  const dataEmptyState = resolveDataEmptyState({
+    connectionState: shell.connectionState,
+    sessionCount: shell.sessions.length,
+    selectedSessionId: shell.selectedSessionId,
+    selectedMessageCount: shell.selectedMessages.length,
+  })
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -29,6 +36,7 @@ export function DesktopShell() {
           <SessionListPane
             sessions={shell.sessions}
             selectedSessionId={shell.selectedSessionId}
+            showNoSessionsState={dataEmptyState === "no-sessions"}
             onSelect={(sessionId) => {
               void shell.selectSession(sessionId)
             }}
@@ -37,6 +45,7 @@ export function DesktopShell() {
             sessions={shell.sessions}
             selectedSessionId={shell.selectedSessionId}
             selectedMessages={shell.selectedMessages}
+            emptyState={dataEmptyState}
           />
         </section>
       </div>
