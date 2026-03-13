@@ -1,29 +1,83 @@
 @import "tailwindcss";
 
 :root {
-  --background: #050816;
-  --foreground: #f8fafc;
-  --card: #0f172a;
-  --card-foreground: #f8fafc;
-  --popover: #050816;
-  --popover-foreground: #f8fafc;
-  --primary: #7dd3fc;
-  --primary-foreground: #082f49;
-  --secondary: #111827;
-  --secondary-foreground: #e5e7eb;
-  --muted: #0f172a;
-  --muted-foreground: #94a3b8;
-  --accent: #13203a;
-  --accent-foreground: #e0f2fe;
-  --destructive: #ef4444;
-  --destructive-foreground: #f8fafc;
-  --border: #1e293b;
-  --input: #1e293b;
-  --ring: #38bdf8;
-  --radius: 1rem;
+  --workspace-canvas: #f4efe5;
+  --workspace-canvas-strong: #fbf7ef;
+  --workspace-glow-primary: rgba(38, 126, 201, 0.18);
+  --workspace-glow-secondary: rgba(209, 137, 54, 0.16);
+  --surface-panel: #fff8ef;
+  --surface-panel-strong: #fffdf9;
+  --surface-panel-muted: #efe6d6;
+  --surface-panel-raised: #ffffff;
+  --surface-selected: #e6f1ff;
+  --surface-selected-strong: #d6e8ff;
+  --text-primary: #1d2632;
+  --text-secondary: #4f5e6f;
+  --text-muted: #728093;
+  --text-inverse: #fbf7ef;
+  --border-subtle: #d9d1c2;
+  --border-strong: #b7ad9d;
+  --state-ready: #1d8f60;
+  --state-ready-soft: #d8f1e6;
+  --state-progress: #2569c7;
+  --state-progress-soft: #dbe9ff;
+  --state-warning: #b87819;
+  --state-warning-soft: #f7ead3;
+  --state-danger: #c24f40;
+  --state-danger-soft: #f8ddd9;
+  --state-preview: #7b6631;
+  --state-preview-soft: #f4ead1;
+  --state-info: #445e88;
+  --state-info-soft: #e1e9f5;
+  --background: var(--workspace-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--surface-panel);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-panel-strong);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--state-progress);
+  --primary-foreground: var(--text-inverse);
+  --secondary: var(--surface-panel-muted);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--surface-panel-muted);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--surface-selected);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--state-danger);
+  --destructive-foreground: var(--text-inverse);
+  --border: var(--border-subtle);
+  --input: var(--border-strong);
+  --ring: rgba(37, 105, 199, 0.32);
+  --radius: 1.25rem;
 }
 
 @theme inline {
+  --color-workspace-canvas: var(--workspace-canvas);
+  --color-workspace-canvas-strong: var(--workspace-canvas-strong);
+  --color-surface-panel: var(--surface-panel);
+  --color-surface-panel-strong: var(--surface-panel-strong);
+  --color-surface-panel-muted: var(--surface-panel-muted);
+  --color-surface-panel-raised: var(--surface-panel-raised);
+  --color-surface-selected: var(--surface-selected);
+  --color-surface-selected-strong: var(--surface-selected-strong);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-inverse: var(--text-inverse);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-state-ready: var(--state-ready);
+  --color-state-ready-soft: var(--state-ready-soft);
+  --color-state-progress: var(--state-progress);
+  --color-state-progress-soft: var(--state-progress-soft);
+  --color-state-warning: var(--state-warning);
+  --color-state-warning-soft: var(--state-warning-soft);
+  --color-state-danger: var(--state-danger);
+  --color-state-danger-soft: var(--state-danger-soft);
+  --color-state-preview: var(--state-preview);
+  --color-state-preview-soft: var(--state-preview-soft);
+  --color-state-info: var(--state-info);
+  --color-state-info-soft: var(--state-info-soft);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -57,14 +111,21 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family:
-      Inter,
+      "Cascadia Code",
+      "JetBrains Mono",
+      SimHei,
+      "黑体",
       "Segoe UI",
-      "PingFang SC",
-      "Microsoft YaHei",
       sans-serif;
     background-image:
-      radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 28%),
-      radial-gradient(circle at top right, rgba(14, 165, 233, 0.08), transparent 24%);
+      radial-gradient(circle at top left, var(--workspace-glow-primary), transparent 30%),
+      radial-gradient(circle at top right, var(--workspace-glow-secondary), transparent 24%),
+      linear-gradient(180deg, var(--workspace-canvas-strong) 0%, var(--workspace-canvas) 58%);
     min-height: 100vh;
+  }
+
+  ::selection {
+    background: var(--surface-selected-strong);
+    color: var(--text-primary);
   }
 }
