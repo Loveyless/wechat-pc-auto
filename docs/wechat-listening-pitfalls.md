@@ -490,6 +490,42 @@
 - 二次启动只做两件事：记录 `single-instance relaunch detected, focus existing window`，然后聚焦已有 `main` 窗口。
 - release 验证必须实际跑 `python scripts/smoke_desktop_shell_release.py`，确认整轮里只有一次 `spawning backend sidecar`。
 
+### 30) GUI 配置保存不是热更新，也不是文件直通车
+现象：
+- 桌面壳设置页能读写配置后，最容易出现两种误判：
+  - 误以为前端拿到的是 `listener.json` / provider JSON 原文，可以随便回显 secret
+  - 误以为点了“保存”就该立刻影响当前 backend 运行态
+
+根因：
+- 当前设置页走的是 `GET /api/config` + `PUT /api/config` 安全 DTO 契约，不是原始文件直出。
+- backend 当前仍在启动时加载配置；保存负责落盘，不负责热更新现有 Python runtime。
+
+处理：
+- `/api/config` 返回 secret 只允许暴露 `configured/source/env_key` 元数据；`deeplx_url`、豆包 `appid/access_token`、腾讯云 `secret_id/secret_key` 都不允许回显原值。
+- `PUT /api/config` 必须继续遵守文件边界：
+  - shared 字段写回 `listener.json`
+  - provider 私有字段写回 `tts.config_path` 指向的独立 JSON
+  - 未知字段必须保留，不能因为 GUI 保存被顺手抹掉
+- secret 更新只能走 write-only 模式：`keep/direct/env/clear`；不要把“读取旧 secret 再原样发回去”这种伪方案塞回主路径。
+- `display.tts_auto_read_active_chat` 是持久化默认值；桌面壳顶部“朗读开/关”仍然只改当前 runtime，不会反写配置文件。
+
+### 31) “保存并应用”只能重启当前壳自己拥有的 backend
+现象：
+- 桌面壳已经知道后端地址后，最容易有人偷懒：无论 backend 是谁拉起的，都尝试在 GUI 里点“保存并应用”顺手重启。
+- 这会直接把外部 backend、开发态 backend，甚至别的壳实例复用的 backend 一起杀掉。
+
+根因：
+- backend 自己并不知道“当前连接是不是桌面壳自己拉起的 child”；ownership 真值只存在于 Tauri bootstrap 的 child handle + marker。
+- 当前主路径固定端口会复用现有 backend；不做 ownership 判断就去 kill，等于拿固定端口猜进程所有权。
+
+处理：
+- `get_backend_connection_info` 必须显式返回 `managed/ownsBackend/restartSupported`，前端只有在这三个条件和 `runtime.apply_strategy=restart_required` 同时满足时，才允许显示“保存并应用”。
+- `restart_owned_backend` 只能操作当前壳实例持有 child handle 且 marker 匹配的 sidecar；复用到的 fixed-port backend 一律退回 `save-only`。
+- apply 流程必须是：
+  1. `PUT /api/config` 先保存配置
+  2. Tauri `restart_owned_backend` 再重启 owned sidecar
+  3. 桌面壳复用现有 WebSocket close/reconnect + `/healthz` 恢复链路
+- “保存成功但 apply 失败”必须按真相上报：配置已经落盘，但当前重启未完成。不要把它伪装成“保存也失败”，否则 UI 状态和磁盘事实会分叉。
 ## 推荐运行命令
 
 ### 新主路径（推荐）
@@ -567,3 +603,4 @@ npm run tauri build
 - 默认行为必须是低干扰：
   - 不抢焦点（除非 `listen.focus_refresh=true`）
   - 不置顶（除非用户手动开启“置顶”开关）
+

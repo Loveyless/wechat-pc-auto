@@ -57,6 +57,27 @@ python scripts/smoke_desktop_shell_release.py
 
 更完整的测试 / 构建说明看 `docs/desktop-shell-build.md`。
 
+## 桌面壳设置页与 `/api/config` 契约
+
+- 桌面壳设置页只通过 `GET /api/config` 和 `PUT /api/config` 读写持久化配置；前端不允许直接改 `listener.json` 或 provider 私有 JSON。
+- `GET /api/config` 返回的是安全 DTO，不是原始文件直出：
+  - `translate` / `display` / `tts` 返回当前可编辑字段
+  - `runtime` 返回 `config_path`、`apply_strategy`、`restart_required`、`hot_reload_supported`
+  - `deeplx_url`、`appid`、`access_token`、`secret_id`、`secret_key` 这类 secret 只返回 `configured/source/env_key` 元数据，绝不回显原值
+- `PUT /api/config` 会按现有文件边界原子写入：
+  - `listener.json` 继续承载 shared 配置
+  - `tts.config_path` 指向的 provider 私有 JSON 继续承载豆包 / 腾讯云私有字段
+  - 未知字段必须保留，不能因为 GUI 保存被顺手删掉
+- secret 更新是 write-only 语义，当前支持四种模式：
+  - `keep`：保持现状
+  - `direct`：写入新的直接值
+  - `env`：改成环境变量名
+  - `clear`：清空现有配置
+- 当前主路径没有 config hot reload。
+  - 源码态或外部 backend 连接：只能 `save-only`，保存后必须手动重启 backend
+  - Tauri 托管且当前壳拥有 backend sidecar ownership：才允许 `保存并应用`
+  - `保存并应用` 本质上仍然是“先落盘，再重启当前壳自己拉起的 backend”，不是运行态热更新
+
 ## 完整配置示例
 
 ```json
@@ -138,6 +159,8 @@ python scripts/smoke_desktop_shell_release.py
 
 - `english_only`：是否只显示翻译后的文本
 - `tts_auto_read_active_chat`：是否自动朗读当前选中会话的新英文消息
+  - 这是持久化默认值
+  - 桌面壳顶部“朗读开/关”是 runtime-only toggle，通过 `/api/runtime/tts-auto-read` 更新当前运行态，不会反写这个字段
 - `on_translate_fail`：翻译失败回退策略
   - `show_cn_with_reason`
   - `show_cn`
