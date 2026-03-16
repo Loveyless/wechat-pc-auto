@@ -5,7 +5,7 @@ import os
 from typing import Any
 
 if __package__:
-    from .runtime_config import load_runtime_config
+    from .runtime_config import DEEPLX_ENV_FIELD, load_runtime_config
     from .sidebar_shared import (
         SUPPORTED_TRANSLATE_PROVIDERS,
         load_json_config,
@@ -40,7 +40,7 @@ if __package__:
         resolve_config_file_path,
     )
 else:
-    from runtime_config import load_runtime_config
+    from runtime_config import DEEPLX_ENV_FIELD, load_runtime_config
     from sidebar_shared import (
         SUPPORTED_TRANSLATE_PROVIDERS,
         load_json_config,
@@ -116,7 +116,7 @@ def build_config_snapshot(config_path: str) -> dict[str, Any]:
             "deeplx_url": _build_secret_status(
                 translate_cfg,
                 "deeplx_url",
-                "",
+                DEEPLX_ENV_FIELD,
                 default_env_key=DEEPLX_ENV_KEY,
             ),
         },
@@ -190,7 +190,7 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
     _apply_secret_update(
         next_translate,
         key="deeplx_url",
-        env_key_field="",
+        env_key_field=DEEPLX_ENV_FIELD,
         update=translate_secret_updates.get("deeplx_url"),
         field_path="translate.deeplx_url",
         default_env_key=DEEPLX_ENV_KEY,
@@ -199,7 +199,7 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
     effective_deeplx_url = _resolve_effective_secret_value(
         next_translate,
         "deeplx_url",
-        "",
+        DEEPLX_ENV_FIELD,
         default_env_key=DEEPLX_ENV_KEY,
     )
     try:
@@ -604,9 +604,7 @@ def _build_secret_status(
     default_env_key: str = "",
 ) -> dict[str, Any]:
     direct_value = str(raw.get(key) or "").strip()
-    env_name = default_env_key
-    if env_key_field:
-        env_name = str(raw.get(env_key_field) or default_env_key).strip()
+    env_name = _resolve_secret_env_name(raw, env_key_field, default_env_key=default_env_key)
     env_value = str(os.getenv(env_name, "")).strip() if env_name else ""
     if direct_value:
         payload: dict[str, Any] = {"configured": True, "source": "direct"}
@@ -672,12 +670,21 @@ def _resolve_effective_secret_value(
     direct_value = str(raw.get(key) or "").strip()
     if direct_value:
         return direct_value
-    env_name = default_env_key
-    if env_key_field:
-        env_name = str(raw.get(env_key_field) or default_env_key).strip()
+    env_name = _resolve_secret_env_name(raw, env_key_field, default_env_key=default_env_key)
     if env_name:
         return str(os.getenv(env_name, "")).strip()
     return ""
+
+
+def _resolve_secret_env_name(
+    raw: dict[str, Any],
+    env_key_field: str,
+    *,
+    default_env_key: str = "",
+) -> str:
+    if env_key_field:
+        return str(raw.get(env_key_field) or "").strip()
+    return str(default_env_key or "").strip()
 
 
 def _provider_config_paths(
@@ -821,7 +828,7 @@ def _field_error(field_path: str, message: str) -> ConfigValidationError:
 
 def _wrap_translate_validation_error(exc: RuntimeError) -> ConfigValidationError:
     message = str(exc)
-    if "DEEPLX_URL" in message or "deeplx_url" in message:
+    if "DEEPLX_URL" in message or "deeplx_url" in message or "deeplx_url_env" in message:
         return _field_error("translate.deeplx_url", message)
     return _field_error("translate", message)
 

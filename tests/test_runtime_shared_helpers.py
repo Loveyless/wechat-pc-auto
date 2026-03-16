@@ -58,6 +58,31 @@ sidebar = _load_sidebar_module()
 
 
 class RuntimeSharedHelpersTest(unittest.TestCase):
+    def test_save_listener_targets_config_allows_empty_targets(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = pathlib.Path(tmpdir) / "listener.json"
+            payload = {
+                "listen": {
+                    "targets": ["测试群"],
+                    "interval_seconds": 0.6,
+                },
+                "display": {
+                    "english_only": True,
+                },
+            }
+            config_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            sidebar.save_listener_targets_config(str(config_path), payload, [])
+
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(saved["listen"]["targets"], [])
+        self.assertEqual(payload["listen"]["targets"], [])
+
     def test_normalize_message_for_dedupe(self):
         raw = "  hello\u200b   world  "
         self.assertEqual(sidebar.normalize_message_for_dedupe(raw), "hello world")

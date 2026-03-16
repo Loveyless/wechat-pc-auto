@@ -131,10 +131,6 @@ def ensure_runtime_layout(
     return runtime_config_path
 
 
-ensure_runtime_layout()
-load_local_env()
-
-
 def load_json_config(path: str) -> Dict[str, Any]:
     # 仅接受 object 根节点，避免把数组/字符串误当配置。
     with open(path, "r", encoding="utf-8") as f:
@@ -171,11 +167,12 @@ def save_json_config_atomic(path: str, payload: Dict[str, Any]):
         raise
 
 
+ensure_runtime_layout()
+load_local_env()
+
+
 def save_listener_targets_config(path: str, config: Dict[str, Any], targets: list[str]):
     normalized_targets = normalize_targets(targets)
-    if not normalized_targets:
-        raise RuntimeError("listen.targets cannot be empty")
-
     payload = dict(config)
     listen_cfg = payload.get("listen", {})
     if not isinstance(listen_cfg, dict):

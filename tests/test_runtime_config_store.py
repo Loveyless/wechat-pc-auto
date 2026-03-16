@@ -180,12 +180,78 @@ class RuntimeConfigStoreTest(unittest.TestCase):
         self.assertEqual(listener_raw["display"]["width"], 470)
         self.assertEqual(listener_raw["display"]["on_translate_fail"], "show_cn")
         self.assertEqual(listener_raw["translate"]["deeplx_url"], "")
+        self.assertEqual(listener_raw["translate"]["deeplx_url_env"], "DEEPLX_URL")
         self.assertEqual(tencent_raw["extra_flag"], "keep-me")
         self.assertEqual(tencent_raw["secret_id"], "new-secret-id")
         self.assertEqual(tencent_raw["secret_key"], "")
         self.assertEqual(tencent_raw["secret_key_env"], "TENCENT_TEST_SECRET_KEY")
         self.assertNotIn("value", saved["tts"]["providers"]["tencent_cloud"]["secret_id"])
         self.assertEqual(saved["translate"]["deeplx_url"]["source"], "env")
+
+    def test_save_config_snapshot_clear_deeplx_url_disables_env_mode(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "DEEPLX_URL": "https://env.deeplx.local",
+                "TENCENT_TEST_SECRET_KEY": "env-secret",
+            },
+            clear=False,
+        ):
+            saved = save_config_snapshot(
+                str(listener_path),
+                {
+                    "translate": {
+                        "enabled": False,
+                        "provider": "deeplx",
+                        "source_lang": "auto",
+                        "target_lang": "EN",
+                        "timeout_seconds": 8.0,
+                    },
+                    "display": {
+                        "english_only": True,
+                        "tts_auto_read_active_chat": True,
+                        "on_translate_fail": "show_cn_with_reason",
+                    },
+                    "tts": {
+                        "provider": "tencent_cloud",
+                        "providers": {
+                            "tencent_cloud": {
+                                "endpoint": "tts.tencentcloudapi.com",
+                                "region": "",
+                                "voice_type": 501008,
+                                "codec": "wav",
+                                "sample_rate": 16000,
+                                "speed": 0.0,
+                                "volume": 0.0,
+                                "primary_language": 2,
+                                "model_type": 1,
+                                "project_id": 0,
+                                "segment_rate": 0,
+                                "enable_subtitle": False,
+                                "emotion_category": "",
+                                "emotion_intensity": 100,
+                                "request_timeout_seconds": 15.0,
+                            }
+                        },
+                    },
+                    "secret_updates": {
+                        "translate": {
+                            "deeplx_url": {
+                                "mode": "clear",
+                            }
+                        }
+                    },
+                },
+            )
+
+        listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
+        self.assertEqual(listener_raw["translate"]["deeplx_url"], "")
+        self.assertEqual(listener_raw["translate"]["deeplx_url_env"], "")
+        self.assertFalse(saved["translate"]["deeplx_url"]["configured"])
+        self.assertEqual(saved["translate"]["deeplx_url"]["source"], "unset")
 
     def test_save_config_snapshot_rejects_invalid_payload_without_mutating_files(self):
         listener_path, tencent_path, temp_dir = self._create_runtime_files()

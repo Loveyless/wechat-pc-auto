@@ -45,6 +45,9 @@ else:
     )
     from sidebar_tts import normalize_tts_provider
 
+DEEPLX_ENV_KEY = "DEEPLX_URL"
+DEEPLX_ENV_FIELD = "deeplx_url_env"
+
 
 @dataclass(slots=True)
 class RuntimeListenConfig:
@@ -90,6 +93,18 @@ class DesktopRuntimeConfig:
     translate: RuntimeTranslateConfig
     display: RuntimeDisplayConfig
     tts: RuntimeTTSConfig
+
+
+def _resolve_deeplx_url(translate_cfg: dict[str, Any]) -> str:
+    direct_value = str(translate_cfg.get("deeplx_url") or "").strip()
+    if direct_value:
+        return direct_value
+    env_name = str(translate_cfg.get(DEEPLX_ENV_FIELD) or "").strip()
+    if not env_name:
+        return ""
+    if env_name != DEEPLX_ENV_KEY:
+        raise RuntimeError(f"translate.{DEEPLX_ENV_FIELD} must be {DEEPLX_ENV_KEY}")
+    return str(os.getenv(env_name, "")).strip()
 
 
 def _read_config_section(payload: dict[str, Any], key: str) -> dict[str, Any]:
@@ -142,7 +157,7 @@ def load_runtime_config(config_path: str = DEFAULT_CONFIG_PATH) -> DesktopRuntim
 
     translate_enabled = as_bool(translate_cfg.get("enabled"), True)
     translate_provider = normalize_translate_provider(translate_cfg.get("provider", "deeplx"))
-    deeplx_url = str(translate_cfg.get("deeplx_url") or os.getenv("DEEPLX_URL", "")).strip()
+    deeplx_url = _resolve_deeplx_url(translate_cfg)
     timeout_seconds = read_config_float(translate_cfg, "timeout_seconds", 8.0)
     timeout_seconds = validate_positive_float("translate.timeout_seconds", timeout_seconds)
     validate_translate_config(translate_enabled, translate_provider, deeplx_url)

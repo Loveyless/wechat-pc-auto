@@ -29,6 +29,12 @@ class RuntimeModelsTest(unittest.TestCase):
 
 
 class RuntimeStoreTest(unittest.TestCase):
+    def test_snapshot_defaults_to_all_sessions_scope(self):
+        store = RuntimeStore(message_limit=2)
+        snapshot = store.snapshot()
+        self.assertEqual(snapshot["runtime"]["monitor_scope"], "all_sessions")
+        self.assertEqual(snapshot["runtime"]["message_fidelity"], "preview_only")
+
     def test_snapshot_contains_translation_and_tts_state(self):
         store = RuntimeStore(message_limit=2)
         store.set_translation_state(enabled=True, provider="deeplx", pending_count=1)

@@ -121,7 +121,71 @@ class RuntimeConfigTest(unittest.TestCase):
         )
 
         with mock.patch.dict(os.environ, {"DEEPLX_URL": ""}, clear=False):
-            with self.assertRaisesRegex(RuntimeError, "DEEPLX_URL"):
+            with self.assertRaisesRegex(RuntimeError, "deeplx_url"):
+                load_runtime_config(config_path)
+
+    def test_load_runtime_config_supports_explicit_deeplx_env_field(self):
+        config_path = self._write_config(
+            {
+                "listen": {
+                    "mode": "session",
+                },
+                "translate": {
+                    "enabled": True,
+                    "provider": "deeplx",
+                    "deeplx_url_env": "DEEPLX_URL",
+                },
+                "tts": {
+                    "provider": "windows_system",
+                },
+            }
+        )
+
+        with mock.patch.dict(os.environ, {"DEEPLX_URL": "https://env.deeplx.local"}, clear=False):
+            config = load_runtime_config(config_path)
+
+        self.assertEqual(config.translate.deeplx_url, "https://env.deeplx.local")
+
+    def test_load_runtime_config_blank_deeplx_env_disables_env_mode(self):
+        config_path = self._write_config(
+            {
+                "listen": {
+                    "mode": "session",
+                },
+                "translate": {
+                    "enabled": True,
+                    "provider": "deeplx",
+                    "deeplx_url_env": "",
+                },
+                "tts": {
+                    "provider": "windows_system",
+                },
+            }
+        )
+
+        with mock.patch.dict(os.environ, {"DEEPLX_URL": "https://env.deeplx.local"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "deeplx_url_env"):
+                load_runtime_config(config_path)
+
+    def test_load_runtime_config_rejects_custom_deeplx_env_key(self):
+        config_path = self._write_config(
+            {
+                "listen": {
+                    "mode": "session",
+                },
+                "translate": {
+                    "enabled": True,
+                    "provider": "deeplx",
+                    "deeplx_url_env": "CUSTOM_DEEPLX_URL",
+                },
+                "tts": {
+                    "provider": "windows_system",
+                },
+            }
+        )
+
+        with mock.patch.dict(os.environ, {"CUSTOM_DEEPLX_URL": "https://env.deeplx.local"}, clear=False):
+            with self.assertRaisesRegex(RuntimeError, "must be DEEPLX_URL"):
                 load_runtime_config(config_path)
 
     def test_load_runtime_config_keeps_legacy_display_fields_in_raw_payload_only(self):

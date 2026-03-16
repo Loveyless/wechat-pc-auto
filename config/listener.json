@@ -1,15 +1,5 @@
 {
   "listen": {
-    "targets": [
-      "ssh 前端进阶交流群3群「禁广告」",
-      "三元 AI 俱乐部",
-      "loopy的编程秘籍3",
-      "产品出海交流群",
-      "怂弟三角洲1群",
-      "街道工作者交流群",
-      "哈佛",
-      "霖"
-    ],
     "interval_seconds": 0.6,
     "load_retry_seconds": 10.0,
     "session_preview_dedupe_window_seconds": 20.0,
@@ -19,6 +9,7 @@
   "translate": {
     "enabled": true,
     "provider": "deeplx",
+    "deeplx_url_env": "DEEPLX_URL",
     "source_lang": "auto",
     "target_lang": "EN",
     "timeout_seconds": 8.0
@@ -26,9 +17,7 @@
   "display": {
     "english_only": true,
     "tts_auto_read_active_chat": true,
-    "on_translate_fail": "show_cn_with_reason",
-    "width": 470,
-    "side": "right"
+    "on_translate_fail": "show_cn_with_reason"
   },
   "tts": {
     "provider": "tencent_cloud",

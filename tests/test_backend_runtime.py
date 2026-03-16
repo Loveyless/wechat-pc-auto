@@ -44,14 +44,14 @@ class FakeTTSPlayer:
 
 
 class BackendRuntimeTest(unittest.TestCase):
-    def _write_config(self) -> str:
+    def _write_config(self, *, targets: list[str] | None = None) -> str:
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         path = Path(temp_dir.name) / "listener.json"
         payload = {
             "listen": {
                 "mode": "session",
-                "targets": ["测试群"],
+                "targets": list(targets) if targets is not None else ["测试群"],
                 "interval_seconds": 0.6,
                 "load_retry_seconds": 1.0,
             },
@@ -95,6 +95,29 @@ class BackendRuntimeTest(unittest.TestCase):
         self.assertEqual(snapshot["translation"]["provider"], "passthrough")
         self.assertEqual(snapshot["tts"]["provider"], "windows_system")
         self.assertTrue(snapshot["tts"]["available"])
+        service.stop()
+
+    @mock.patch("listener_app.backend_runtime.release_managed_target_locks")
+    @mock.patch("listener_app.backend_runtime.set_managed_target_lock_paths")
+    @mock.patch("listener_app.backend_runtime.acquire_target_lock", return_value=(True, "fake.lock"))
+    @mock.patch("listener_app.backend_runtime.cleanup_stale_target_locks", return_value=0)
+    @mock.patch("listener_app.backend_runtime.create_tts_player", return_value=(FakeTTSPlayer(), "tts ready"))
+    @mock.patch("listener_app.backend_runtime.start_worker_process", return_value=FakeWorkerProcess())
+    def test_start_allows_empty_targets_for_all_sessions_path(
+        self,
+        _start_worker_process,
+        _create_tts_player,
+        _cleanup_stale_target_locks,
+        acquire_target_lock,
+        _set_managed_target_lock_paths,
+        _release_managed_target_locks,
+    ):
+        service = BackendRuntimeService(config_path=self._write_config(targets=[]))
+        service.start()
+        time.sleep(0.05)
+        snapshot = service.snapshot()
+        self.assertEqual(snapshot["runtime"]["monitor_scope"], "all_sessions")
+        acquire_target_lock.assert_not_called()
         service.stop()
 
     def test_message_event_creates_preview_message(self):

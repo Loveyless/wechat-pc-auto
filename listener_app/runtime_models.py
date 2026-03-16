@@ -57,7 +57,7 @@ class RuntimeState:
     worker_state: str = "idle"
     worker_detail: str = ""
     active_session_id: str = ""
-    monitor_scope: str = "configured_targets"
+    monitor_scope: str = "all_sessions"
     message_fidelity: str = "preview_only"
     session_order: list[str] = field(default_factory=list)
 

@@ -132,7 +132,7 @@ def validate_translate_config(enabled: bool, provider: str, deeplx_url: str):
         return
     if provider == "deeplx" and not str(deeplx_url or "").strip():
         raise RuntimeError(
-            "translate.enabled=true and provider=deeplx require translate.deeplx_url or DEEPLX_URL"
+            "translate.enabled=true and provider=deeplx require translate.deeplx_url or translate.deeplx_url_env"
         )
 
 
@@ -163,7 +163,7 @@ def create_translator(
         raise RuntimeError(f"unsupported translator provider: {provider}")
     if not deeplx_url:
         raise RuntimeError(
-            "translate.enabled=true and provider=deeplx require translate.deeplx_url or DEEPLX_URL"
+            "translate.enabled=true and provider=deeplx require translate.deeplx_url or translate.deeplx_url_env"
         )
     return DeepLXTranslator(
         url=deeplx_url,
