@@ -13,6 +13,8 @@ const managedInfo: BackendConnectionInfo = {
   httpBaseUrl: "http://127.0.0.1:8765",
   wsUrl: "ws://127.0.0.1:8766/events",
   managed: true,
+  ownsBackend: true,
+  restartSupported: true,
   startupError: "",
   runtimeRoot: "C:/runtime",
 }
