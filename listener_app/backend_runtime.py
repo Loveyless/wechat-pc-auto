@@ -11,6 +11,7 @@ from typing import Any
 
 if __package__:
     from .runtime_config import DesktopRuntimeConfig, load_runtime_config
+    from .runtime_config_store import build_config_snapshot, save_config_snapshot
     from .runtime_engine import ListenerRuntime
     from .sidebar_runtime_support import (
         acquire_target_lock,
@@ -61,6 +62,7 @@ if __package__:
     )
 else:
     from runtime_config import DesktopRuntimeConfig, load_runtime_config
+    from runtime_config_store import build_config_snapshot, save_config_snapshot
     from runtime_engine import ListenerRuntime
     from sidebar_runtime_support import (
         acquire_target_lock,
@@ -295,36 +297,31 @@ class BackendRuntimeService:
     def set_active_session(self, session_id: str) -> None:
         self.runtime.set_active_session(session_id)
 
-    def get_config_snapshot(self) -> dict[str, Any]:
+    def set_tts_auto_read_enabled(self, enabled: bool) -> dict[str, Any]:
         settings = self.settings
         if settings is None:
-            return {}
-        return {
-            "listen": {
-                "mode": "session",
-                "scope": "all_sessions",
-                "targets": list(self._running_targets or settings.targets),
-                "interval_seconds": settings.listen_interval,
-                "focus_refresh": settings.focus_refresh,
-                "load_retry_seconds": settings.load_retry_seconds,
-                "session_preview_dedupe_window_seconds": settings.session_preview_dedupe_window_seconds,
-            },
-            "translate": {
-                "enabled": settings.translate_enabled,
-                "provider": settings.translate_provider,
-            },
-            "display": {
-                "english_only": settings.english_only,
-                "tts_auto_read_active_chat": settings.tts_auto_read_active_chat,
-            },
-            "tts": {
-                "provider": settings.tts_provider,
-                "available": settings.tts_player is not None,
-            },
-            "runtime": {
-                "config_path": settings.config_path,
-            },
-        }
+            raise RuntimeError("backend runtime not started")
+        next_enabled = bool(enabled)
+        settings.tts_auto_read_active_chat = next_enabled
+        self.runtime.set_tts_auto_read_enabled(next_enabled)
+        active_session_id = str(self.snapshot().get("runtime", {}).get("active_session_id", ""))
+        self.runtime.publish_tts_event(
+            action="toggle_auto_read",
+            session_id=active_session_id,
+            accepted=True,
+            detail="",
+            auto_read_enabled=next_enabled,
+        )
+        self._log_line(
+            f"tts auto_read {'enabled' if next_enabled else 'disabled'} by runtime api"
+        )
+        return self.snapshot().get("tts", {})
+
+    def get_config_snapshot(self) -> dict[str, Any]:
+        return build_config_snapshot(self.config_path)
+
+    def save_config_snapshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return save_config_snapshot(self.config_path, payload)
 
     def get_health_snapshot(self) -> dict[str, str]:
         return self.health.snapshot()

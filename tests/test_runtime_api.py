@@ -1,12 +1,13 @@
 import asyncio
 import json
 import unittest
-from urllib import request
+from urllib import error, request
 
 from websockets.asyncio.client import connect
 
 from listener_app.runtime_api import RuntimeApiServer
 from listener_app.runtime_engine import ListenerRuntime
+from listener_app.runtime_config_store import ConfigValidationError
 
 
 class FakeService:
@@ -14,11 +15,22 @@ class FakeService:
         self.runtime = ListenerRuntime(message_limit=20)
         self._health = {"status": "starting", "detail": "booting", "worker_state": "idle"}
         self._config = {
-            "listen": {"mode": "session", "targets": ["测试群"], "interval_seconds": 0.6},
-            "translate": {"enabled": False, "provider": "passthrough"},
+            "translate": {
+                "enabled": False,
+                "provider": "passthrough",
+                "available_providers": ["deeplx", "passthrough"],
+                "deeplx_url": {"configured": False, "source": "env", "env_key": "DEEPLX_URL"},
+            },
             "display": {"english_only": True, "tts_auto_read_active_chat": True},
-            "tts": {"provider": "windows_system", "available": True},
+            "tts": {
+                "provider": "windows_system",
+                "available_providers": ["windows_system", "doubao", "tencent_cloud"],
+                "providers": {"windows_system": {}, "doubao": {}, "tencent_cloud": {}},
+            },
+            "runtime": {"config_path": "D:/mock/config/listener.json"},
         }
+        self._saved_payload = None
+        self._save_error: Exception | None = None
 
     def snapshot(self):
         return self.runtime.snapshot()
@@ -30,6 +42,12 @@ class FakeService:
         return self.runtime.get_session_messages(session_id)
 
     def get_config_snapshot(self):
+        return dict(self._config)
+
+    def save_config_snapshot(self, payload: dict):
+        if self._save_error is not None:
+            raise self._save_error
+        self._saved_payload = dict(payload)
         return dict(self._config)
 
     def get_health_snapshot(self):
@@ -66,6 +84,20 @@ class RuntimeApiServerTest(unittest.TestCase):
         with request.urlopen(req, timeout=3) as response:
             return json.loads(response.read().decode("utf-8"))
 
+    def _json_put(self, path: str, payload: dict) -> tuple[int, dict]:
+        raw = json.dumps(payload).encode("utf-8")
+        req = request.Request(
+            f"{self.server.http_base_url}{path}",
+            data=raw,
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        try:
+            with request.urlopen(req, timeout=3) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+
     def test_http_runtime_endpoint_exposes_cors_headers(self):
         with request.urlopen(f"{self.server.http_base_url}/api/runtime", timeout=3) as response:
             self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
@@ -84,7 +116,7 @@ class RuntimeApiServerTest(unittest.TestCase):
         self.assertIn("runtime", runtime_payload)
         self.assertEqual(len(sessions_payload["items"]), 1)
         self.assertEqual(len(messages_payload["items"]), 1)
-        self.assertEqual(config_payload["listen"]["mode"], "session")
+        self.assertEqual(config_payload["translate"]["provider"], "passthrough")
 
     def test_http_health_endpoint_uses_service_snapshot(self):
         self.service._health = {
@@ -133,6 +165,22 @@ class RuntimeApiServerTest(unittest.TestCase):
     def test_http_active_session_control(self):
         payload = self._json_post("/api/runtime/active-session", {"session_id": "测试群"})
         self.assertEqual(payload["runtime"]["active_session_id"], "测试群")
+
+    def test_http_put_config_returns_saved_snapshot(self):
+        status, payload = self._json_put("/api/config", {"display": {"english_only": False}})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["config"]["runtime"]["config_path"], "D:/mock/config/listener.json")
+        self.assertEqual(self.service._saved_payload, {"display": {"english_only": False}})
+
+    def test_http_put_config_returns_field_errors(self):
+        self.service._save_error = ConfigValidationError(
+            "config validation failed",
+            field_errors={"tts.provider": "invalid provider"},
+        )
+        status, payload = self._json_put("/api/config", {"tts": {"provider": "bad"}})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "validation_failed")
+        self.assertEqual(payload["field_errors"]["tts.provider"], "invalid provider")
 
     def test_websocket_stream_emits_runtime_events(self):
         async def run_test():

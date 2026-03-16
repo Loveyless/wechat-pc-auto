@@ -12,6 +12,11 @@ from urllib.parse import unquote, urlparse
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
 
+if __package__:
+    from .runtime_config_store import ConfigValidationError
+else:
+    from runtime_config_store import ConfigValidationError
+
 DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 8765
 DEFAULT_WS_PORT = 8766
@@ -83,7 +88,7 @@ class RuntimeApiServer:
         class RuntimeRequestHandler(BaseHTTPRequestHandler):
             def _send_cors_headers(self) -> None:
                 self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
             def _read_json_body(self) -> dict[str, Any]:
@@ -149,20 +154,60 @@ class RuntimeApiServer:
             def do_POST(self) -> None:
                 parsed = urlparse(self.path)
                 path = parsed.path
-                if path != "/api/runtime/active-session":
-                    self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-                    return
                 try:
                     payload = self._read_json_body()
                 except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
                     self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
                     return
-                session_id = str(payload.get("session_id", "")).strip()
-                service.set_active_session(session_id)
-                self._send_json(
-                    HTTPStatus.OK,
-                    {"runtime": service.snapshot().get("runtime", {})},
-                )
+                if path == "/api/runtime/active-session":
+                    session_id = str(payload.get("session_id", "")).strip()
+                    service.set_active_session(session_id)
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"runtime": service.snapshot().get("runtime", {})},
+                    )
+                    return
+                if path == "/api/runtime/tts-auto-read":
+                    enabled = payload.get("enabled")
+                    if not isinstance(enabled, bool):
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"error": "enabled must be boolean"},
+                        )
+                        return
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {"tts": service.set_tts_auto_read_enabled(enabled)},
+                    )
+                    return
+                self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+
+            def do_PUT(self) -> None:
+                parsed = urlparse(self.path)
+                path = parsed.path
+                if path != "/api/config":
+                    self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
+                    return
+                try:
+                    payload = self._read_json_body()
+                    saved = service.save_config_snapshot(payload)
+                except ConfigValidationError as exc:
+                    self._send_json(
+                        HTTPStatus.BAD_REQUEST,
+                        {
+                            "error": "validation_failed",
+                            "message": str(exc),
+                            "field_errors": exc.field_errors,
+                        },
+                    )
+                    return
+                except RuntimeError as exc:
+                    self._send_json(
+                        HTTPStatus.BAD_REQUEST,
+                        {"error": "save_failed", "message": str(exc)},
+                    )
+                    return
+                self._send_json(HTTPStatus.OK, {"config": saved})
 
             def log_message(self, format: str, *args: Any) -> None:
                 logger = getattr(service, "_log_line", None)
