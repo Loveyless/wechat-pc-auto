@@ -8,7 +8,6 @@ export type ShellConnectionState =
 
 export type ShellSession = {
   id: string
-  kind: "group" | "private" | "unknown"
   name: string
   preview: string
   unread: number
@@ -90,5 +89,5 @@ export type BackendEvent =
   | { event: "session.list.updated"; payload: { items: BackendSession[] } }
   | { event: "message.created"; payload: BackendMessage }
   | { event: "translation.updated"; payload: BackendMessage }
-  | { event: "tts.updated"; payload: { action: string; session_id: string; message_id: string; accepted: boolean; provider: string; detail: string } }
+  | { event: "tts.updated"; payload: { action: string; session_id: string; message_id: string; accepted: boolean; provider: string; detail: string; auto_read_enabled?: boolean } }
   | { event: "error.reported"; payload: { source: string; message: string; detail: string } }

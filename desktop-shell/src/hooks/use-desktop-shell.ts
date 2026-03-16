@@ -9,6 +9,7 @@ import {
   fetchSnapshot,
   resolveBackendConnectionInfo,
   setActiveSession,
+  setTtsAutoReadEnabled as requestSetTtsAutoReadEnabled,
 } from "@/lib/api"
 import type {
   BackendEvent,
@@ -33,13 +34,6 @@ import {
   resolveHydrationConnectionState,
 } from "@/hooks/desktop-shell-connection"
 
-function inferSessionKind(name: string): ShellSession["kind"] {
-  if (!name) {
-    return "unknown"
-  }
-  return /群|Group/i.test(name) ? "group" : "private"
-}
-
 function mapSession(session: {
   session_id: string
   session_name: string
@@ -50,7 +44,6 @@ function mapSession(session: {
 }): ShellSession {
   return {
     id: session.session_id,
-    kind: inferSessionKind(session.session_name),
     name: session.session_name,
     preview: session.latest_preview,
     unread: session.unread_count,
@@ -101,6 +94,8 @@ const DEFAULT_BACKEND_INFO: BackendConnectionInfo = {
   httpBaseUrl: import.meta.env.VITE_BACKEND_HTTP_URL ?? "http://127.0.0.1:8765",
   wsUrl: import.meta.env.VITE_BACKEND_WS_URL ?? "ws://127.0.0.1:8766/events",
   managed: false,
+  ownsBackend: false,
+  restartSupported: false,
   startupError: "",
   runtimeRoot: "",
 }
@@ -273,6 +268,10 @@ export function useDesktopShell() {
     if (event.event === "tts.updated") {
       setTtsState((current) => ({
         ...current,
+        auto_read_enabled:
+          typeof event.payload.auto_read_enabled === "boolean"
+            ? event.payload.auto_read_enabled
+            : current.auto_read_enabled,
         last_error: event.payload.accepted ? "" : event.payload.detail,
       }))
       return
@@ -397,6 +396,20 @@ export function useDesktopShell() {
     return messagesBySession[selectedSessionId] ?? []
   }, [messagesBySession, selectedSessionId])
 
+  const setTtsAutoReadEnabled = useCallback(async (enabled: boolean) => {
+    try {
+      const response = await requestSetTtsAutoReadEnabled(enabled)
+      if (unmountedRef.current) {
+        return
+      }
+      setTtsState(response.tts)
+      setLastError("")
+    } catch (error) {
+      setLastError(error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  }, [])
+
   return {
     connectionState,
     runtimeState,
@@ -408,6 +421,7 @@ export function useDesktopShell() {
     lastError,
     lastEvent,
     selectSession,
+    setTtsAutoReadEnabled,
     backendInfo,
   }
 }
