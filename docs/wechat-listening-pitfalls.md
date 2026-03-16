@@ -35,6 +35,7 @@
 - UI 私有状态、provider 私有配置和 shared helper 不应再混堆；否则 shared 很快又会退化成垃圾桶。
 - 当前监听主链路已收敛为 `session-only + preview-only`。
 - 新主路径 worker 为单进程全会话预览扫描：一次扫描微信主窗口左侧会话列表，覆盖当前可见的群聊和私聊会话。
+- 桌面壳会话列表只保留名称、时间、预览文案和未读数；不再显示每行“私聊/群聊”或“预览”标签，避免把全局 `preview-only` 语义误导成会话级实时状态。
 - 新主路径桌面壳必须保持 `single-instance`：第二次启动只聚焦已有窗口，不允许额外拉起第二个壳窗口。
 - 当前主路径不再维护 `chat` / `mixed` 监听模式；相关复杂度已从主链路删除。
 - 当前分支不再维护任何主动操作微信的能力（发送消息、发送文件、自动回复、写输入框）。
@@ -218,14 +219,15 @@
 ### 17) 配置脏值导致运行中崩溃
 现象：
 - `listen.interval_seconds<0.2` 或 `translate.timeout_seconds<=0` 时，worker/翻译线程会在运行期报错。
-- `translate.enabled=true` 但未配置 `translate.deeplx_url` / `DEEPLX_URL` 时，旧逻辑会静默降级成原文透传，用户误以为翻译正常。
+- `translate.enabled=true` 但未配置 `translate.deeplx_url` / `translate.deeplx_url_env` 时，旧逻辑会静默降级成原文透传，用户误以为翻译正常。
 
 处理：
 - 主路径后端启动时对关键配置做 fail-fast 校验，不合法直接退出并打印错误：
   - `listen.interval_seconds >= 0.2`
   - `listen.load_retry_seconds > 0`
   - `translate.timeout_seconds > 0`
-  - `translate.enabled=true and provider=deeplx` 时必须存在 `translate.deeplx_url` 或 `DEEPLX_URL`
+  - `translate.enabled=true and provider=deeplx` 时必须存在 `translate.deeplx_url` 或 `translate.deeplx_url_env`
+  - `translate.deeplx_url_env` 只允许 `DEEPLX_URL`
 
 ### 18) 监听体感慢，不一定是 UIA 本身
 现象：
@@ -259,10 +261,10 @@
 - 主程序在 frozen 环境下不再拉 `.py` 文件，而是直接拉同目录的 `group_listener_worker.exe`。
 - 打包态默认配置、日志、`.env.local`、运行时锁都按主程序目录解析，不再写回源码目录。
 
-### 20) 打包态目标名乱码，左侧多出脏会话项
+### 20) 打包态会话名乱码，左侧多出脏会话项
 现象：
-- 源码运行时目标名正常，打包后侧边栏左侧会出现 `����` 之类乱码项。
-- 配置里的目标群明明在监听列表里，但实际消息跑进了一个乱码新项里。
+- 源码运行时会话名正常，打包后侧边栏左侧会出现 `����` 之类乱码项。
+- 实际预览消息会被归到乱码会话项里，看起来像“凭空多了一条脏会话”。
 
 根因：
 - `group_listener_worker.exe` 是独立子进程。
@@ -270,7 +272,8 @@
 
 处理：
 - worker 启动时强制把 stdout/stderr 重配置为 UTF-8，保证 JSON 行事件在源码态和打包态都维持同一编码契约。
-- 侧边栏 UI 在 `session-only` 分支只接受“当前运行 target 集”；它来自启动配置，外加用户在窗口中显式添加/删除并回写配置后的结果。未知 `chat_name` 一律丢弃，不再把脏事件扩展成新的左侧会话项。
+- 当前桌面壳会按 backend 推过来的 `session_snapshot` / `message` 事件建立会话列表；主路径看的是实际可见会话，不是 `listen.targets` 白名单。
+- 如果 `chat_name` 在子进程输出时就被解码坏，前端拿到的就是脏会话名；这类问题该查编码链路，不该回头怀疑“是不是没配目标群”。
 
 ### 21) 语音/视频/动画表情占位污染翻译结果
 现象：
@@ -280,7 +283,8 @@
 处理：
 - 在主进程进入翻译前，先过滤明显的媒体占位文本（图片、视频、动画表情、语音等）。
 - 当前额外启用了一条激进兜底：凡是整条消息被 ASCII 方括号完整包住（`[ ... ]`），一律按占位文本过滤，不再送翻译。
-- 侧边栏头部增加“原文”开关，便于在不改配置的情况下切换查看消息原文，继续补充新的占位样本。
+- 桌面壳顶部功能区提供“原文”开关，默认关闭；打开后才在消息阅读区展开原始预览。
+- 这类“原文”开关属于前端显示状态，不回写运行配置。
 - `Right` / `Ctrl+Right` 都会复用同一个“原文”开关状态，而不是额外维护一套快捷键私有状态；否则复选框状态和实际显示很容易跑偏。
 
 ### 21.1) 带 `http://` / `https://` 的链接消息不该进翻译链路
@@ -322,9 +326,10 @@
 
 处理：
 - 自动朗读的判定只看“当前选中会话”，不看操作系统焦点。
-- 仅当 `display.tts_auto_read_active_chat=true`、原文关闭、翻译结果可判定为英文时，当前选中会话的新消息才自动朗读。
+- 仅当 `display.tts_auto_read_active_chat=true`，且当前选中会话收到可朗读的英文译文时，当前会话的新消息才自动朗读。
 - 自动朗读在翻译结果落地时触发，不在 `Loading...` 占位阶段触发。
-- 配置项只决定启动默认值；运行中由侧边栏头部“朗读”开关接管。
+- 配置项只决定启动默认值；运行中由桌面壳顶部功能区“朗读”开关接管。
+- 这个“朗读”开关必须是真切换：桌面壳通过本地 API 更新 backend runtime 的 `tts.auto_read_enabled`，不能只改前端按钮样式。
 
 ### 24) TTS 出问题但日志看不见
 现象：
@@ -442,7 +447,7 @@
 现象：
 - `desktop-shell` 现在已经能产出 `wechat-auto-shell.exe`、`msi`、`nsis`，而且双击壳会自动拉起 backend sidecar。
 - 运行时配置、日志、锁会落到 `%LOCALAPPDATA%\com.wechatauto.shell`，不再写回源码目录。
-- 但如果 `translate.enabled=true` 且你既没在配置里写 `deeplx_url`，也没提供 `.env.local`，壳启动阶段仍会 fail-fast。
+- 但如果 `translate.enabled=true` 且你既没在配置里写 `deeplx_url` / `deeplx_url_env`，也没提供 `.env.local`，壳启动阶段仍会 fail-fast。
 
 根因：
 - `desktop-shell/package.json` 的 `pretauri` 会先构建 PyInstaller sidecar。
@@ -454,6 +459,7 @@
 - `tauri.conf.json` 继续显式维护 Windows `.ico`，否则 bundle 还是会直接失败。
 - 如果要让打包壳直接可用，至少满足下面任一条件：
   - `config/listener.json` 里显式提供 `translate.deeplx_url`
+  - `config/listener.json` 里显式提供 `translate.deeplx_url_env`
   - `%LOCALAPPDATA%\com.wechatauto.shell\.env.local` 存在
   - `wechat-auto-shell.exe` 同目录 `.env.local` 存在
 - 真正的最小验证不是“exe 打开了”，而是：
@@ -508,6 +514,8 @@
   - provider 私有字段写回 `tts.config_path` 指向的独立 JSON
   - 未知字段必须保留，不能因为 GUI 保存被顺手抹掉
 - secret 更新只能走 write-only 模式：`keep/direct/env/clear`；不要把“读取旧 secret 再原样发回去”这种伪方案塞回主路径。
+- GUI 的 `env` 模式只会写配置里的 `*_env` 字段，不会回写 `.env.local` 真值。
+- DeepLX 不再兼容隐式 env fallback；现有配置必须显式写 `translate.deeplx_url` 或 `translate.deeplx_url_env=DEEPLX_URL`，自定义 env key 不再受支持。
 - `display.tts_auto_read_active_chat` 是持久化默认值；桌面壳顶部“朗读开/关”仍然只改当前 runtime，不会反写配置文件。
 
 ### 31) “保存并应用”只能重启当前壳自己拥有的 backend
@@ -527,6 +535,7 @@
   2. Tauri `restart_owned_backend` 再重启 owned sidecar
   3. 桌面壳复用现有 WebSocket close/reconnect + `/healthz` 恢复链路
 - “保存成功但 apply 失败”必须按真相上报：配置已经落盘，但当前重启未完成。不要把它伪装成“保存也失败”，否则 UI 状态和磁盘事实会分叉。
+
 ## 推荐运行命令
 
 ### 新主路径（推荐）
@@ -563,14 +572,14 @@ npm run tauri build
 更具体的产物路径和验收边界看 `docs/desktop-shell-build.md`。
 
 ### 接入 DeepLX
-在 `config/listener.json` 设置 `translate.enabled=true` 且配置 `translate.deeplx_url`。
+在 `config/listener.json` 设置 `translate.enabled=true`，并显式配置 `translate.deeplx_url` 或 `translate.deeplx_url_env`。
 
 ### 仅在必要时开启强刷新（会抢焦点）
 在 `config/listener.json` 设置 `listen.focus_refresh=true`。
 
 ## 排障最小步骤
-1. 先看侧边栏状态是否为 `session-only ... running`。
-2. 再看 `logging.file` 指向的日志文件是否有 `status: running session-only targets=...`（相对路径按项目根目录解析）。
+1. 先看侧边栏状态是否进入 `running` / `waiting_wechat` / `reconnecting` 之一，不要再按“有没有配置目标群”判断主链路是否存活。
+2. 再看 `logging.file` 指向的日志文件是否有 `status: running all-session previews`（相对路径按项目根目录解析）。
 3. 若无消息事件，临时设 `listen.worker_debug=true`，观察 `debug target=... session_preview=... unread=...` 是否变化。
 4. `session_preview` 不变化时，再设 `listen.focus_refresh=true` 验证是否恢复。
 5. 若怀疑 TTS 无效，直接搜 `tts ` 关键字：
@@ -604,4 +613,3 @@ npm run tauri build
 - 默认行为必须是低干扰：
   - 不抢焦点（除非 `listen.focus_refresh=true`）
   - 不置顶（除非用户手动开启“置顶”开关）
-

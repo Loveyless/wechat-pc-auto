@@ -73,6 +73,9 @@ python scripts/smoke_desktop_shell_release.py
   - `direct`：写入新的直接值
   - `env`：改成环境变量名
   - `clear`：清空现有配置
+- GUI 不会写 `.env.local` 真值。
+  - `env` 模式只会更新配置文件中的 `*_env` 字段。
+  - DeepLX 在 GUI 中固定使用 `DEEPLX_URL`，不开放自定义 env key。
 - 当前主路径没有 config hot reload。
   - 源码态或外部 backend 连接：只能 `save-only`，保存后必须手动重启 backend
   - Tauri 托管且当前壳拥有 backend sidecar ownership：才允许 `保存并应用`
@@ -83,9 +86,6 @@ python scripts/smoke_desktop_shell_release.py
 ```json
 {
   "listen": {
-    "targets": [
-      "ssh 前端进阶交流群3群「禁广告」"
-    ],
     "interval_seconds": 0.6,
     "load_retry_seconds": 10.0,
     "session_preview_dedupe_window_seconds": 20.0,
@@ -95,7 +95,7 @@ python scripts/smoke_desktop_shell_release.py
   "translate": {
     "enabled": true,
     "provider": "deeplx",
-    "deeplx_url": "https://api.deeplx.org/<your-key>/translate",
+    "deeplx_url_env": "DEEPLX_URL",
     "source_lang": "auto",
     "target_lang": "EN",
     "timeout_seconds": 8.0
@@ -119,10 +119,6 @@ python scripts/smoke_desktop_shell_release.py
 
 ### `listen`
 
-- `targets`：兼容性保留字段。
-  - 当前主路径会读取并去重它，但不会再把它当成监听范围筛选条件。
-  - 主路径固定按 `all_sessions` 扫描左侧可见会话。
-  - 允许为空；为空不代表后端失效，只代表没有额外的兼容性 target 元数据。
 - `interval_seconds`：worker 轮询间隔（秒），默认 `0.6`
   - 必须 `>= 0.2`
   - 越小越实时，但 UIA 扫描频率和 CPU 占用也越高
@@ -142,8 +138,14 @@ python scripts/smoke_desktop_shell_release.py
   - `true`：调用翻译 provider
   - `false`：原文透传
 - `provider`：当前支持 `deeplx` / `passthrough`
-- `deeplx_url`：DeepLX 接口地址
-  - 当 `translate.enabled=true` 且 `provider=deeplx` 时，若配置值和 `DEEPLX_URL` 都为空，启动阶段会 fail-fast
+- `deeplx_url`：DeepLX 接口地址的直接值
+  - 适合把 URL 直接写进 `listener.json` 的场景
+- `deeplx_url_env`：DeepLX URL 对应的环境变量名
+  - 写了这个字段才会读环境变量
+  - 只允许写成 `DEEPLX_URL`
+  - 仓库默认值固定为 `DEEPLX_URL`
+  - 清空这个字段就等于显式关闭 env 模式，不会再偷偷 fallback
+  - 当 `translate.enabled=true` 且 `provider=deeplx` 时，若 `deeplx_url` 和 `deeplx_url_env` 都为空，启动阶段会 fail-fast
 - `source_lang`：源语言，通常填 `auto`
 - `target_lang`：目标语言，例如 `EN`
 - `timeout_seconds`：翻译请求超时（秒）
@@ -276,7 +278,7 @@ python scripts/smoke_desktop_shell_release.py
 ## 当前主路径运行语义
 
 - 主路径固定为 `session-only`，不会恢复 `chat` / `mixed`
-- 主路径固定按 `all_sessions` 扫描左侧可见会话，`listen.targets` 不决定监控范围
+- 主路径固定按 `all_sessions` 扫描左侧可见会话
 - `runtime.monitor_scope=all_sessions`
 - `runtime.message_fidelity=preview_only`
 - `/healthz` 只表达 backend runtime 是否能服务桌面壳，不表达“微信 worker 是否已经抓到消息”
