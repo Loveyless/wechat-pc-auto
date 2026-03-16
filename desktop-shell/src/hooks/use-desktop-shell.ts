@@ -410,6 +410,17 @@ export function useDesktopShell() {
     }
   }, [])
 
+  const refreshConnection = useCallback(async () => {
+    if (unmountedRef.current) {
+      return
+    }
+    setConnectionState("reconnecting")
+    setLastError("")
+    clearReconnectTimer()
+    closeSocket()
+    await connect(true)
+  }, [clearReconnectTimer, closeSocket, connect])
+
   return {
     connectionState,
     runtimeState,
@@ -422,6 +433,7 @@ export function useDesktopShell() {
     lastEvent,
     selectSession,
     setTtsAutoReadEnabled,
+    refreshConnection,
     backendInfo,
   }
 }

@@ -55,7 +55,9 @@ export function DesktopShell() {
   const [ttsTogglePending, setTtsTogglePending] = useState(false)
   const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true)
   const [compactSidebarVisible, setCompactSidebarVisible] = useState(false)
-  const settings = useDesktopSettings(shell.backendInfo)
+  const settings = useDesktopSettings(shell.backendInfo, {
+    onApply: shell.refreshConnection,
+  })
   const dataEmptyState = resolveDataEmptyState({
     connectionState: shell.connectionState,
     sessionCount: shell.sessions.length,

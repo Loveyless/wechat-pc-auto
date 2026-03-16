@@ -4,6 +4,7 @@ import {
   ConfigSaveError,
   type BackendConnectionInfo,
   fetchRuntimeConfig,
+  restartManagedBackend,
   saveRuntimeConfig,
 } from "@/lib/api"
 import type {
@@ -279,6 +280,80 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
+function resolveDesktopSettingsSavedNotice(
+  actionState: DesktopSettingsActionState,
+  applied: boolean,
+): string {
+  if (applied) {
+    return "配置已保存，并已重启当前托管 backend。桌面壳会按现有连接链路自动恢复。"
+  }
+  if (actionState.mode === "save_and_apply") {
+    return "配置已保存。当前连接已具备 apply 能力，可继续执行保存并应用。"
+  }
+  return "配置已保存。当前连接仅支持 save-only，需手动重启 backend 生效。"
+}
+
+export type PersistDesktopSettingsDependencies = {
+  saveConfig: (payload: DesktopSettingsSavePayload) => Promise<DesktopRuntimeConfig>
+  applyManagedRestart: () => Promise<BackendConnectionInfo>
+  onApplied?: (backendInfo: BackendConnectionInfo) => Promise<void> | void
+}
+
+export type PersistDesktopSettingsResult =
+  | {
+      outcome: "saved"
+      config: DesktopRuntimeConfig
+      notice: string
+    }
+  | {
+      outcome: "saved_apply_failed"
+      config: DesktopRuntimeConfig
+      errorMessage: string
+    }
+
+export async function persistDesktopSettings(params: {
+  draft: DesktopSettingsDraft
+  actionState: DesktopSettingsActionState
+  intent?: DesktopSettingsSaveIntent
+  deps: PersistDesktopSettingsDependencies
+}): Promise<PersistDesktopSettingsResult> {
+  const { draft, actionState, deps, intent = "save" } = params
+  const nextConfig = await deps.saveConfig(buildDesktopSettingsSavePayload(draft))
+  const shouldApply = intent === "apply" && actionState.mode === "save_and_apply"
+
+  if (!shouldApply) {
+    return {
+      outcome: "saved",
+      config: nextConfig,
+      notice: resolveDesktopSettingsSavedNotice(actionState, false),
+    }
+  }
+
+  try {
+    const backendInfo = await deps.applyManagedRestart()
+    try {
+      await deps.onApplied?.(backendInfo)
+    } catch {
+      // WebSocket close/reconnect is already the fallback recovery path.
+    }
+    return {
+      outcome: "saved",
+      config: nextConfig,
+      notice: resolveDesktopSettingsSavedNotice(actionState, true),
+    }
+  } catch (error) {
+    return {
+      outcome: "saved_apply_failed",
+      config: nextConfig,
+      errorMessage: resolveErrorMessage(error, "托管 backend 重启失败"),
+    }
+  }
+}
+
+type UseDesktopSettingsOptions = {
+  onApply?: (backendInfo: BackendConnectionInfo) => Promise<void> | void
+}
+
 export type UseDesktopSettingsResult = {
   isOpen: boolean
   openSettings: () => Promise<void>
@@ -331,6 +406,7 @@ export type UseDesktopSettingsResult = {
 
 export function useDesktopSettings(
   backendInfo: BackendConnectionInfo,
+  options: UseDesktopSettingsOptions = {},
 ): UseDesktopSettingsResult {
   const [isOpen, setIsOpen] = useState(false)
   const [config, setConfig] = useState<DesktopRuntimeConfig | null>(null)
@@ -419,7 +495,7 @@ export function useDesktopSettings(
   }, [loadSettings])
 
   const saveSettings = useCallback(
-    async (_intent: DesktopSettingsSaveIntent = "save") => {
+    async (intent: DesktopSettingsSaveIntent = "save") => {
       if (!draftState) {
         return false
       }
@@ -428,14 +504,23 @@ export function useDesktopSettings(
       setFieldErrors({})
       setSaveNotice("")
       try {
-        const nextConfig = await saveRuntimeConfig(buildDesktopSettingsSavePayload(draftState))
-        setConfig(nextConfig)
-        setDraftState(createDesktopSettingsDraft(nextConfig))
-        setSaveNotice(
-          actionState.mode === "save_and_apply"
-            ? "配置已保存。当前连接已具备 apply 能力，UI 可继续触发保存并应用。"
-            : "配置已保存。当前连接仅支持 save-only，需手动重启 backend 生效。",
-        )
+        const result = await persistDesktopSettings({
+          draft: draftState,
+          actionState,
+          intent,
+          deps: {
+            saveConfig: saveRuntimeConfig,
+            applyManagedRestart: restartManagedBackend,
+            onApplied: options.onApply,
+          },
+        })
+        setConfig(result.config)
+        setDraftState(createDesktopSettingsDraft(result.config))
+        if (result.outcome === "saved_apply_failed") {
+          setSaveError(`配置已保存，但应用失败：${result.errorMessage}`)
+          return false
+        }
+        setSaveNotice(result.notice)
         return true
       } catch (error) {
         if (error instanceof ConfigSaveError) {
@@ -449,7 +534,7 @@ export function useDesktopSettings(
         setSaving(false)
       }
     },
-    [actionState.mode, draftState],
+    [actionState, draftState, options.onApply],
   )
 
   const applyMode: DesktopSettingsApplyMode =

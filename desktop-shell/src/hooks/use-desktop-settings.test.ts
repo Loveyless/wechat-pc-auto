@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import type { BackendConnectionInfo } from "@/lib/api"
 import type { DesktopRuntimeConfig } from "@/lib/settings-types"
@@ -6,6 +6,7 @@ import {
   buildDesktopSettingsSavePayload,
   createDesktopSettingsDraft,
   isDesktopSettingsDirty,
+  persistDesktopSettings,
   resolveDesktopSettingsActionState,
 } from "@/hooks/use-desktop-settings"
 
@@ -174,5 +175,117 @@ describe("desktop settings state", () => {
         }),
       }).mode,
     ).toBe("save_only")
+  })
+
+  it("persists config before invoking managed apply and reconnect callback", async () => {
+    const config = createRuntimeConfig()
+    const draft = createDesktopSettingsDraft(config)
+    const callOrder: string[] = []
+    const actionState = resolveDesktopSettingsActionState({
+      config,
+      backendInfo: createBackendInfo({
+        managed: true,
+        ownsBackend: true,
+        restartSupported: true,
+      }),
+    })
+
+    const result = await persistDesktopSettings({
+      draft,
+      actionState,
+      intent: "apply",
+      deps: {
+        saveConfig: vi.fn(async () => {
+          callOrder.push("save")
+          return config
+        }),
+        applyManagedRestart: vi.fn(async () => {
+          callOrder.push("apply")
+          return createBackendInfo({
+            managed: true,
+            ownsBackend: true,
+            restartSupported: true,
+          })
+        }),
+        onApplied: vi.fn(async () => {
+          callOrder.push("notify")
+        }),
+      },
+    })
+
+    expect(result.outcome).toBe("saved")
+    if (result.outcome !== "saved") {
+      throw new Error("expected saved outcome")
+    }
+    expect(result.notice).toContain("已重启当前托管 backend")
+    expect(callOrder).toEqual(["save", "apply", "notify"])
+  })
+
+  it("does not invoke managed apply on save-only connections even if intent is apply", async () => {
+    const config = createRuntimeConfig()
+    const draft = createDesktopSettingsDraft(config)
+    const actionState = resolveDesktopSettingsActionState({
+      config,
+      backendInfo: createBackendInfo({
+        managed: true,
+        ownsBackend: false,
+        restartSupported: true,
+      }),
+    })
+    const applyManagedRestart = vi.fn(async () =>
+      createBackendInfo({
+        managed: true,
+        ownsBackend: true,
+        restartSupported: true,
+      }),
+    )
+
+    const result = await persistDesktopSettings({
+      draft,
+      actionState,
+      intent: "apply",
+      deps: {
+        saveConfig: vi.fn(async () => config),
+        applyManagedRestart,
+      },
+    })
+
+    expect(result.outcome).toBe("saved")
+    if (result.outcome !== "saved") {
+      throw new Error("expected saved outcome")
+    }
+    expect(result.notice).toContain("仅支持 save-only")
+    expect(applyManagedRestart).not.toHaveBeenCalled()
+  })
+
+  it("keeps the saved config result when managed apply fails", async () => {
+    const config = createRuntimeConfig()
+    const draft = createDesktopSettingsDraft(config)
+    const actionState = resolveDesktopSettingsActionState({
+      config,
+      backendInfo: createBackendInfo({
+        managed: true,
+        ownsBackend: true,
+        restartSupported: true,
+      }),
+    })
+
+    const result = await persistDesktopSettings({
+      draft,
+      actionState,
+      intent: "apply",
+      deps: {
+        saveConfig: vi.fn(async () => config),
+        applyManagedRestart: vi.fn(async () => {
+          throw new Error("restart backend failed")
+        }),
+      },
+    })
+
+    expect(result).toEqual({
+      outcome: "saved_apply_failed",
+      config,
+      errorMessage: "restart backend failed",
+    })
   })
 })

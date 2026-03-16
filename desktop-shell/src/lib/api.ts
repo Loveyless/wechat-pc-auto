@@ -194,6 +194,14 @@ export async function saveRuntimeConfig(payload: DesktopSettingsSavePayload) {
   throw new Error(errorMessage)
 }
 
+export async function restartManagedBackend() {
+  if (!isTauri()) {
+    throw new Error("保存并应用只支持 Tauri 托管桌面壳")
+  }
+  const payload = await invoke<Partial<BackendConnectionInfo>>("restart_owned_backend")
+  return normalizeBackendConnectionInfo(payload)
+}
+
 export async function createEventSocket(onEvent: (event: BackendEvent) => void) {
   const backendInfo = await requireBackendConnectionInfo()
   const socket = new WebSocket(backendInfo.wsUrl)
