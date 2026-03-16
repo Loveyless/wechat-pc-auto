@@ -1,7 +1,9 @@
 {
   "provider": "doubao",
   "endpoint": "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream",
+  "appid": "",
   "appid_env": "VOLCENGINE_TTS_APPID",
+  "access_token": "",
   "access_token_env": "VOLCENGINE_TTS_ACCESS_TOKEN",
   "resource_id": "seed-tts-2.0",
   "speaker": "en_female_dacey_uranus_bigtts",

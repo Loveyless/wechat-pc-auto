@@ -209,6 +209,8 @@ python scripts/smoke_desktop_shell_release.py
 
 ### `doubao_tts.json` 字段说明
 
+- 仓库跟踪的 `config/doubao_tts.json` 默认只保留安全默认值。
+- `appid` / `access_token` 在仓库默认值里应保持空串；真实凭证优先放 `.env.local` 或 Tauri 运行时目录对应的 `.env.local`。
 - `provider`：固定为 `doubao`
 - `endpoint`：单向流式 WebSocket 地址
 - `appid_env` / `access_token_env`：凭证环境变量名
@@ -250,6 +252,8 @@ python scripts/smoke_desktop_shell_release.py
 
 ### `tencent_tts.json` 字段说明
 
+- 仓库跟踪的 `config/tencent_tts.json` 默认只保留安全默认值。
+- `secret_id` / `secret_key` 在仓库默认值里应保持空串；真实凭证优先放 `.env.local` 或 Tauri 运行时目录对应的 `.env.local`。
 - `provider`：固定为 `tencent_cloud`
 - `secret_id` / `secret_key`：腾讯云密钥本体；推荐留空并通过环境变量注入
 - `secret_id_env` / `secret_key_env`：凭证环境变量名

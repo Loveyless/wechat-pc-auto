@@ -302,6 +302,7 @@
 - 正文点击范围只覆盖正文字符，不包括时间、发送人和空白区。
 - TTS provider 现在走独立配置：`listener.json` 只负责选择 `tts.provider`，provider 私有参数拆到独立 JSON（例如 `config/doubao_tts.json`、`config/tencent_tts.json`）。
 - 当前默认 provider 已切到 `tencent_cloud`；这会让启动默认依赖腾讯云凭证和 `config/tencent_tts.json`，不再像旧版那样天然只依赖本机系统语音。
+- 仓库跟踪的 provider JSON 只应保留安全默认值；豆包 `appid/access_token`、腾讯云 `secret_id/secret_key` 这类真实凭证应留在 `.env.local` 或 Tauri 运行时目录，不应写回仓库文件。
 - `tts.provider=windows_system` 时，仍走 Windows 系统 `System.Speech`，默认优先选 `Microsoft Zira Desktop`，不存在时再回退到其他英文 voice。
 - `tts.provider=doubao` 时，走豆包单向流式 WebSocket；当前播放链路要求 provider 配置里的 `audio_format=wav`，否则启动阶段直接报错。
 - `tts.provider=tencent_cloud` 时，走腾讯云基础语音合成 `TextToVoice`（官方 Python SDK）；当前播放链路同样只允许 `codec=wav`，不会顺手放开 `mp3/pcm`。
