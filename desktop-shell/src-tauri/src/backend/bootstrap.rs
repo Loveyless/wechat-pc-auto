@@ -43,6 +43,8 @@ pub struct BackendConnectionInfo {
     http_base_url: String,
     ws_url: String,
     managed: bool,
+    owns_backend: bool,
+    restart_supported: bool,
     startup_error: String,
     runtime_root: String,
 }
@@ -53,12 +55,16 @@ struct BackendPidMarker {
     start_token: String,
 }
 
-pub struct ManagedBackendState {
-    child: Mutex<Option<CommandChild>>,
+struct ManagedBackendMetadata {
     owns_child: bool,
     info: BackendConnectionInfo,
-    runtime_root: PathBuf,
     marker: Option<BackendPidMarker>,
+}
+
+pub struct ManagedBackendState {
+    child: Mutex<Option<CommandChild>>,
+    metadata: Mutex<ManagedBackendMetadata>,
+    runtime_root: PathBuf,
 }
 
 impl ManagedBackendState {
@@ -71,23 +77,115 @@ impl ManagedBackendState {
     ) -> Self {
         Self {
             child: Mutex::new(child),
-            owns_child,
-            info,
+            metadata: Mutex::new(ManagedBackendMetadata {
+                owns_child,
+                info,
+                marker,
+            }),
             runtime_root,
-            marker,
         }
     }
 
+    pub fn connection_info(&self) -> BackendConnectionInfo {
+        self.metadata.lock().unwrap().info.clone()
+    }
+
+    fn replace_backend_state(
+        &self,
+        info: BackendConnectionInfo,
+        child: Option<CommandChild>,
+        owns_child: bool,
+        marker: Option<BackendPidMarker>,
+    ) {
+        *self.child.lock().unwrap() = child;
+        *self.metadata.lock().unwrap() = ManagedBackendMetadata {
+            owns_child,
+            info,
+            marker,
+        };
+    }
+
     pub fn kill_owned_child(&self) {
-        if !self.owns_child {
-            return;
-        }
-        if let Some(marker) = self.marker.as_ref() {
+        let marker = {
+            let metadata = self.metadata.lock().unwrap();
+            if !metadata.owns_child {
+                return;
+            }
+            metadata.marker.clone()
+        };
+        if let Some(marker) = marker.as_ref() {
             clear_backend_marker_if_matches(&self.runtime_root, Some(marker));
         }
         let mut guard = self.child.lock().unwrap();
         if let Some(child) = guard.take() {
             let _ = child.kill();
+        }
+    }
+
+    fn take_owned_child_for_restart(&self) -> Result<(CommandChild, BackendPidMarker), String> {
+        let marker = {
+            let metadata = self.metadata.lock().unwrap();
+            if !metadata.owns_child || !metadata.info.owns_backend || !metadata.info.restart_supported
+            {
+                return Err("backend is not owned by the current shell".to_string());
+            }
+            metadata
+                .marker
+                .clone()
+                .ok_or_else(|| "owned backend marker is missing".to_string())?
+        };
+        clear_backend_marker_if_matches(&self.runtime_root, Some(&marker));
+        let child = {
+            let mut guard = self.child.lock().unwrap();
+            guard
+                .take()
+                .ok_or_else(|| "owned backend child handle is missing".to_string())?
+        };
+        self.replace_backend_state(
+            build_backend_info(&self.runtime_root, true, false, false, String::new()),
+            None,
+            false,
+            None,
+        );
+        Ok((child, marker))
+    }
+
+    fn set_restart_failure(&self, error: String) {
+        self.replace_backend_state(
+            build_backend_info(&self.runtime_root, false, false, false, error),
+            None,
+            false,
+            None,
+        );
+    }
+
+    pub fn restart_owned_backend<R: Runtime>(
+        &self,
+        app: &tauri::AppHandle<R>,
+    ) -> Result<BackendConnectionInfo, String> {
+        let _bootstrap_lock = acquire_backend_bootstrap_lock(&self.runtime_root)?;
+        let (child, marker) = self.take_owned_child_for_restart()?;
+        child.kill().map_err(|err| {
+            let message = format!("kill owned backend failed: {err}");
+            self.set_restart_failure(message.clone());
+            message
+        })?;
+        wait_for_backend_exit(&marker).map_err(|error| {
+            self.set_restart_failure(error.clone());
+            error
+        })?;
+
+        match spawn_backend_sidecar(app, &self.runtime_root) {
+            Ok((child, marker)) => {
+                let info =
+                    build_backend_info(&self.runtime_root, true, true, true, String::new());
+                self.replace_backend_state(info.clone(), Some(child), true, Some(marker));
+                Ok(info)
+            }
+            Err(error) => {
+                self.set_restart_failure(error.clone());
+                Err(error)
+            }
         }
     }
 }
@@ -101,7 +199,15 @@ enum BackendWaitResult {
 
 #[tauri::command]
 pub fn get_backend_connection_info(state: State<'_, ManagedBackendState>) -> BackendConnectionInfo {
-    state.info.clone()
+    state.connection_info()
+}
+
+#[tauri::command]
+pub fn restart_owned_backend<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, ManagedBackendState>,
+) -> Result<BackendConnectionInfo, String> {
+    state.restart_owned_backend(&app)
 }
 
 pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState {
@@ -110,7 +216,7 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
         Err(error) => {
             eprintln!("[backend-bootstrap] {error}");
             return ManagedBackendState::new(
-                build_backend_info(Path::new(""), false, error),
+                build_backend_info(Path::new(""), false, false, false, error),
                 None,
                 false,
                 PathBuf::new(),
@@ -134,7 +240,7 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
             eprintln!("[backend-bootstrap] {error}");
             append_bootstrap_log(&runtime_root, &format!("bootstrap failed: {error}"));
             return ManagedBackendState::new(
-                build_backend_info(&runtime_root, false, error),
+                build_backend_info(&runtime_root, false, false, false, error),
                 None,
                 false,
                 runtime_root,
@@ -152,7 +258,7 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
             match wait_for_existing_backend(&runtime_root, &marker) {
                 BackendWaitResult::Ready => {
                     return ManagedBackendState::new(
-                        build_backend_info(&runtime_root, false, String::new()),
+                        build_backend_info(&runtime_root, false, false, false, String::new()),
                         None,
                         false,
                         runtime_root,
@@ -161,7 +267,7 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
                 }
                 BackendWaitResult::StillStarting(_) => {
                     return ManagedBackendState::new(
-                        build_backend_info(&runtime_root, true, String::new()),
+                        build_backend_info(&runtime_root, true, false, false, String::new()),
                         None,
                         false,
                         runtime_root,
@@ -174,7 +280,7 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
                         &format!("existing backend health failed: {error}"),
                     );
                     return ManagedBackendState::new(
-                        build_backend_info(&runtime_root, false, error),
+                        build_backend_info(&runtime_root, false, false, false, error),
                         None,
                         false,
                         runtime_root,
@@ -195,9 +301,9 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
         }
     }
 
-    match spawn_backend_sidecar(app, &runtime_root) {
+    match spawn_backend_sidecar(&app.handle(), &runtime_root) {
         Ok((child, marker)) => ManagedBackendState::new(
-            build_backend_info(&runtime_root, true, String::new()),
+            build_backend_info(&runtime_root, true, true, true, String::new()),
             Some(child),
             true,
             runtime_root.clone(),
@@ -207,7 +313,7 @@ pub fn bootstrap_backend<R: Runtime>(app: &tauri::App<R>) -> ManagedBackendState
             eprintln!("[backend-bootstrap] {error}");
             append_bootstrap_log(&runtime_root, &format!("bootstrap failed: {error}"));
             ManagedBackendState::new(
-                build_backend_info(&runtime_root, false, error),
+                build_backend_info(&runtime_root, false, false, false, error),
                 None,
                 false,
                 runtime_root,
@@ -226,12 +332,16 @@ pub fn log_single_instance_event<R: Runtime>(app: &tauri::AppHandle<R>, message:
 fn build_backend_info(
     runtime_root: &Path,
     managed: bool,
+    owns_backend: bool,
+    restart_supported: bool,
     startup_error: String,
 ) -> BackendConnectionInfo {
     BackendConnectionInfo {
         http_base_url: format!("http://{BACKEND_HOST}:{BACKEND_HTTP_PORT}"),
         ws_url: format!("ws://{BACKEND_HOST}:{BACKEND_WS_PORT}/events"),
         managed,
+        owns_backend,
+        restart_supported,
         startup_error,
         runtime_root: runtime_root.display().to_string(),
     }
@@ -342,10 +452,24 @@ fn clear_backend_marker_if_matches(runtime_root: &Path, expected: Option<&Backen
     let _ = fs::remove_file(marker_path);
 }
 
+fn wait_for_backend_exit(marker: &BackendPidMarker) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if !backend_marker_is_alive(marker) {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    Err(format!(
+        "owned backend did not exit after restart request pid={}",
+        marker.pid
+    ))
+}
+
 fn build_fixed_port_failure_state(runtime_root: &Path, error: String) -> ManagedBackendState {
     append_bootstrap_log(&runtime_root, &format!("bootstrap failed: {error}"));
     ManagedBackendState::new(
-        build_backend_info(runtime_root, false, error),
+        build_backend_info(runtime_root, false, false, false, error),
         None,
         false,
         runtime_root.to_path_buf(),
@@ -363,7 +487,7 @@ fn resolve_existing_fixed_port_backend(runtime_root: &Path) -> Option<ManagedBac
         BackendHealthProbe::Reachable(snapshot) if snapshot.status.is_ready() => {
             append_bootstrap_log(&runtime_root, "reuse existing backend on fixed ports");
             Some(ManagedBackendState::new(
-                build_backend_info(runtime_root, false, String::new()),
+                build_backend_info(runtime_root, false, false, false, String::new()),
                 None,
                 false,
                 runtime_root.to_path_buf(),
@@ -380,7 +504,7 @@ fn resolve_existing_fixed_port_backend(runtime_root: &Path) -> Option<ManagedBac
             );
             match wait_for_backend_ready(|| false) {
                 BackendWaitResult::Ready => Some(ManagedBackendState::new(
-                    build_backend_info(runtime_root, false, String::new()),
+                    build_backend_info(runtime_root, false, false, false, String::new()),
                     None,
                     false,
                     runtime_root.to_path_buf(),
@@ -405,7 +529,7 @@ fn resolve_existing_fixed_port_backend(runtime_root: &Path) -> Option<ManagedBac
                         );
                     }
                     Some(ManagedBackendState::new(
-                        build_backend_info(runtime_root, true, String::new()),
+                        build_backend_info(runtime_root, true, false, false, String::new()),
                         None,
                         false,
                         runtime_root.to_path_buf(),
@@ -540,7 +664,7 @@ fn wait_for_existing_backend(runtime_root: &Path, marker: &BackendPidMarker) -> 
 }
 
 fn spawn_backend_sidecar<R: Runtime>(
-    app: &tauri::App<R>,
+    app: &tauri::AppHandle<R>,
     runtime_root: &Path,
 ) -> Result<(CommandChild, BackendPidMarker), String> {
     let config_path = runtime_root.join("config").join("listener.json");
@@ -681,7 +805,10 @@ fn spawn_backend_sidecar<R: Runtime>(
 mod tests {
     use std::path::Path;
 
-    use super::{backend_marker_path, build_backend_bootstrap_mutex_name};
+    use super::{
+        backend_marker_path, build_backend_bootstrap_mutex_name, build_backend_info,
+        ManagedBackendState,
+    };
 
     #[test]
     fn backend_bootstrap_mutex_name_is_stable_for_same_runtime_root() {
@@ -707,5 +834,56 @@ mod tests {
         let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
         let marker_path = backend_marker_path(runtime_root);
         assert!(marker_path.ends_with("logs/.runtime/backend-sidecar.json"));
+    }
+
+    #[test]
+    fn build_backend_info_marks_owned_managed_backend_as_restartable() {
+        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let info = build_backend_info(runtime_root, true, true, true, String::new());
+        assert!(info.managed);
+        assert!(info.owns_backend);
+        assert!(info.restart_supported);
+        assert!(info.startup_error.is_empty());
+    }
+
+    #[test]
+    fn build_backend_info_marks_reused_backend_as_unowned() {
+        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let info = build_backend_info(runtime_root, false, false, false, String::new());
+        assert!(!info.managed);
+        assert!(!info.owns_backend);
+        assert!(!info.restart_supported);
+    }
+
+    #[test]
+    fn take_owned_child_for_restart_rejects_unowned_backend() {
+        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let state = ManagedBackendState::new(
+            build_backend_info(runtime_root, true, false, false, String::new()),
+            None,
+            false,
+            runtime_root.to_path_buf(),
+            None,
+        );
+        match state.take_owned_child_for_restart() {
+            Ok(_) => panic!("unowned backend should not pass restart gate"),
+            Err(error) => assert_eq!(error, "backend is not owned by the current shell"),
+        }
+    }
+
+    #[test]
+    fn take_owned_child_for_restart_requires_owned_marker_after_passing_gate() {
+        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let state = ManagedBackendState::new(
+            build_backend_info(runtime_root, true, true, true, String::new()),
+            None,
+            true,
+            runtime_root.to_path_buf(),
+            None,
+        );
+        match state.take_owned_child_for_restart() {
+            Ok(_) => panic!("owned restart without marker should fail"),
+            Err(error) => assert_eq!(error, "owned backend marker is missing"),
+        }
     }
 }
