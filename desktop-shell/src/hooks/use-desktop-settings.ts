@@ -20,6 +20,8 @@ import type {
   DesktopSecretDrafts,
 } from "@/lib/settings-types"
 
+const DEEPLX_ENV_KEY = "DEEPLX_URL"
+
 function createSecretInputDraft(status: DesktopSecretStatus): DesktopSecretInputDraft {
   return {
     status: {
@@ -162,6 +164,13 @@ function buildSecretUpdate(input: DesktopSecretInputDraft): DesktopSecretUpdate 
   }
 }
 
+function buildDeeplxSecretUpdate(input: DesktopSecretInputDraft): DesktopSecretUpdate {
+  if (input.mode === "env") {
+    return { mode: "env", env_key: DEEPLX_ENV_KEY }
+  }
+  return buildSecretUpdate(input)
+}
+
 export function buildDesktopSettingsSavePayload(
   draft: DesktopSettingsDraft,
 ): DesktopSettingsSavePayload {
@@ -214,7 +223,7 @@ export function buildDesktopSettingsSavePayload(
     },
     secret_updates: {
       translate: {
-        deeplx_url: buildSecretUpdate(draft.translate.deeplx_url),
+        deeplx_url: buildDeeplxSecretUpdate(draft.translate.deeplx_url),
       },
       tts: {
         doubao: {

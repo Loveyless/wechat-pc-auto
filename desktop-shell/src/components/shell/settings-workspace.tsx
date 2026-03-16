@@ -33,6 +33,7 @@ type SecretEditorProps = {
   description: string
   draft: DesktopSecretInputDraft
   error?: string
+  fixedEnvKey?: string
   onChange: (next: DesktopSecretInputDraft) => void
 }
 
@@ -107,7 +108,7 @@ function num(value: string, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-function SecretEditor({ label, description, draft, error, onChange }: SecretEditorProps) {
+function SecretEditor({ label, description, draft, error, fixedEnvKey, onChange }: SecretEditorProps) {
   return (
     <div className="rounded-[0.95rem] border border-border-subtle bg-workspace-canvas-strong/70 px-3 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -123,12 +124,14 @@ function SecretEditor({ label, description, draft, error, onChange }: SecretEdit
         <select
           className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
           value={draft.mode}
-          onChange={(event) =>
+          onChange={(event) => {
+            const nextMode = event.target.value as DesktopSecretInputDraft["mode"]
             onChange({
               ...draft,
-              mode: event.target.value as DesktopSecretInputDraft["mode"],
+              mode: nextMode,
+              env_key: nextMode === "env" && fixedEnvKey ? fixedEnvKey : draft.env_key,
             })
-          }
+          }}
         >
           <option value="keep">保持现状</option>
           <option value="direct">改成直接值</option>
@@ -144,7 +147,12 @@ function SecretEditor({ label, description, draft, error, onChange }: SecretEdit
             onChange={(event) => onChange({ ...draft, value: event.target.value })}
           />
         ) : null}
-        {draft.mode === "env" ? (
+        {draft.mode === "env" && fixedEnvKey ? (
+          <div className="rounded-lg border border-dashed border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-secondary">
+            固定环境变量：{fixedEnvKey}
+          </div>
+        ) : null}
+        {draft.mode === "env" && !fixedEnvKey ? (
           <input
             className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
             placeholder="输入环境变量名"
@@ -300,9 +308,10 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
             <SecretEditor
               label="DeepLX URL"
-              description="仅在 provider=deeplx 时生效。"
+              description="仅在 provider=deeplx 时生效；env 模式固定使用 DEEPLX_URL，GUI 不会写 .env.local。"
               draft={draft.translate.deeplx_url}
               error={fieldError("translate.deeplx_url")}
+              fixedEnvKey="DEEPLX_URL"
               onChange={(next) =>
                 updateSecretDrafts((current) => ({
                   ...current,

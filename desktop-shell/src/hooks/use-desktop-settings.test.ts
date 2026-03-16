@@ -137,7 +137,7 @@ describe("desktop settings state", () => {
     expect(payload.translate.provider).toBe("deeplx")
     expect(payload.secret_updates.translate.deeplx_url).toEqual({
       mode: "env",
-      env_key: "DEEPLX_URL_OVERRIDE",
+      env_key: "DEEPLX_URL",
     })
     expect(payload.secret_updates.tts.doubao.appid).toEqual({
       mode: "direct",
