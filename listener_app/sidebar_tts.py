@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import importlib
@@ -51,12 +53,16 @@ PREFERRED_ENGLISH_TTS_VOICES = ("Microsoft Zira Desktop", "Microsoft David Deskt
 SUPPORTED_TTS_PROVIDERS = ("windows_system", "doubao", "tencent_cloud")
 DEFAULT_TTS_PROVIDER = "tencent_cloud"
 DOUBAO_TTS_DEFAULT_CONFIG_PATH = os.path.join("config", "doubao_tts.json")
+DOUBAO_TTS_DEFAULT_APPID_ENV_KEY = "VOLCENGINE_TTS_APPID"
+DOUBAO_TTS_DEFAULT_ACCESS_TOKEN_ENV_KEY = "VOLCENGINE_TTS_ACCESS_TOKEN"
 DOUBAO_TTS_DEFAULT_ENDPOINT = "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream"
 DOUBAO_TTS_SUPPORTED_SAMPLE_RATES = (8000, 16000, 22050, 24000, 32000, 44100, 48000)
 DOUBAO_TTS_DEFAULT_SAMPLE_RATE = 32000
 DOUBAO_TTS_DEFAULT_SPEECH_RATE = -15
 DOUBAO_TTS_DEFAULT_LOUDNESS_RATE = 0
 TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH = os.path.join("config", "tencent_tts.json")
+TENCENT_CLOUD_TTS_DEFAULT_SECRET_ID_ENV_KEY = "TENCENTCLOUD_SECRET_ID"
+TENCENT_CLOUD_TTS_DEFAULT_SECRET_KEY_ENV_KEY = "TENCENTCLOUD_SECRET_KEY"
 TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT = "tts.tencentcloudapi.com"
 TENCENT_CLOUD_TTS_SUPPORTED_SAMPLE_RATES = (8000, 16000, 24000)
 TENCENT_CLOUD_TTS_SUPPORTED_PRIMARY_LANGUAGES = (1, 2)
@@ -117,6 +123,156 @@ def normalize_tts_provider(value: Any) -> str:
             f"tts.provider must be one of {', '.join(SUPPORTED_TTS_PROVIDERS)}, got {value!r}"
         )
     return provider
+
+
+def load_doubao_tts_settings_from_payload(raw: dict[str, Any]) -> DoubaoTTSSettings:
+    provider = str(raw.get("provider") or "doubao").strip().lower()
+    if provider and provider != "doubao":
+        raise RuntimeError(f"doubao config provider must be 'doubao', got {provider!r}")
+
+    endpoint = str(raw.get("endpoint") or DOUBAO_TTS_DEFAULT_ENDPOINT).strip()
+    appid = read_secret_config_value(raw, "appid", "appid_env")
+    access_token = read_secret_config_value(raw, "access_token", "access_token_env")
+    resource_id = str(raw.get("resource_id") or "").strip()
+    speaker = str(raw.get("speaker") or "").strip()
+    audio_format = str(raw.get("audio_format") or "wav").strip().lower()
+    sample_rate = read_config_int(raw, "sample_rate", DOUBAO_TTS_DEFAULT_SAMPLE_RATE)
+    speech_rate = read_config_int(raw, "speech_rate", DOUBAO_TTS_DEFAULT_SPEECH_RATE)
+    loudness_rate = read_config_int(raw, "loudness_rate", DOUBAO_TTS_DEFAULT_LOUDNESS_RATE)
+    use_cache = as_bool(raw.get("use_cache"), False)
+    uid = str(raw.get("uid") or "wechat-pc-auto").strip() or "wechat-pc-auto"
+    connect_timeout_seconds = read_config_float(raw, "connect_timeout_seconds", 10.0)
+
+    if not endpoint:
+        raise RuntimeError("doubao endpoint is required")
+    if not appid:
+        raise RuntimeError("doubao appid/appid_env is required")
+    if not access_token:
+        raise RuntimeError("doubao access_token/access_token_env is required")
+    if not resource_id:
+        raise RuntimeError("doubao resource_id is required")
+    if not speaker:
+        raise RuntimeError("doubao speaker is required")
+    if audio_format != "wav":
+        raise RuntimeError(
+            f"doubao audio_format must be 'wav' for current Windows playback path, got {audio_format!r}"
+        )
+    sample_rate = validate_int_choices(
+        "doubao.sample_rate", sample_rate, DOUBAO_TTS_SUPPORTED_SAMPLE_RATES
+    )
+    speech_rate = validate_int_range("doubao.speech_rate", speech_rate, -50, 100)
+    loudness_rate = validate_int_range("doubao.loudness_rate", loudness_rate, -50, 100)
+    connect_timeout_seconds = validate_positive_float(
+        "doubao.connect_timeout_seconds",
+        connect_timeout_seconds,
+    )
+    return DoubaoTTSSettings(
+        endpoint=endpoint,
+        appid=appid,
+        access_token=access_token,
+        resource_id=resource_id,
+        speaker=speaker,
+        audio_format=audio_format,
+        sample_rate=sample_rate,
+        speech_rate=speech_rate,
+        loudness_rate=loudness_rate,
+        use_cache=use_cache,
+        uid=uid,
+        connect_timeout_seconds=connect_timeout_seconds,
+    )
+
+
+def load_tencent_cloud_tts_settings_from_payload(
+    raw: dict[str, Any],
+) -> TencentCloudTTSSettings:
+    provider = str(raw.get("provider") or "tencent_cloud").strip().lower()
+    if provider and provider != "tencent_cloud":
+        raise RuntimeError(
+            f"tencent_cloud config provider must be 'tencent_cloud', got {provider!r}"
+        )
+
+    endpoint = str(raw.get("endpoint") or TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT).strip()
+    region = str(raw.get("region") or "").strip()
+    secret_id = read_secret_config_value(raw, "secret_id", "secret_id_env")
+    secret_key = read_secret_config_value(raw, "secret_key", "secret_key_env")
+    voice_type = read_config_int(raw, "voice_type", 0)
+    codec = str(raw.get("codec") or "wav").strip().lower()
+    sample_rate = read_config_int(raw, "sample_rate", TENCENT_CLOUD_TTS_DEFAULT_SAMPLE_RATE)
+    speed = read_config_float(raw, "speed", TENCENT_CLOUD_TTS_DEFAULT_SPEED)
+    volume = read_config_float(raw, "volume", TENCENT_CLOUD_TTS_DEFAULT_VOLUME)
+    primary_language = read_config_int(
+        raw,
+        "primary_language",
+        TENCENT_CLOUD_TTS_DEFAULT_PRIMARY_LANGUAGE,
+    )
+    model_type = read_config_int(raw, "model_type", TENCENT_CLOUD_TTS_DEFAULT_MODEL_TYPE)
+    project_id = read_config_int(raw, "project_id", TENCENT_CLOUD_TTS_DEFAULT_PROJECT_ID)
+    segment_rate = read_config_int(raw, "segment_rate", TENCENT_CLOUD_TTS_DEFAULT_SEGMENT_RATE)
+    enable_subtitle = as_bool(raw.get("enable_subtitle"), False)
+    emotion_category = str(raw.get("emotion_category") or "").strip()
+    emotion_intensity = read_config_int(raw, "emotion_intensity", 100)
+    request_timeout_seconds = read_config_float(raw, "request_timeout_seconds", 15.0)
+
+    if not endpoint:
+        raise RuntimeError("tencent_cloud endpoint is required")
+    if not secret_id:
+        raise RuntimeError("tencent_cloud secret_id/secret_id_env is required")
+    if not secret_key:
+        raise RuntimeError("tencent_cloud secret_key/secret_key_env is required")
+    voice_type = validate_int_min("tencent_cloud.voice_type", voice_type, 1)
+    if codec != "wav":
+        raise RuntimeError(
+            f"tencent_cloud codec must be 'wav' for current Windows playback path, got {codec!r}"
+        )
+    sample_rate = validate_int_choices(
+        "tencent_cloud.sample_rate",
+        sample_rate,
+        TENCENT_CLOUD_TTS_SUPPORTED_SAMPLE_RATES,
+    )
+    speed = validate_float_range("tencent_cloud.speed", speed, -2.0, 6.0)
+    volume = validate_float_range("tencent_cloud.volume", volume, -10.0, 10.0)
+    primary_language = validate_int_choices(
+        "tencent_cloud.primary_language",
+        primary_language,
+        TENCENT_CLOUD_TTS_SUPPORTED_PRIMARY_LANGUAGES,
+    )
+    model_type = validate_int_choices("tencent_cloud.model_type", model_type, (1,))
+    project_id = validate_int_min("tencent_cloud.project_id", project_id, 0)
+    segment_rate = validate_int_choices(
+        "tencent_cloud.segment_rate",
+        segment_rate,
+        TENCENT_CLOUD_TTS_SUPPORTED_SEGMENT_RATES,
+    )
+    if emotion_category:
+        emotion_intensity = validate_int_range(
+            "tencent_cloud.emotion_intensity",
+            emotion_intensity,
+            50,
+            200,
+        )
+    request_timeout_seconds = validate_positive_float(
+        "tencent_cloud.request_timeout_seconds",
+        request_timeout_seconds,
+    )
+    return TencentCloudTTSSettings(
+        secret_id=secret_id,
+        secret_key=secret_key,
+        voice_type=voice_type,
+        endpoint=endpoint,
+        region=region,
+        codec=codec,
+        sample_rate=sample_rate,
+        speed=speed,
+        volume=volume,
+        primary_language=primary_language,
+        model_type=model_type,
+        project_id=project_id,
+        segment_rate=segment_rate,
+        enable_subtitle=enable_subtitle,
+        emotion_category=emotion_category,
+        emotion_intensity=emotion_intensity,
+        request_timeout_seconds=request_timeout_seconds,
+    )
 
 
 def pick_preferred_tts_voice(voices: list[dict[str, str]]) -> str:
@@ -432,60 +588,7 @@ def load_doubao_tts_settings(config_path: str, *, base_dir: str = ROOT_DIR) -> D
     if not resolved_path or not os.path.isfile(resolved_path):
         raise RuntimeError(f"tts config not found: {config_path!r}")
     raw = load_json_config(resolved_path)
-    provider = str(raw.get("provider") or "doubao").strip().lower()
-    if provider and provider != "doubao":
-        raise RuntimeError(f"doubao config provider must be 'doubao', got {provider!r}")
-
-    endpoint = str(raw.get("endpoint") or DOUBAO_TTS_DEFAULT_ENDPOINT).strip()
-    appid = read_secret_config_value(raw, "appid", "appid_env")
-    access_token = read_secret_config_value(raw, "access_token", "access_token_env")
-    resource_id = str(raw.get("resource_id") or "").strip()
-    speaker = str(raw.get("speaker") or "").strip()
-    audio_format = str(raw.get("audio_format") or "wav").strip().lower()
-    sample_rate = read_config_int(raw, "sample_rate", DOUBAO_TTS_DEFAULT_SAMPLE_RATE)
-    speech_rate = read_config_int(raw, "speech_rate", DOUBAO_TTS_DEFAULT_SPEECH_RATE)
-    loudness_rate = read_config_int(raw, "loudness_rate", DOUBAO_TTS_DEFAULT_LOUDNESS_RATE)
-    use_cache = as_bool(raw.get("use_cache"), False)
-    uid = str(raw.get("uid") or "wechat-pc-auto").strip() or "wechat-pc-auto"
-    connect_timeout_seconds = read_config_float(raw, "connect_timeout_seconds", 10.0)
-
-    if not endpoint:
-        raise RuntimeError("doubao endpoint is required")
-    if not appid:
-        raise RuntimeError("doubao appid/appid_env is required")
-    if not access_token:
-        raise RuntimeError("doubao access_token/access_token_env is required")
-    if not resource_id:
-        raise RuntimeError("doubao resource_id is required")
-    if not speaker:
-        raise RuntimeError("doubao speaker is required")
-    if audio_format != "wav":
-        raise RuntimeError(
-            f"doubao audio_format must be 'wav' for current Windows playback path, got {audio_format!r}"
-        )
-    sample_rate = validate_int_choices(
-        "doubao.sample_rate", sample_rate, DOUBAO_TTS_SUPPORTED_SAMPLE_RATES
-    )
-    speech_rate = validate_int_range("doubao.speech_rate", speech_rate, -50, 100)
-    loudness_rate = validate_int_range("doubao.loudness_rate", loudness_rate, -50, 100)
-    connect_timeout_seconds = validate_positive_float(
-        "doubao.connect_timeout_seconds",
-        connect_timeout_seconds,
-    )
-    return DoubaoTTSSettings(
-        endpoint=endpoint,
-        appid=appid,
-        access_token=access_token,
-        resource_id=resource_id,
-        speaker=speaker,
-        audio_format=audio_format,
-        sample_rate=sample_rate,
-        speech_rate=speech_rate,
-        loudness_rate=loudness_rate,
-        use_cache=use_cache,
-        uid=uid,
-        connect_timeout_seconds=connect_timeout_seconds,
-    )
+    return load_doubao_tts_settings_from_payload(raw)
 
 
 def load_tencent_cloud_tts_settings(
@@ -497,94 +600,7 @@ def load_tencent_cloud_tts_settings(
     if not resolved_path or not os.path.isfile(resolved_path):
         raise RuntimeError(f"tts config not found: {config_path!r}")
     raw = load_json_config(resolved_path)
-    provider = str(raw.get("provider") or "tencent_cloud").strip().lower()
-    if provider and provider != "tencent_cloud":
-        raise RuntimeError(
-            f"tencent_cloud config provider must be 'tencent_cloud', got {provider!r}"
-        )
-
-    endpoint = str(raw.get("endpoint") or TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT).strip()
-    region = str(raw.get("region") or "").strip()
-    secret_id = read_secret_config_value(raw, "secret_id", "secret_id_env")
-    secret_key = read_secret_config_value(raw, "secret_key", "secret_key_env")
-    voice_type = read_config_int(raw, "voice_type", 0)
-    codec = str(raw.get("codec") or "wav").strip().lower()
-    sample_rate = read_config_int(raw, "sample_rate", TENCENT_CLOUD_TTS_DEFAULT_SAMPLE_RATE)
-    speed = read_config_float(raw, "speed", TENCENT_CLOUD_TTS_DEFAULT_SPEED)
-    volume = read_config_float(raw, "volume", TENCENT_CLOUD_TTS_DEFAULT_VOLUME)
-    primary_language = read_config_int(
-        raw,
-        "primary_language",
-        TENCENT_CLOUD_TTS_DEFAULT_PRIMARY_LANGUAGE,
-    )
-    model_type = read_config_int(raw, "model_type", TENCENT_CLOUD_TTS_DEFAULT_MODEL_TYPE)
-    project_id = read_config_int(raw, "project_id", TENCENT_CLOUD_TTS_DEFAULT_PROJECT_ID)
-    segment_rate = read_config_int(raw, "segment_rate", TENCENT_CLOUD_TTS_DEFAULT_SEGMENT_RATE)
-    enable_subtitle = as_bool(raw.get("enable_subtitle"), False)
-    emotion_category = str(raw.get("emotion_category") or "").strip()
-    emotion_intensity = read_config_int(raw, "emotion_intensity", 100)
-    request_timeout_seconds = read_config_float(raw, "request_timeout_seconds", 15.0)
-
-    if not endpoint:
-        raise RuntimeError("tencent_cloud endpoint is required")
-    if not secret_id:
-        raise RuntimeError("tencent_cloud secret_id/secret_id_env is required")
-    if not secret_key:
-        raise RuntimeError("tencent_cloud secret_key/secret_key_env is required")
-    voice_type = validate_int_min("tencent_cloud.voice_type", voice_type, 1)
-    if codec != "wav":
-        raise RuntimeError(
-            f"tencent_cloud codec must be 'wav' for current Windows playback path, got {codec!r}"
-        )
-    sample_rate = validate_int_choices(
-        "tencent_cloud.sample_rate",
-        sample_rate,
-        TENCENT_CLOUD_TTS_SUPPORTED_SAMPLE_RATES,
-    )
-    speed = validate_float_range("tencent_cloud.speed", speed, -2.0, 6.0)
-    volume = validate_float_range("tencent_cloud.volume", volume, -10.0, 10.0)
-    primary_language = validate_int_choices(
-        "tencent_cloud.primary_language",
-        primary_language,
-        TENCENT_CLOUD_TTS_SUPPORTED_PRIMARY_LANGUAGES,
-    )
-    model_type = validate_int_choices("tencent_cloud.model_type", model_type, (1,))
-    project_id = validate_int_min("tencent_cloud.project_id", project_id, 0)
-    segment_rate = validate_int_choices(
-        "tencent_cloud.segment_rate",
-        segment_rate,
-        TENCENT_CLOUD_TTS_SUPPORTED_SEGMENT_RATES,
-    )
-    if emotion_category:
-        emotion_intensity = validate_int_range(
-            "tencent_cloud.emotion_intensity",
-            emotion_intensity,
-            50,
-            200,
-        )
-    request_timeout_seconds = validate_positive_float(
-        "tencent_cloud.request_timeout_seconds",
-        request_timeout_seconds,
-    )
-    return TencentCloudTTSSettings(
-        secret_id=secret_id,
-        secret_key=secret_key,
-        voice_type=voice_type,
-        endpoint=endpoint,
-        region=region,
-        codec=codec,
-        sample_rate=sample_rate,
-        speed=speed,
-        volume=volume,
-        primary_language=primary_language,
-        model_type=model_type,
-        project_id=project_id,
-        segment_rate=segment_rate,
-        enable_subtitle=enable_subtitle,
-        emotion_category=emotion_category,
-        emotion_intensity=emotion_intensity,
-        request_timeout_seconds=request_timeout_seconds,
-    )
+    return load_tencent_cloud_tts_settings_from_payload(raw)
 
 
 def build_doubao_ws_headers(settings: DoubaoTTSSettings, connect_id: str) -> dict[str, str]:
