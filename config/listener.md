@@ -17,6 +17,10 @@ Tk 回退链已经下线，不要再按旧 UI 的字段和行为理解这份配�
   - `ws://127.0.0.1:8766/events`
 - `desktop-shell/` 的 `npm run tauri dev` / `npm run tauri build` 会先构建 PyInstaller sidecar，再由 Tauri 壳自动拉起 backend
 - Tauri 壳运行时根目录固定在 `%LOCALAPPDATA%\com.wechatauto.shell`
+- 仓库跟踪的默认 `listener.json` 以“首启可进入桌面壳和设置页”为目标：
+  - `translate.enabled=false`
+  - `tts.provider=windows_system`
+  - fresh runtime root 不依赖 `.env.local` 也能启动
 - 当前主路径固定为 `session-only + all_sessions + preview-only`
 
 ## 当前主路径启动方式
@@ -63,10 +67,11 @@ python scripts/smoke_desktop_shell_release.py
 - `GET /api/config` 返回的是安全 DTO，不是原始文件直出：
   - `translate` / `display` / `tts` 返回当前可编辑字段
   - `runtime` 返回 `config_path`、`apply_strategy`、`restart_required`、`hot_reload_supported`
-  - `deeplx_url`、`appid`、`access_token`、`secret_id`、`secret_key` 这类 secret 只返回 `configured/source/env_key` 元数据，绝不回显原值
+  - `deeplx_url`、`api_key`、`appid`、`access_token`、`secret_id`、`secret_key` 这类 secret 只返回 `configured/source/env_key` 元数据，绝不回显原值
 - `PUT /api/config` 会按现有文件边界原子写入：
-  - `listener.json` 继续承载 shared 配置
-  - `tts.config_path` 指向的 provider 私有 JSON 继续承载豆包 / 腾讯云私有字段
+  - `listener.json` 继续承载 shared 字段和 `translate.providers` / `tts.providers.<provider>.config_path`
+  - `tts.providers.<provider>.config_path` 指向的 provider 私有 JSON 继续承载豆包 / 腾讯云私有字段
+  - 启动加载仍兼容旧 `translate.deeplx_url(_env)`、旧顶层 `translate.timeout_seconds` 和旧 `tts.config_path`，但 GUI 新保存只写新结构
   - 未知字段必须保留，不能因为 GUI 保存被顺手删掉
 - secret 更新是 write-only 语义，当前支持四种模式：
   - `keep`：保持现状
@@ -76,10 +81,28 @@ python scripts/smoke_desktop_shell_release.py
 - GUI 不会写 `.env.local` 真值。
   - `env` 模式只会更新配置文件中的 `*_env` 字段。
   - DeepLX 在 GUI 中固定使用 `DEEPLX_URL`，不开放自定义 env key。
+  - `translate.providers.openai_compatible.api_key` 不支持 `env` 模式，也没有 `api_key_env` 兼容字段。
 - 当前主路径没有 config hot reload。
   - 源码态或外部 backend 连接：只能 `save-only`，保存后必须手动重启 backend
   - Tauri 托管且当前壳拥有 backend sidecar ownership：才允许 `保存并应用`
   - `保存并应用` 本质上仍然是“先落盘，再重启当前壳自己拉起的 backend”，不是运行态热更新
+
+## 源码态与 Tauri 壳别混
+
+- 源码态启动：
+  - `python listener_app/backend_main.py --config ".\\config\\listener.json"`
+  - 当前 backend 直接吃仓库里的 `config/listener.json`
+  - `.env.local` 默认也在仓库根目录
+- Tauri 壳 / 安装版启动：
+  - `npm run tauri dev`
+  - `wechat-auto-shell.exe`
+  - installer 安装后的应用
+  - 当前 backend 吃 `%LOCALAPPDATA%\\com.wechatauto.shell\\config\\listener.json`
+  - `.env.local` 优先读 `%LOCALAPPDATA%\\com.wechatauto.shell\\.env.local`
+
+这两套配置目录不会自动同步。
+桌面壳设置页保存时，只会写当前 backend 的 `runtime.config_path` 指向的那套配置，不会顺手把另一套也改掉。
+安装目录也不是配置目录；Tauri 壳真正长期落盘的位置还是 `%LOCALAPPDATA%\\com.wechatauto.shell`。
 
 ## 完整配置示例
 
@@ -93,12 +116,23 @@ python scripts/smoke_desktop_shell_release.py
     "worker_debug": false
   },
   "translate": {
-    "enabled": true,
+    "enabled": false,
     "provider": "deeplx",
-    "deeplx_url_env": "DEEPLX_URL",
     "source_lang": "auto",
     "target_lang": "EN",
-    "timeout_seconds": 8.0
+    "providers": {
+      "deeplx": {
+        "deeplx_url_env": "DEEPLX_URL",
+        "timeout_seconds": 8.0
+      },
+      "openai_compatible": {
+        "base_url": "",
+        "model": "",
+        "api_key": "",
+        "timeout_seconds": 8.0
+      },
+      "passthrough": {}
+    }
   },
   "display": {
     "english_only": true,
@@ -106,8 +140,15 @@ python scripts/smoke_desktop_shell_release.py
     "on_translate_fail": "show_cn_with_reason"
   },
   "tts": {
-    "provider": "tencent_cloud",
-    "config_path": "config/tencent_tts.json"
+    "provider": "windows_system",
+    "providers": {
+      "doubao": {
+        "config_path": "config/doubao_tts.json"
+      },
+      "tencent_cloud": {
+        "config_path": "config/tencent_tts.json"
+      }
+    }
   },
   "logging": {
     "file": "logs/sidebar_listener.log"
@@ -137,25 +178,42 @@ python scripts/smoke_desktop_shell_release.py
 - `enabled`：是否启用翻译
   - `true`：调用翻译 provider
   - `false`：原文透传
-- `provider`：当前支持 `deeplx` / `passthrough`
-- `deeplx_url`：DeepLX 接口地址的直接值
-  - 适合把 URL 直接写进 `listener.json` 的场景
-- `deeplx_url_env`：DeepLX URL 对应的环境变量名
-  - 写了这个字段才会读环境变量
-  - 只允许写成 `DEEPLX_URL`
-  - 仓库默认值固定为 `DEEPLX_URL`
-  - 清空这个字段就等于显式关闭 env 模式，不会再偷偷 fallback
-  - 当 `translate.enabled=true` 且 `provider=deeplx` 时，若 `deeplx_url` 和 `deeplx_url_env` 都为空，启动阶段会 fail-fast
+  - 仓库默认值是 `false`，目的是让首次打包运行不因缺 provider 私有字段直接 fail-fast
+- `provider`：当前支持 `deeplx` / `openai_compatible` / `passthrough`
 - `source_lang`：源语言，通常填 `auto`
 - `target_lang`：目标语言，例如 `EN`
-- `timeout_seconds`：翻译请求超时（秒）
-  - 必须 `> 0`
+- `providers.deeplx`
+  - `deeplx_url`：DeepLX 接口地址的直接值
+  - `deeplx_url_env`：DeepLX URL 对应的环境变量名
+    - 只允许写成 `DEEPLX_URL`
+    - 仓库默认值固定为 `DEEPLX_URL`
+    - 清空这个字段就等于显式关闭 env 模式，不会再偷偷 fallback
+  - `timeout_seconds`：DeepLX 请求超时（秒），必须 `> 0`
+  - 当 `translate.enabled=true` 且 `provider=deeplx` 时，若 `deeplx_url` 和 `deeplx_url_env` 都为空，启动阶段会 fail-fast
+- `providers.openai_compatible`
+  - `base_url`：OpenAI-compatible Chat Completions 入口基地址
+  - `model`：请求模型名
+  - `api_key`：直接值密钥
+    - 当前配置契约不支持 `api_key_env`
+    - 桌面壳 GUI 只支持 direct/clear，不会把这个字段改成 env 模式
+  - `timeout_seconds`：请求超时（秒），必须 `> 0`
+  - 当 `translate.enabled=true` 且 `provider=openai_compatible` 时，`base_url`、`model`、`api_key` 三个字段都必须存在
+- `providers.passthrough`
+  - 当前固定为空对象；只保留 shared 语言方向字段，不发起外部翻译请求
+- 启动加载兼容旧结构：
+  - 旧 `translate.deeplx_url`
+  - 旧 `translate.deeplx_url_env`
+  - 旧顶层 `translate.timeout_seconds`
+  - 兼容只用于读；新保存结果只写 `translate.providers.*`
 
 `.env.local` 读取顺序：
 
 - 源码态默认读仓库根目录 `.env.local`
 - Tauri 壳优先读 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`
 - 若运行时目录没有，再回退到 `wechat-auto-shell.exe` 同目录 `.env.local`
+
+当前默认打包配置不要求首启必须带 `.env.local`。
+但只要你把 `translate.enabled=true` 且 `provider=deeplx`，DeepLX URL 仍然必须通过 `translate.providers.deeplx.deeplx_url` 或 `DEEPLX_URL` 提供。
 
 ### `display`
 
@@ -177,10 +235,16 @@ python scripts/smoke_desktop_shell_release.py
   - `windows_system`
   - `doubao`
   - `tencent_cloud`
-- `config_path`：provider 私有配置文件路径
+  - 仓库默认值是 `windows_system`，目的是让 fresh install 不依赖云凭据也能首启进入设置页
+- `providers.doubao.config_path` / `providers.tencent_cloud.config_path`：provider 私有配置文件路径
   - 相对路径优先按 `listener.json` 所在目录解析
   - 找不到时再按项目根目录解析
   - 推荐把 provider 私有参数拆到独立 JSON，不要把不同供应商字段继续堆回 `listener.json`
+  - `windows_system` 没有 provider 私有路径
+- 启动加载兼容旧结构：
+  - 若当前激活 provider 缺失 `tts.providers.<provider>.config_path`，会回退读取旧 `tts.config_path`
+  - GUI 新保存只写 `tts.providers.<provider>.config_path`
+  - 未激活 provider 的路径配置会继续保留，不会因为切换 provider 被清掉
 
 ### `logging`
 

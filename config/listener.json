@@ -7,12 +7,23 @@
     "worker_debug": false
   },
   "translate": {
-    "enabled": true,
+    "enabled": false,
     "provider": "deeplx",
-    "deeplx_url_env": "DEEPLX_URL",
     "source_lang": "auto",
     "target_lang": "EN",
-    "timeout_seconds": 8.0
+    "providers": {
+      "deeplx": {
+        "deeplx_url_env": "DEEPLX_URL",
+        "timeout_seconds": 8.0
+      },
+      "openai_compatible": {
+        "base_url": "",
+        "model": "",
+        "api_key": "",
+        "timeout_seconds": 8.0
+      },
+      "passthrough": {}
+    }
   },
   "display": {
     "english_only": true,
@@ -20,8 +31,15 @@
     "on_translate_fail": "show_cn_with_reason"
   },
   "tts": {
-    "provider": "tencent_cloud",
-    "config_path": "config/tencent_tts.json"
+    "provider": "windows_system",
+    "providers": {
+      "doubao": {
+        "config_path": "config/doubao_tts.json"
+      },
+      "tencent_cloud": {
+        "config_path": "config/tencent_tts.json"
+      }
+    }
   },
   "logging": {
     "file": "logs/sidebar_listener.log"

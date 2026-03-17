@@ -51,6 +51,34 @@ TENCENTCLOUD_SECRET_KEY=<your-secret-key>
 - Tauri 壳兜底：`wechat-auto-shell.exe` 同目录 `.env.local`
 
 默认不会把 `.env.local` 打进安装包。原因很直接：这玩意通常带密钥，自动分发就是泄漏。
+当前仓库跟踪的默认 `config/listener.json` 也不再把 DeepLX / 腾讯云 TTS 当成首启硬依赖：
+
+- `translate.enabled=false`
+- `tts.provider=windows_system`
+
+所以 fresh install 即使没有 `.env.local`，也应该先能打开桌面壳并进入设置页。
+只有在你启用 DeepLX / OpenAI-compatible 翻译、豆包或腾讯云 TTS 时，才需要再补 URL / 凭据。
+
+翻译 provider 现在支持 `deeplx` / `openai_compatible` / `passthrough`：
+
+- `deeplx`：继续支持 `DEEPLX_URL`
+- `openai_compatible`：需要在 `translate.providers.openai_compatible` 里补 `base_url`、`model`、`api_key`
+- `passthrough`：不请求外部翻译 provider
+
+别把 OpenAI-compatible 的 `api_key` 当成 `.env.local` 契约的一部分。
+当前配置 owner 和桌面壳 GUI 都只认直接值写入，不支持 `api_key_env`。
+
+配置目录也要分清，别再混成一套：
+
+- 源码态：`python listener_app/backend_main.py --config ".\\config\\listener.json"` + `npm run dev`
+  - 吃仓库里的 `config/listener.json`
+  - 读仓库根目录 `.env.local`
+- Tauri 壳 / 安装版：`npm run tauri dev`、`wechat-auto-shell.exe`、installer 安装后的应用
+  - 吃 `%LOCALAPPDATA%\\com.wechatauto.shell\\config\\listener.json`
+  - 优先读 `%LOCALAPPDATA%\\com.wechatauto.shell\\.env.local`
+
+这两套配置目录不会自动同步。
+设置页保存时，只会写当前连接的 backend 正在使用的那套配置，不会顺手把源码态和安装版态一起改掉。
 
 ## 启动
 
@@ -189,6 +217,9 @@ python scripts/smoke_desktop_shell_release.py
 
 - `.env.local` 不会自动塞进安装包，用户要自己提供
 - release 壳必须通过 `scripts/smoke_desktop_shell_release.py`，不能只看 build 成功
+
+补一句关键事实：不带 `.env.local` 不等于“包一定起不来”。
+当前默认 bundle 配置应该允许首启进壳；真正需要外置的是 DeepLX 和云 TTS 的 URL / 密钥，不是桌面壳本身。
 
 ## 配置与排障
 

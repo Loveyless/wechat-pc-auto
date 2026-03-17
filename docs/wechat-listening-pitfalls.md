@@ -17,7 +17,7 @@
 - `wechat_auto/window.py`
 - `wechat_auto/controls.py`
 
-目标：在不改微信客户端的前提下，稳定监听左侧会话列表的预览消息并在桌面前端展示（可接 DeepLX 翻译）。
+目标：在不改微信客户端的前提下，稳定监听左侧会话列表的预览消息并在桌面前端展示（可接 DeepLX / OpenAI-compatible 翻译）。
 
 当前只有一条受支持运行路径：
 - `listener_app/backend_main.py` + `desktop-shell/`，默认按 `all_sessions` 方式扫描左侧可见会话列表，不再依赖 `listen.targets` 做主路径筛选。
@@ -218,16 +218,17 @@
 
 ### 17) 配置脏值导致运行中崩溃
 现象：
-- `listen.interval_seconds<0.2` 或 `translate.timeout_seconds<=0` 时，worker/翻译线程会在运行期报错。
-- `translate.enabled=true` 但未配置 `translate.deeplx_url` / `translate.deeplx_url_env` 时，旧逻辑会静默降级成原文透传，用户误以为翻译正常。
+- `listen.interval_seconds<0.2`、`translate.providers.<provider>.timeout_seconds<=0` 或 provider 缺必填字段时，worker/翻译线程会在运行期报错。
+- `translate.enabled=true` 但 active provider 缺少必填字段时，旧逻辑可能静默降级成原文透传，用户误以为翻译正常。
 
 处理：
 - 主路径后端启动时对关键配置做 fail-fast 校验，不合法直接退出并打印错误：
   - `listen.interval_seconds >= 0.2`
   - `listen.load_retry_seconds > 0`
-  - `translate.timeout_seconds > 0`
-  - `translate.enabled=true and provider=deeplx` 时必须存在 `translate.deeplx_url` 或 `translate.deeplx_url_env`
-  - `translate.deeplx_url_env` 只允许 `DEEPLX_URL`
+  - `translate.providers.deeplx.timeout_seconds > 0` / `translate.providers.openai_compatible.timeout_seconds > 0`
+  - `translate.enabled=true and provider=deeplx` 时必须存在 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env`
+  - `translate.providers.deeplx.deeplx_url_env` 只允许 `DEEPLX_URL`
+  - `translate.enabled=true and provider=openai_compatible` 时必须存在 `translate.providers.openai_compatible.base_url`、`model`、`api_key`
 
 ### 18) 监听体感慢，不一定是 UIA 本身
 现象：
@@ -305,7 +306,7 @@
 - 当前正文支持“轻点朗读”：按下后小位移松开会播放；若形成拖拽选区，或触发双击/三击选词，则不会播放。
 - 正文点击范围只覆盖正文字符，不包括时间、发送人和空白区。
 - TTS provider 现在走独立配置：`listener.json` 只负责选择 `tts.provider`，provider 私有参数拆到独立 JSON（例如 `config/doubao_tts.json`、`config/tencent_tts.json`）。
-- 当前默认 provider 已切到 `tencent_cloud`；这会让启动默认依赖腾讯云凭证和 `config/tencent_tts.json`，不再像旧版那样天然只依赖本机系统语音。
+- 仓库跟踪的默认 provider 现在回到 `windows_system`；目标不是“偏爱系统语音”，而是保证 fresh install 无密钥也能先进入桌面壳和设置页。
 - 仓库跟踪的 provider JSON 只应保留安全默认值；豆包 `appid/access_token`、腾讯云 `secret_id/secret_key` 这类真实凭证应留在 `.env.local` 或 Tauri 运行时目录，不应写回仓库文件。
 - `tts.provider=windows_system` 时，仍走 Windows 系统 `System.Speech`，默认优先选 `Microsoft Zira Desktop`，不存在时再回退到其他英文 voice。
 - `tts.provider=doubao` 时，走豆包单向流式 WebSocket；当前播放链路要求 provider 配置里的 `audio_format=wav`，否则启动阶段直接报错。
@@ -369,9 +370,10 @@
 处理：
 - 打包脚本对主程序显式加 `--collect-submodules websockets`、`--collect-submodules tencentcloud` 和 `--collect-all charset_normalizer`，并通过仓库内 PyInstaller hook 动态补齐 `charset_normalizer` 的发行版级 `__mypyc` 顶层模块；不能继续赌 PyInstaller 会自动猜中函数内动态导入和 `requests` 的字符集依赖链。
 - 这些打包依赖和 smoke 脏告警规则现在统一收口到 `scripts/packaging_manifest.json`；如果以后再补动态依赖，先改清单，不要分头改两套脚本。
-- 打包脚本在真正调用 PyInstaller 前，会先用源码态主程序跑一次 `--check-tts-deps`。当前默认 `tts.provider=tencent_cloud`，缺 `tencentcloud` SDK 时必须在这里直接失败，不能等 PyInstaller 白跑完才补刀。
+- 打包脚本在真正调用 PyInstaller 前，会先用源码态主程序跑一次 `--check-tts-deps`。但这一步只检查“当前默认 provider 对应的依赖链”，不是替你自动验证所有云 TTS provider 都可用。
 - 主程序启动创建 TTS 时，会先做一次 provider 对应依赖探测；若缺依赖，不再伪装成 `tts configured ...`，而是直接记成 `tts unavailable ... reason=...`。
-- 构建后额外执行 `wechat-auto-backend.exe --check-tts-deps` 做最小冒烟；这一步失败，或者打出 `RequestsDependencyWarning`，都说明产物里的 TTS 朗读链路根本不完整，不该继续分发。
+- 构建后额外执行 `wechat-auto-backend.exe --check-tts-deps` 做最小冒烟；这一步失败，或者打出 `RequestsDependencyWarning`，都说明“当前默认 provider 的朗读链路”不完整，不该继续分发。
+- 如果你准备把默认 provider 改成 `doubao` 或 `tencent_cloud` 再发包，就必须额外按目标 provider 跑一遍对应依赖和配置验证，别拿 `windows_system` 的通过结果冒充云 TTS 也没问题。
 
 ### 26) 收起左侧菜单后，看不出当前正在看哪个群
 现象：
@@ -444,28 +446,50 @@
 - 当前消息卡必须把 `display/translated` 作为第一阅读层；原始预览只留在次级区块；`captureLevel=preview` 和 `pendingTranslation=true` 继续显示，但只能作为次级状态提示。
 - 当前桌面壳必须显式区分 `no sessions` 和 `no messages` 两种空态，且这两种空态的优先级低于 `startup_failed` / `degraded` / `reconnecting` 这类异常态。
 
-### 28) `npm run tauri build` 现在已经能做一体化桌面壳，但密钥仍然必须外置
+### 28) `npm run tauri build` 现在已经能做一体化桌面壳；密钥仍然外置，但 fresh install 不该被密钥卡死
 现象：
 - `desktop-shell` 现在已经能产出 `wechat-auto-shell.exe`、`msi`、`nsis`，而且双击壳会自动拉起 backend sidecar。
 - 运行时配置、日志、锁会落到 `%LOCALAPPDATA%\com.wechatauto.shell`，不再写回源码目录。
-- 但如果 `translate.enabled=true` 且你既没在配置里写 `deeplx_url` / `deeplx_url_env`，也没提供 `.env.local`，壳启动阶段仍会 fail-fast。
+- fresh runtime root 使用仓库跟踪的默认 bundle 配置时，即使没有 `.env.local`，也应该能先进入桌面壳和设置页。
+- 但已有 runtime root 若残留旧配置，或者你把 DeepLX / 云 TTS 打开后又没补 URL / 凭据，壳启动阶段仍会 fail-fast。
 
 根因：
 - `desktop-shell/package.json` 的 `pretauri` 会先构建 PyInstaller sidecar。
 - `desktop-shell/src-tauri/src/main.rs` 现在会托管 `wechat-auto-backend.exe`，并给 sidecar 注入 `WECHAT_AUTO_RUNTIME_ROOT`。
 - `listener_app/sidebar_shared.py` 会按运行时根目录解析配置/日志，并在 Tauri 壳下按“运行时目录优先、可执行目录兜底”读取 `.env.local`。
+- `listener_app/sidebar_shared.py` 复制 bundle 配置时只补不存在的文件，不覆盖已有 runtime 配置。
 - 一体化不等于“顺手把你的密钥一起烘焙进 installer”；这条边界必须保留。
 
 处理：
 - `tauri.conf.json` 继续显式维护 Windows `.ico`，否则 bundle 还是会直接失败。
-- 如果要让打包壳直接可用，至少满足下面任一条件：
-  - `config/listener.json` 里显式提供 `translate.deeplx_url`
-  - `config/listener.json` 里显式提供 `translate.deeplx_url_env`
-  - `%LOCALAPPDATA%\com.wechatauto.shell\.env.local` 存在
-  - `wechat-auto-shell.exe` 同目录 `.env.local` 存在
+- 仓库跟踪的默认 `config/listener.json` 必须保持这两个首启安全值：
+  - `translate.enabled=false`
+  - `tts.provider=windows_system`
+- 需要 DeepLX 或云 TTS 时，再通过设置页或运行时配置补下面这些条件：
+  - `translate.enabled=true and provider=deeplx` 时，显式提供 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env`
+  - `translate.enabled=true and provider=openai_compatible` 时，补 `translate.providers.openai_compatible.base_url/model/api_key`
+  - `tts.provider=doubao` 或 `tts.provider=tencent_cloud` 时，补对应 `tts.providers.<provider>.config_path`、provider 私有配置和密钥
+- 验 fresh install 时，必须隔离一个干净 runtime root；已有 `%LOCALAPPDATA%\com.wechatauto.shell\config\listener.json` 不会被 installer 覆盖
 - 真正的最小验证不是“exe 打开了”，而是：
   - `http://127.0.0.1:8765/healthz` 返回 `{"status":"ok"}`
   - `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log` 出现 `spawned backend sidecar pid=...`
+
+### 28.1) 把源码态配置和安装版配置混成一套
+现象：
+- 安装路径明明不在仓库里，但重装后翻译和 TTS 还是“自动就能用”。
+- 你以为安装版会吃项目里的 `config/listener.json`，结果实际行为和仓库文件对不上。
+
+根因：
+- Tauri 壳启动 sidecar 时，会把 `runtime_root/config/listener.json` 作为真实配置路径传给 backend。
+- 当前这个 `runtime_root` 是 `%LOCALAPPDATA%\com.wechatauto.shell`，不是仓库目录。
+- `listener_app/sidebar_shared.py` 还会优先读取 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`。
+- 安装包首次只会补齐缺失的 `config/*.json`；已有 runtime 配置不会被覆盖。
+
+处理：
+- 源码态：看仓库根目录 `config/listener.json` 和仓库根目录 `.env.local`
+- Tauri 壳 / 安装版：看 `%LOCALAPPDATA%\com.wechatauto.shell\config\listener.json` 和 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`
+- 桌面壳设置页保存时，只会写当前 backend 的 `runtime.config_path` 指向的那套配置，不会替你同步另一套
+- 如果要验证 installer 的“真正首启默认值”，先隔离或备份 `%LOCALAPPDATA%\com.wechatauto.shell`，别拿旧 runtime 配置污染结果
 
 ### 29) PyInstaller `onefile` 的双进程表现，别误判成重复 spawn
 现象：
@@ -509,14 +533,15 @@
 - backend 当前仍在启动时加载配置；保存负责落盘，不负责热更新现有 Python runtime。
 
 处理：
-- `/api/config` 返回 secret 只允许暴露 `configured/source/env_key` 元数据；`deeplx_url`、豆包 `appid/access_token`、腾讯云 `secret_id/secret_key` 都不允许回显原值。
+- `/api/config` 返回 secret 只允许暴露 `configured/source/env_key` 元数据；`deeplx_url`、`openai_compatible.api_key`、豆包 `appid/access_token`、腾讯云 `secret_id/secret_key` 都不允许回显原值。
 - `PUT /api/config` 必须继续遵守文件边界：
-  - shared 字段写回 `listener.json`
-  - provider 私有字段写回 `tts.config_path` 指向的独立 JSON
+  - shared 字段和 `translate.providers` / `tts.providers.<provider>.config_path` 写回 `listener.json`
+  - provider 私有字段写回 `tts.providers.<provider>.config_path` 指向的独立 JSON
   - 未知字段必须保留，不能因为 GUI 保存被顺手抹掉
 - secret 更新只能走 write-only 模式：`keep/direct/env/clear`；不要把“读取旧 secret 再原样发回去”这种伪方案塞回主路径。
 - GUI 的 `env` 模式只会写配置里的 `*_env` 字段，不会回写 `.env.local` 真值。
-- DeepLX 不再兼容隐式 env fallback；现有配置必须显式写 `translate.deeplx_url` 或 `translate.deeplx_url_env=DEEPLX_URL`，自定义 env key 不再受支持。
+- DeepLX 不再兼容隐式 env fallback；现有配置必须显式写 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env=DEEPLX_URL`，自定义 env key 不再受支持。
+- `translate.providers.openai_compatible.api_key` 不支持 `env` 模式，也没有 `api_key_env` 兼容字段。
 - `display.tts_auto_read_active_chat` 是持久化默认值；桌面壳顶部“朗读开/关”仍然只改当前 runtime，不会反写配置文件。
 
 ### 31) “保存并应用”只能重启当前壳自己拥有的 backend
@@ -573,7 +598,7 @@ npm run tauri build
 更具体的产物路径和验收边界看 `docs/desktop-shell-build.md`。
 
 ### 接入 DeepLX
-在 `config/listener.json` 设置 `translate.enabled=true`，并显式配置 `translate.deeplx_url` 或 `translate.deeplx_url_env`。
+在 `config/listener.json` 设置 `translate.enabled=true`、`translate.provider=deeplx`，并显式配置 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env`。
 
 ### 仅在必要时开启强刷新（会抢焦点）
 在 `config/listener.json` 设置 `listen.focus_refresh=true`。
@@ -597,7 +622,7 @@ npm run tauri build
 - 同一 target 只允许一个活动侧边栏实例（由运行时锁保证）。
 - 去重必须是“时间窗策略”，禁止恢复为全生命周期永久 `set` 去重。
 - 每个 target 的消息缓存上限固定 `100` 条，禁止无限增长。
-- 启动阶段必须对 `listen.interval_seconds`、`listen.load_retry_seconds`、`translate.timeout_seconds` 做 fail-fast 校验。
+- 启动阶段必须对 `listen.interval_seconds`、`listen.load_retry_seconds`、`translate.providers.<provider>.timeout_seconds` 做 fail-fast 校验。
 - 运行时锁活性判断必须包含 `pid` 与进程启动时间 token，禁止仅靠 `pid` 判断。
 - 翻译任务队列必须有上限并具备溢出日志，禁止无界增长。
 - TTS 运行期必须输出可定位日志，至少覆盖触发、跳过/拒绝、合成开始、播放成功、失败原因，禁止把错误只留在对象内部状态。
