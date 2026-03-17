@@ -82,13 +82,18 @@ class ListenerRuntime:
     def update_tts_state(
         self,
         *,
+        auto_read_enabled: bool | None = None,
         available: bool | None = None,
         last_error: str | None = None,
     ) -> None:
         self.store.set_tts_state(
+            auto_read_enabled=auto_read_enabled,
             available=available,
             last_error=last_error,
         )
+
+    def set_tts_auto_read_enabled(self, enabled: bool) -> None:
+        self.store.set_tts_state(auto_read_enabled=enabled)
 
     def publish_status(self, state: str, detail: str) -> None:
         self.store.set_runtime_state(worker_state=state, worker_detail=detail)
@@ -115,18 +120,22 @@ class ListenerRuntime:
         message_id: str = "",
         accepted: bool,
         detail: str = "",
+        auto_read_enabled: bool | None = None,
     ) -> None:
         tts_state = self.snapshot().get("tts", {})
+        payload = {
+            "action": str(action or "").strip(),
+            "session_id": normalize_session_id(session_id),
+            "message_id": str(message_id or "").strip(),
+            "accepted": bool(accepted),
+            "provider": str(tts_state.get("provider", "")),
+            "detail": str(detail or ""),
+        }
+        if auto_read_enabled is not None:
+            payload["auto_read_enabled"] = bool(auto_read_enabled)
         self._publish(
             "tts.updated",
-            {
-                "action": str(action or "").strip(),
-                "session_id": normalize_session_id(session_id),
-                "message_id": str(message_id or "").strip(),
-                "accepted": bool(accepted),
-                "provider": str(tts_state.get("provider", "")),
-                "detail": str(detail or ""),
-            },
+            payload,
         )
 
     def record_preview_message(
