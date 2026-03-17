@@ -145,6 +145,98 @@ class RuntimeConfigTest(unittest.TestCase):
             config = load_runtime_config(config_path)
 
         self.assertEqual(config.translate.deeplx_url, "https://env.deeplx.local")
+        self.assertEqual(config.translate.timeout_seconds, 8.0)
+
+    def test_load_runtime_config_supports_provider_aware_deeplx_fields(self):
+        config_path = self._write_config(
+            {
+                "listen": {
+                    "mode": "session",
+                },
+                "translate": {
+                    "enabled": True,
+                    "provider": "deeplx",
+                    "source_lang": "auto",
+                    "target_lang": "EN",
+                    "providers": {
+                        "deeplx": {
+                            "deeplx_url_env": "DEEPLX_URL",
+                            "timeout_seconds": 12.0,
+                        }
+                    },
+                },
+                "tts": {
+                    "provider": "windows_system",
+                },
+            }
+        )
+
+        with mock.patch.dict(os.environ, {"DEEPLX_URL": "https://env.deeplx.local"}, clear=False):
+            config = load_runtime_config(config_path)
+
+        self.assertEqual(config.translate.deeplx_url, "https://env.deeplx.local")
+        self.assertEqual(config.translate.timeout_seconds, 12.0)
+
+    def test_load_runtime_config_supports_openai_compatible_provider(self):
+        config_path = self._write_config(
+            {
+                "listen": {
+                    "mode": "session",
+                },
+                "translate": {
+                    "enabled": True,
+                    "provider": "openai_compatible",
+                    "source_lang": "ZH",
+                    "target_lang": "EN",
+                    "providers": {
+                        "openai_compatible": {
+                            "base_url": "https://openrouter.local/v1",
+                            "model": "gpt-4o-mini",
+                            "api_key": "test-key",
+                            "timeout_seconds": 15.0,
+                        }
+                    },
+                },
+                "tts": {
+                    "provider": "windows_system",
+                },
+            }
+        )
+
+        config = load_runtime_config(config_path)
+
+        self.assertEqual(config.translate.provider, "openai_compatible")
+        self.assertEqual(config.translate.openai_base_url, "https://openrouter.local/v1")
+        self.assertEqual(config.translate.openai_model, "gpt-4o-mini")
+        self.assertEqual(config.translate.openai_api_key, "test-key")
+        self.assertEqual(config.translate.timeout_seconds, 15.0)
+
+    def test_load_runtime_config_rejects_incomplete_openai_compatible_provider(self):
+        config_path = self._write_config(
+            {
+                "listen": {
+                    "mode": "session",
+                },
+                "translate": {
+                    "enabled": True,
+                    "provider": "openai_compatible",
+                    "providers": {
+                        "openai_compatible": {
+                            "base_url": "https://openrouter.local/v1",
+                            "model": "",
+                            "api_key": "test-key",
+                            "timeout_seconds": 15.0,
+                        }
+                    },
+                },
+                "tts": {
+                    "provider": "windows_system",
+                },
+            }
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "openai_compatible.*model"):
+            load_runtime_config(config_path)
 
     def test_load_runtime_config_blank_deeplx_env_disables_env_mode(self):
         config_path = self._write_config(
@@ -213,6 +305,51 @@ class RuntimeConfigTest(unittest.TestCase):
         self.assertEqual(runtime_config.raw_config["display"]["width"], 540)
         self.assertEqual(runtime_config.raw_config["display"]["side"], "weird-side")
         self.assertEqual(runtime_config.display.on_translate_fail, "show_cn_with_reason")
+
+    def test_load_runtime_config_resolves_tts_provider_config_path_from_provider_map(self):
+        config_path = self._write_config(
+            {
+                "listen": {
+                    "mode": "session",
+                },
+                "translate": {
+                    "enabled": False,
+                    "provider": "passthrough",
+                },
+                "tts": {
+                    "provider": "tencent_cloud",
+                    "providers": {
+                        "tencent_cloud": {
+                            "config_path": "config/tencent_tts.json",
+                        }
+                    },
+                },
+            }
+        )
+
+        runtime_config = load_runtime_config(config_path)
+
+        self.assertEqual(runtime_config.tts.provider, "tencent_cloud")
+        self.assertEqual(runtime_config.tts.raw_config["config_path"], "config/tencent_tts.json")
+
+    def test_repository_default_config_is_first_launch_safe_without_env(self):
+        repo_config_path = Path(__file__).resolve().parents[1] / "config" / "listener.json"
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "DEEPLX_URL": "",
+                "TENCENTCLOUD_SECRET_ID": "",
+                "TENCENTCLOUD_SECRET_KEY": "",
+            },
+            clear=False,
+        ):
+            runtime_config = load_runtime_config(str(repo_config_path))
+
+        self.assertFalse(runtime_config.translate.enabled)
+        self.assertEqual(runtime_config.translate.provider, "deeplx")
+        self.assertEqual(runtime_config.translate.deeplx_url, "")
+        self.assertEqual(runtime_config.tts.provider, "windows_system")
 
 
 if __name__ == "__main__":

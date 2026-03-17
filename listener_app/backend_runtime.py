@@ -227,6 +227,9 @@ def load_backend_settings(config_path: str) -> BackendSettings:
         source_lang=runtime_config.translate.source_lang,
         target_lang=runtime_config.translate.target_lang,
         timeout_seconds=runtime_config.translate.timeout_seconds,
+        openai_base_url=runtime_config.translate.openai_base_url,
+        openai_model=runtime_config.translate.openai_model,
+        openai_api_key=runtime_config.translate.openai_api_key,
     )
     tts_player, tts_runtime_text = create_tts_player(
         runtime_config.tts.raw_config,
@@ -255,6 +258,8 @@ def load_backend_settings(config_path: str) -> BackendSettings:
         translator_runtime_text=build_translator_runtime_text(
             runtime_config.translate.enabled,
             runtime_config.translate.provider,
+            openai_base_url=runtime_config.translate.openai_base_url,
+            openai_model=runtime_config.translate.openai_model,
         ),
         tts_runtime_text=tts_runtime_text,
         english_only=runtime_config.display.english_only,

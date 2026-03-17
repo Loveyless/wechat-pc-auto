@@ -79,7 +79,7 @@ WORKER_RESTART_MAX_BACKOFF_SECONDS = 30.0
 WORKER_STOP_TIMEOUT_SECONDS = 3.0
 WORKER_FORCE_KILL_TIMEOUT_SECONDS = 1.0
 RUNTIME_LOCK_DIR = os.path.join(ROOT_DIR, "logs", ".runtime")
-SUPPORTED_TRANSLATE_PROVIDERS = ("deeplx", "passthrough")
+SUPPORTED_TRANSLATE_PROVIDERS = ("deeplx", "openai_compatible", "passthrough")
 
 
 def _load_env_file(env_path: str):

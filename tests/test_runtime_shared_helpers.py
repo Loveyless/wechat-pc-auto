@@ -145,6 +145,23 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             sidebar.validate_translate_config(True, "deeplx", "")
         sidebar.validate_translate_config(False, "deeplx", "")
         sidebar.validate_translate_config(True, "passthrough", "")
+        sidebar.validate_translate_config(
+            True,
+            "openai_compatible",
+            "",
+            openai_base_url="https://openrouter.local/v1",
+            openai_model="gpt-4o-mini",
+            openai_api_key="token",
+        )
+        with self.assertRaises(RuntimeError):
+            sidebar.validate_translate_config(
+                True,
+                "openai_compatible",
+                "",
+                openai_base_url="",
+                openai_model="gpt-4o-mini",
+                openai_api_key="token",
+            )
 
     def test_normalize_tts_provider_rejects_invalid_value(self):
         self.assertEqual(sidebar.normalize_tts_provider("DOUBAO"), "doubao")
@@ -745,6 +762,21 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
                 target_lang="EN",
                 timeout_seconds=8.0,
             )
+
+    def test_create_translator_supports_openai_compatible(self):
+        translator = sidebar.create_translator(
+            enabled=True,
+            provider="openai_compatible",
+            deeplx_url="",
+            source_lang="ZH",
+            target_lang="EN",
+            timeout_seconds=12.0,
+            openai_base_url="https://openrouter.local/v1",
+            openai_model="gpt-4o-mini",
+            openai_api_key="token",
+        )
+
+        self.assertIsInstance(translator, sidebar.OpenAICompatibleTranslator)
 
     def test_ensure_runtime_layout_copies_default_config(self):
         with tempfile.TemporaryDirectory() as runtime_dir, tempfile.TemporaryDirectory() as bundle_dir:
