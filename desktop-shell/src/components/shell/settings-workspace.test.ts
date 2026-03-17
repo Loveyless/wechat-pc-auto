@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest"
 
-import { resolveDesktopSettingsProviderSections } from "@/components/shell/settings-workspace"
+import {
+  resolveDesktopSettingsProviderSections,
+  resolveDesktopSettingsTranslateSections,
+} from "@/components/shell/settings-workspace"
+
+describe("settings workspace translate sections", () => {
+  it("renders deeplx as the only deeplx branch", () => {
+    expect(resolveDesktopSettingsTranslateSections("deeplx")).toEqual({
+      showDeeplxFields: true,
+      showOpenAICompatibleFields: false,
+      showPassthroughNotice: false,
+    })
+  })
+
+  it("renders openai_compatible and passthrough as exclusive branches", () => {
+    expect(resolveDesktopSettingsTranslateSections("openai_compatible")).toEqual({
+      showDeeplxFields: false,
+      showOpenAICompatibleFields: true,
+      showPassthroughNotice: false,
+    })
+    expect(resolveDesktopSettingsTranslateSections("passthrough")).toEqual({
+      showDeeplxFields: false,
+      showOpenAICompatibleFields: false,
+      showPassthroughNotice: true,
+    })
+  })
+})
 
 describe("settings workspace provider sections", () => {
   it("renders windows_system as notice-only branch", () => {

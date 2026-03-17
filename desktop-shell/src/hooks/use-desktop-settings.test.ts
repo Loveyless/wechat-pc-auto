@@ -174,6 +174,29 @@ describe("desktop settings state", () => {
     })
   })
 
+  it("preserves provider-specific translate payload branches when switching to openai_compatible", () => {
+    const draft = createDesktopSettingsDraft(createRuntimeConfig())
+
+    draft.translate.provider = "openai_compatible"
+    draft.translate.providers.openai_compatible.base_url = "https://gateway.local/v1"
+    draft.translate.providers.openai_compatible.model = "gpt-4.1-mini"
+    draft.translate.providers.openai_compatible.timeout_seconds = 18
+    draft.translate.providers.openai_compatible.api_key.mode = "clear"
+
+    const payload = buildDesktopSettingsSavePayload(draft)
+
+    expect(payload.translate.provider).toBe("openai_compatible")
+    expect(payload.translate.providers.openai_compatible).toEqual({
+      base_url: "https://gateway.local/v1",
+      model: "gpt-4.1-mini",
+      timeout_seconds: 18,
+    })
+    expect(payload.translate.providers.passthrough).toEqual({})
+    expect(payload.secret_updates.translate.openai_compatible.api_key).toEqual({
+      mode: "clear",
+    })
+  })
+
   it("enables save_and_apply only for owned managed connections with restart support", () => {
     const config = createRuntimeConfig()
 
