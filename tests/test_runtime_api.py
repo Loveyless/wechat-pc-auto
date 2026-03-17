@@ -18,16 +18,43 @@ class FakeService:
             "translate": {
                 "enabled": False,
                 "provider": "passthrough",
-                "available_providers": ["deeplx", "passthrough"],
-                "deeplx_url": {"configured": False, "source": "env", "env_key": "DEEPLX_URL"},
+                "available_providers": ["deeplx", "openai_compatible", "passthrough"],
+                "source_lang": "auto",
+                "target_lang": "EN",
+                "providers": {
+                    "deeplx": {
+                        "timeout_seconds": 8.0,
+                        "deeplx_url": {
+                            "configured": False,
+                            "source": "env",
+                            "env_key": "DEEPLX_URL",
+                        },
+                    },
+                    "openai_compatible": {
+                        "base_url": "",
+                        "model": "",
+                        "timeout_seconds": 8.0,
+                        "api_key": {"configured": False, "source": "unset"},
+                    },
+                    "passthrough": {},
+                },
             },
             "display": {"english_only": True, "tts_auto_read_active_chat": True},
             "tts": {
                 "provider": "windows_system",
                 "available_providers": ["windows_system", "doubao", "tencent_cloud"],
-                "providers": {"windows_system": {}, "doubao": {}, "tencent_cloud": {}},
+                "providers": {
+                    "windows_system": {},
+                    "doubao": {"config_path": "config/doubao_tts.json"},
+                    "tencent_cloud": {"config_path": "config/tencent_tts.json"},
+                },
             },
-            "runtime": {"config_path": "D:/mock/config/listener.json"},
+            "runtime": {
+                "config_path": "D:/mock/config/listener.json",
+                "apply_strategy": "restart_required",
+                "restart_required": True,
+                "hot_reload_supported": False,
+            },
         }
         self._saved_payload = None
         self._save_error: Exception | None = None
@@ -117,6 +144,11 @@ class RuntimeApiServerTest(unittest.TestCase):
         self.assertEqual(len(sessions_payload["items"]), 1)
         self.assertEqual(len(messages_payload["items"]), 1)
         self.assertEqual(config_payload["translate"]["provider"], "passthrough")
+        self.assertIn("openai_compatible", config_payload["translate"]["providers"])
+        self.assertEqual(
+            config_payload["tts"]["providers"]["tencent_cloud"]["config_path"],
+            "config/tencent_tts.json",
+        )
 
     def test_http_health_endpoint_uses_service_snapshot(self):
         self.service._health = {
@@ -167,10 +199,40 @@ class RuntimeApiServerTest(unittest.TestCase):
         self.assertEqual(payload["runtime"]["active_session_id"], "测试群")
 
     def test_http_put_config_returns_saved_snapshot(self):
-        status, payload = self._json_put("/api/config", {"display": {"english_only": False}})
+        status, payload = self._json_put(
+            "/api/config",
+            {
+                "translate": {
+                    "enabled": True,
+                    "provider": "openai_compatible",
+                    "source_lang": "ZH",
+                    "target_lang": "EN",
+                    "providers": {
+                        "openai_compatible": {
+                            "base_url": "https://openrouter.local/v1",
+                            "model": "gpt-4o-mini",
+                            "timeout_seconds": 11.0,
+                        }
+                    },
+                },
+                "secret_updates": {
+                    "translate": {
+                        "openai_compatible": {
+                            "api_key": {
+                                "mode": "direct",
+                                "value": "token",
+                            }
+                        }
+                    }
+                },
+            },
+        )
         self.assertEqual(status, 200)
         self.assertEqual(payload["config"]["runtime"]["config_path"], "D:/mock/config/listener.json")
-        self.assertEqual(self.service._saved_payload, {"display": {"english_only": False}})
+        self.assertEqual(
+            self.service._saved_payload["translate"]["providers"]["openai_compatible"]["model"],
+            "gpt-4o-mini",
+        )
 
     def test_http_put_config_returns_field_errors(self):
         self.service._save_error = ConfigValidationError(
