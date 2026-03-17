@@ -9,7 +9,6 @@ import type {
 export const mockSessions: ShellSession[] = [
   {
     id: "group-english-checkin",
-    kind: "group",
     name: "英语打卡群",
     unread: 3,
     preview: "Alice：pipeline 已经切成 HTTP + WS 了，前端别再读 stdout。",
@@ -18,7 +17,6 @@ export const mockSessions: ShellSession[] = [
   },
   {
     id: "private-bob",
-    kind: "private",
     name: "Bob",
     unread: 1,
     preview: "preview_only 要写死，不要冒充完整正文。",
@@ -27,7 +25,6 @@ export const mockSessions: ShellSession[] = [
   },
   {
     id: "group-weekly-review",
-    kind: "group",
     name: "周会复盘",
     unread: 0,
     preview: "先把桌面壳子起起来，运行时接线后面再说。",

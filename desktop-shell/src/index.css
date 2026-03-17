@@ -104,6 +104,13 @@
 }
 
 @layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    min-height: 100%;
+  }
+
   * {
     @apply border-border;
   }
@@ -122,10 +129,41 @@
       radial-gradient(circle at top right, var(--workspace-glow-secondary), transparent 24%),
       linear-gradient(180deg, var(--workspace-canvas-strong) 0%, var(--workspace-canvas) 58%);
     min-height: 100vh;
+    overflow: hidden;
   }
 
   ::selection {
     background: var(--surface-selected-strong);
     color: var(--text-primary);
+  }
+}
+
+@layer utilities {
+  .shell-scrollbar {
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(79, 94, 111, 0.42) transparent;
+  }
+
+  .shell-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .shell-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .shell-scrollbar::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: rgba(79, 94, 111, 0.42);
+    background-clip: padding-box;
+  }
+
+  .shell-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(79, 94, 111, 0.58);
+    background-clip: padding-box;
   }
 }

@@ -1,9 +1,3 @@
-import { StatusBadge } from "@/components/ui/status-badge"
-import {
-  resolveSessionFidelityBadge,
-  resolveSessionKindBadge,
-  resolveUnreadTone,
-} from "@/components/shell/shell-view-model"
 import type { ShellSession } from "@/lib/shell-types"
 
 type SessionRowProps = {
@@ -17,24 +11,21 @@ function resolveSessionMonogram(session: ShellSession) {
 }
 
 export function SessionRow({ session, selected, onSelect }: SessionRowProps) {
-  const kindBadge = resolveSessionKindBadge(session.kind)
-  const fidelityBadge = resolveSessionFidelityBadge(session)
-
   return (
     <button
       className={[
-        "w-full rounded-[1.45rem] border px-4 py-4 text-left transition",
+        "w-full rounded-[0.9rem] border border-transparent px-2.5 py-2.5 text-left transition-colors",
         selected
-          ? "border-state-progress/20 bg-surface-selected shadow-[0_16px_36px_rgba(37,105,199,0.14)]"
-          : "border-border-subtle bg-surface-panel-strong hover:border-border-strong hover:bg-workspace-canvas-strong/80",
+          ? "bg-surface-selected/90"
+          : "bg-transparent hover:bg-workspace-canvas-strong/72",
       ].join(" ")}
       onClick={() => onSelect(session.id)}
       type="button"
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2.5">
         <div
           className={[
-            "grid h-11 w-11 shrink-0 place-items-center rounded-[1rem] text-sm font-semibold",
+            "grid h-9 w-9 shrink-0 place-items-center rounded-[0.8rem] text-[13px] font-semibold",
             selected
               ? "bg-state-progress text-text-inverse"
               : "bg-surface-panel-muted text-text-primary",
@@ -44,36 +35,27 @@ export function SessionRow({ session, selected, onSelect }: SessionRowProps) {
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-base font-semibold text-text-primary">
-                  {session.name}
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <StatusBadge tone={kindBadge.tone}>{kindBadge.label}</StatusBadge>
-                {fidelityBadge ? (
-                  <StatusBadge tone={fidelityBadge.tone}>
-                    {fidelityBadge.label}
-                  </StatusBadge>
-                ) : null}
-              </div>
+              <span className="block truncate text-[13px] font-semibold text-text-primary">
+                {session.name}
+              </span>
             </div>
 
-            <div className="flex shrink-0 flex-col items-end gap-2">
-              <span className="text-xs text-text-muted">{session.updatedAt}</span>
-              {session.unread > 0 ? (
-                <StatusBadge tone={resolveUnreadTone(session.unread)}>
-                  {session.unread}
-                </StatusBadge>
-              ) : null}
-            </div>
+            <span className="shrink-0 pt-0.5 text-[11px] text-text-muted">{session.updatedAt}</span>
           </div>
 
-          <p className="mt-3 line-clamp-2 text-sm leading-6 text-text-secondary">
-            {session.preview}
+          <p className="mt-0.5 truncate text-[12px] leading-5 text-text-secondary">
+            {session.preview || "暂无预览"}
           </p>
+
+          <div className="mt-1.5 flex items-center justify-end text-[10px]">
+            {session.unread > 0 ? (
+              <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-state-progress px-1.5 py-0.5 font-semibold text-text-inverse">
+                {session.unread}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
     </button>

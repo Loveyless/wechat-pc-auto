@@ -4,18 +4,21 @@ import type { ShellMessage } from "@/lib/shell-types"
 
 type MessageCardProps = {
   message: ShellMessage
+  showOriginal: boolean
 }
 
-export function MessageCard({ message }: MessageCardProps) {
+export function MessageCard({ message, showOriginal }: MessageCardProps) {
   const presentation = resolveMessagePresentation(message)
+  const canShowOriginal = Boolean(
+    message.original && message.original !== presentation.primaryText,
+  )
 
   return (
-    <article className="rounded-[1.55rem] border border-border-subtle bg-surface-panel-strong/95 p-5 shadow-[0_16px_36px_rgba(29,38,50,0.06)]">
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-text-primary">{message.sender}</p>
-          <p className="text-xs text-text-muted">{message.time}</p>
-        </div>
+    <article className="w-full max-w-[820px] rounded-[0.9rem] border border-border-subtle bg-surface-panel-strong/96 px-3 py-2.5">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-[12px] font-medium text-text-secondary">
+          [{message.time}] {message.sender}
+        </p>
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge tone={presentation.fidelityTone}>
             {presentation.fidelityLabel}
@@ -28,18 +31,20 @@ export function MessageCard({ message }: MessageCardProps) {
         </div>
       </div>
 
-      <div className="rounded-[1.3rem] bg-workspace-canvas-strong/80 px-4 py-4">
-        <p className="text-xl font-semibold leading-9 text-text-primary">
-          {presentation.primaryText}
-        </p>
-      </div>
+      <p className="mt-1.5 whitespace-pre-wrap break-words text-[13px] font-medium leading-6 text-text-primary">
+        {presentation.primaryText}
+      </p>
 
-      <div className="mt-4 rounded-[1.2rem] border border-border-subtle bg-surface-panel px-4 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
-          Source Preview
-        </p>
-        <p className="mt-2 text-sm leading-6 text-text-secondary">{message.original}</p>
-      </div>
+      {showOriginal && canShowOriginal ? (
+        <div className="mt-2 border-l-2 border-border-subtle pl-2.5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-text-muted">
+            原始预览
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-5 text-text-secondary">
+            {message.original}
+          </p>
+        </div>
+      ) : null}
     </article>
   )
 }

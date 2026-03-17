@@ -6,8 +6,6 @@ import {
   resolveDataEmptyState,
   resolveMessagePresentation,
   resolveRuntimeSummary,
-  resolveSessionFidelityBadge,
-  resolveSessionKindBadge,
   resolveTranslationSummary,
   resolveTtsSummary,
   resolveUnreadTone,
@@ -42,13 +40,9 @@ describe("shell view model", () => {
     expect(resolveConnectionBannerState("ready", "")).toBeNull()
   })
 
-  it("maps session kind, unread, and preview fidelity to stable badge semantics", () => {
-    expect(resolveSessionKindBadge("group")).toEqual({ label: "群聊", tone: "accent" })
+  it("keeps unread tone stable without per-session badge helpers", () => {
     expect(resolveUnreadTone(2)).toBe("unread")
-    expect(resolveSessionFidelityBadge({ previewOnly: true })).toEqual({
-      label: "PREVIEW",
-      tone: "preview",
-    })
+    expect(resolveUnreadTone(0)).toBe("neutral")
   })
 
   it("prioritizes display text and preserves preview and translating cues", () => {
@@ -62,9 +56,9 @@ describe("shell view model", () => {
       }),
     ).toEqual({
       primaryText: "display",
-      fidelityLabel: "PREVIEW",
+      fidelityLabel: "预览",
       fidelityTone: "preview",
-      translationLabel: "TRANSLATING",
+      translationLabel: "翻译中",
       translationTone: "info",
     })
   })
@@ -77,7 +71,7 @@ describe("shell view model", () => {
         last_error: "",
         provider: "deeplx",
       }),
-    ).toEqual({ label: "translate:deeplx:1", tone: "info" })
+    ).toEqual({ label: "DeepLX 排队 1", tone: "info" })
     expect(
       resolveTtsSummary({
         available: false,
@@ -85,7 +79,7 @@ describe("shell view model", () => {
         last_error: "missing module",
         provider: "windows_system",
       }),
-    ).toEqual({ label: "tts:windows_system:blocked", tone: "warning" })
+    ).toEqual({ label: "系统朗读 不可用", tone: "warning" })
   })
 
   it("maps runtime fidelity and worker states into reusable tones", () => {
@@ -97,7 +91,10 @@ describe("shell view model", () => {
       }),
     ).toEqual({
       fidelityTone: "preview",
+      fidelityLabel: "预览模式",
+      scopeLabel: "全部会话",
       workerTone: "success",
+      workerLabel: "运行中",
     })
   })
 
