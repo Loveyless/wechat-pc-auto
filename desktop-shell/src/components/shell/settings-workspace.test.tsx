@@ -1,28 +1,49 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 
-import type { UseDesktopSettingsResult } from "@/hooks/use-desktop-settings"
-import type { DesktopRuntimeConfig, DesktopTtsProvider } from "@/lib/settings-types"
+import { SettingsWorkspace } from "@/components/shell/settings-workspace"
 import {
   createDesktopSettingsDraft,
   extractDesktopSecretDrafts,
   resolveDesktopSettingsActionState,
 } from "@/hooks/use-desktop-settings"
-import { SettingsWorkspace } from "@/components/shell/settings-workspace"
+import type { UseDesktopSettingsResult } from "@/hooks/use-desktop-settings"
+import type {
+  DesktopRuntimeConfig,
+  DesktopTranslateProvider,
+  DesktopTtsProvider,
+} from "@/lib/settings-types"
 
-function createRuntimeConfig(provider: DesktopTtsProvider): DesktopRuntimeConfig {
+function createRuntimeConfig(params: {
+  translateProvider: DesktopTranslateProvider
+  ttsProvider: DesktopTtsProvider
+}): DesktopRuntimeConfig {
   return {
     translate: {
       enabled: true,
-      provider: "deeplx",
-      available_providers: ["deeplx", "passthrough"],
+      provider: params.translateProvider,
+      available_providers: ["deeplx", "openai_compatible", "passthrough"],
       source_lang: "auto",
       target_lang: "EN",
-      timeout_seconds: 8,
-      deeplx_url: {
-        configured: true,
-        source: "env",
-        env_key: "DEEPLX_URL",
+      providers: {
+        deeplx: {
+          timeout_seconds: 8,
+          deeplx_url: {
+            configured: true,
+            source: "env",
+            env_key: "DEEPLX_URL",
+          },
+        },
+        openai_compatible: {
+          base_url: "https://openai-compatible.local/v1",
+          model: "gpt-4o-mini",
+          timeout_seconds: 12,
+          api_key: {
+            configured: true,
+            source: "direct",
+          },
+        },
+        passthrough: {},
       },
     },
     display: {
@@ -31,11 +52,12 @@ function createRuntimeConfig(provider: DesktopTtsProvider): DesktopRuntimeConfig
       on_translate_fail: "show_cn_with_reason",
     },
     tts: {
-      provider,
+      provider: params.ttsProvider,
       available_providers: ["windows_system", "doubao", "tencent_cloud"],
       providers: {
         windows_system: {},
         doubao: {
+          config_path: "config/doubao_tts.json",
           endpoint: "wss://doubao.local",
           resource_id: "res-id",
           speaker: "speaker-a",
@@ -58,6 +80,7 @@ function createRuntimeConfig(provider: DesktopTtsProvider): DesktopRuntimeConfig
           },
         },
         tencent_cloud: {
+          config_path: "config/tencent_tts.json",
           endpoint: "tts.tencentcloudapi.com",
           region: "ap-shanghai",
           voice_type: 501008,
@@ -96,10 +119,11 @@ function createRuntimeConfig(provider: DesktopTtsProvider): DesktopRuntimeConfig
 }
 
 function createSettingsResult(params: {
-  provider: DesktopTtsProvider
+  translateProvider: DesktopTranslateProvider
+  ttsProvider: DesktopTtsProvider
   managedApply: boolean
 }): UseDesktopSettingsResult {
-  const config = createRuntimeConfig(params.provider)
+  const config = createRuntimeConfig(params)
   const draft = createDesktopSettingsDraft(config)
   const secretDrafts = extractDesktopSecretDrafts(draft)
   const actionState = resolveDesktopSettingsActionState({
@@ -149,30 +173,129 @@ function createSettingsResult(params: {
 }
 
 describe("settings workspace", () => {
-  it("renders provider-specific branches for windows_system, doubao, and tencent_cloud", () => {
-    const windowsMarkup = renderToStaticMarkup(
-      <SettingsWorkspace settings={createSettingsResult({ provider: "windows_system", managedApply: false })} />,
+  it("renders translate provider branches for deeplx, openai_compatible, and passthrough", () => {
+    const deeplxMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "windows_system",
+          managedApply: false,
+        })}
+      />,
     )
+    const openAiMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "openai_compatible",
+          ttsProvider: "windows_system",
+          managedApply: false,
+        })}
+      />,
+    )
+    const passthroughMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "passthrough",
+          ttsProvider: "windows_system",
+          managedApply: false,
+        })}
+      />,
+    )
+
+    expect(deeplxMarkup).toContain("DeepLX Timeout")
+    expect(deeplxMarkup).toContain("DeepLX URL")
+    expect(openAiMarkup).toContain("Base URL")
+    expect(openAiMarkup).toContain("Model")
+    expect(openAiMarkup).toContain("API Key")
+    expect(openAiMarkup).not.toContain("改成环境变量")
+    expect(passthroughMarkup).toContain("不请求外部翻译 provider")
+  })
+
+  it("keeps cloud TTS core fields visible and groups secondary tuning under advanced sections", () => {
     const doubaoMarkup = renderToStaticMarkup(
-      <SettingsWorkspace settings={createSettingsResult({ provider: "doubao", managedApply: false })} />,
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "doubao",
+          managedApply: false,
+        })}
+      />,
     )
     const tencentMarkup = renderToStaticMarkup(
-      <SettingsWorkspace settings={createSettingsResult({ provider: "tencent_cloud", managedApply: false })} />,
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "tencent_cloud",
+          managedApply: false,
+        })}
+      />,
+    )
+
+    expect(doubaoMarkup).toContain("Config Path")
+    expect(doubaoMarkup).toContain("豆包 App ID")
+    expect(doubaoMarkup).toContain("高级参数")
+    expect(doubaoMarkup).toContain("Speech Rate")
+    expect(tencentMarkup).toContain("Config Path")
+    expect(tencentMarkup).toContain("Tencent Secret ID")
+    expect(tencentMarkup).toContain("高级参数")
+    expect(tencentMarkup).toContain("Emotion Intensity")
+  })
+
+  it("renders provider-specific branches for windows_system, doubao, and tencent_cloud", () => {
+    const windowsMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "windows_system",
+          managedApply: false,
+        })}
+      />,
+    )
+    const doubaoMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "doubao",
+          managedApply: false,
+        })}
+      />,
+    )
+    const tencentMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "tencent_cloud",
+          managedApply: false,
+        })}
+      />,
     )
 
     expect(windowsMarkup).toContain("没有 provider-private 表单")
-    expect(doubaoMarkup).toContain("App ID")
-    expect(doubaoMarkup).toContain("Access Token")
-    expect(tencentMarkup).toContain("Secret ID")
-    expect(tencentMarkup).toContain("Emotion Intensity")
+    expect(windowsMarkup).not.toContain("豆包 App ID")
+    expect(doubaoMarkup).toContain("豆包 App ID")
+    expect(doubaoMarkup).toContain("豆包 Access Token")
+    expect(tencentMarkup).toContain("Tencent Secret ID")
+    expect(tencentMarkup).toContain("Tencent Secret Key")
   })
 
   it("switches CTA copy between save-only and save-and-apply modes", () => {
     const saveOnlyMarkup = renderToStaticMarkup(
-      <SettingsWorkspace settings={createSettingsResult({ provider: "windows_system", managedApply: false })} />,
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "windows_system",
+          managedApply: false,
+        })}
+      />,
     )
     const applyMarkup = renderToStaticMarkup(
-      <SettingsWorkspace settings={createSettingsResult({ provider: "windows_system", managedApply: true })} />,
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "windows_system",
+          managedApply: true,
+        })}
+      />,
     )
 
     expect(saveOnlyMarkup).toContain("保存设置")
