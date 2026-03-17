@@ -86,10 +86,15 @@ class RuntimeConfigStoreTest(unittest.TestCase):
             snapshot = build_config_snapshot(str(listener_path))
 
         self.assertEqual(snapshot["translate"]["provider"], "deeplx")
-        self.assertNotIn("value", snapshot["translate"]["deeplx_url"])
-        self.assertEqual(snapshot["translate"]["deeplx_url"]["source"], "direct")
+        self.assertNotIn("value", snapshot["translate"]["providers"]["deeplx"]["deeplx_url"])
+        self.assertEqual(snapshot["translate"]["providers"]["deeplx"]["deeplx_url"]["source"], "direct")
+        self.assertEqual(snapshot["translate"]["providers"]["deeplx"]["timeout_seconds"], 8.0)
         self.assertEqual(snapshot["tts"]["provider"], "tencent_cloud")
         self.assertIn("doubao", snapshot["tts"]["providers"])
+        self.assertEqual(
+            snapshot["tts"]["providers"]["tencent_cloud"]["config_path"],
+            "tencent_tts.json",
+        )
         self.assertEqual(
             snapshot["tts"]["providers"]["tencent_cloud"]["secret_id"]["source"],
             "direct",
@@ -123,7 +128,11 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                         "provider": "deeplx",
                         "source_lang": "auto",
                         "target_lang": "EN",
-                        "timeout_seconds": 9.0,
+                        "providers": {
+                            "deeplx": {
+                                "timeout_seconds": 9.0,
+                            }
+                        },
                     },
                     "display": {
                         "english_only": False,
@@ -134,6 +143,7 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                         "provider": "tencent_cloud",
                         "providers": {
                             "tencent_cloud": {
+                                "config_path": "tencent_tts.json",
                                 "endpoint": "tts.tencentcloudapi.com",
                                 "region": "ap-shanghai",
                                 "voice_type": 501008,
@@ -154,9 +164,11 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                     },
                     "secret_updates": {
                         "translate": {
-                            "deeplx_url": {
-                                "mode": "env",
-                                "env_key": "DEEPLX_URL",
+                            "deeplx": {
+                                "deeplx_url": {
+                                    "mode": "env",
+                                    "env_key": "DEEPLX_URL",
+                                }
                             }
                         },
                         "tts": {
@@ -179,14 +191,31 @@ class RuntimeConfigStoreTest(unittest.TestCase):
         tencent_raw = json.loads(tencent_path.read_text(encoding="utf-8"))
         self.assertEqual(listener_raw["display"]["width"], 470)
         self.assertEqual(listener_raw["display"]["on_translate_fail"], "show_cn")
-        self.assertEqual(listener_raw["translate"]["deeplx_url"], "")
-        self.assertEqual(listener_raw["translate"]["deeplx_url_env"], "DEEPLX_URL")
+        self.assertNotIn("deeplx_url", listener_raw["translate"])
+        self.assertNotIn("deeplx_url_env", listener_raw["translate"])
+        self.assertEqual(
+            listener_raw["translate"]["providers"]["deeplx"]["deeplx_url"],
+            "",
+        )
+        self.assertEqual(
+            listener_raw["translate"]["providers"]["deeplx"]["deeplx_url_env"],
+            "DEEPLX_URL",
+        )
+        self.assertEqual(
+            listener_raw["translate"]["providers"]["deeplx"]["timeout_seconds"],
+            9.0,
+        )
         self.assertEqual(tencent_raw["extra_flag"], "keep-me")
         self.assertEqual(tencent_raw["secret_id"], "new-secret-id")
         self.assertEqual(tencent_raw["secret_key"], "")
         self.assertEqual(tencent_raw["secret_key_env"], "TENCENT_TEST_SECRET_KEY")
+        self.assertNotIn("config_path", listener_raw["tts"])
+        self.assertEqual(
+            listener_raw["tts"]["providers"]["tencent_cloud"]["config_path"],
+            "tencent_tts.json",
+        )
         self.assertNotIn("value", saved["tts"]["providers"]["tencent_cloud"]["secret_id"])
-        self.assertEqual(saved["translate"]["deeplx_url"]["source"], "env")
+        self.assertEqual(saved["translate"]["providers"]["deeplx"]["deeplx_url"]["source"], "env")
 
     def test_save_config_snapshot_clear_deeplx_url_disables_env_mode(self):
         listener_path, _, temp_dir = self._create_runtime_files()
@@ -208,7 +237,11 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                         "provider": "deeplx",
                         "source_lang": "auto",
                         "target_lang": "EN",
-                        "timeout_seconds": 8.0,
+                        "providers": {
+                            "deeplx": {
+                                "timeout_seconds": 8.0,
+                            }
+                        },
                     },
                     "display": {
                         "english_only": True,
@@ -219,6 +252,7 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                         "provider": "tencent_cloud",
                         "providers": {
                             "tencent_cloud": {
+                                "config_path": "tencent_tts.json",
                                 "endpoint": "tts.tencentcloudapi.com",
                                 "region": "",
                                 "voice_type": 501008,
@@ -239,8 +273,10 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                     },
                     "secret_updates": {
                         "translate": {
-                            "deeplx_url": {
-                                "mode": "clear",
+                            "deeplx": {
+                                "deeplx_url": {
+                                    "mode": "clear",
+                                }
                             }
                         }
                     },
@@ -248,10 +284,123 @@ class RuntimeConfigStoreTest(unittest.TestCase):
             )
 
         listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
-        self.assertEqual(listener_raw["translate"]["deeplx_url"], "")
-        self.assertEqual(listener_raw["translate"]["deeplx_url_env"], "")
-        self.assertFalse(saved["translate"]["deeplx_url"]["configured"])
-        self.assertEqual(saved["translate"]["deeplx_url"]["source"], "unset")
+        self.assertEqual(listener_raw["translate"]["providers"]["deeplx"]["deeplx_url"], "")
+        self.assertEqual(listener_raw["translate"]["providers"]["deeplx"]["deeplx_url_env"], "")
+        self.assertFalse(saved["translate"]["providers"]["deeplx"]["deeplx_url"]["configured"])
+        self.assertEqual(saved["translate"]["providers"]["deeplx"]["deeplx_url"]["source"], "unset")
+
+    def test_save_config_snapshot_supports_openai_compatible_provider(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+
+        saved = save_config_snapshot(
+            str(listener_path),
+            {
+                "translate": {
+                    "enabled": True,
+                    "provider": "openai_compatible",
+                    "source_lang": "ZH",
+                    "target_lang": "EN",
+                    "providers": {
+                        "openai_compatible": {
+                            "base_url": "https://openrouter.local/v1",
+                            "model": "gpt-4o-mini",
+                            "timeout_seconds": 11.0,
+                        }
+                    },
+                },
+                "display": {
+                    "english_only": True,
+                    "tts_auto_read_active_chat": True,
+                    "on_translate_fail": "show_cn_with_reason",
+                },
+                "tts": {
+                    "provider": "windows_system",
+                    "providers": {},
+                },
+                "secret_updates": {
+                    "translate": {
+                        "openai_compatible": {
+                            "api_key": {
+                                "mode": "direct",
+                                "value": "openai-token",
+                            }
+                        }
+                    }
+                },
+            },
+        )
+
+        listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
+        self.assertEqual(listener_raw["translate"]["provider"], "openai_compatible")
+        self.assertEqual(
+            listener_raw["translate"]["providers"]["openai_compatible"]["base_url"],
+            "https://openrouter.local/v1",
+        )
+        self.assertEqual(
+            listener_raw["translate"]["providers"]["openai_compatible"]["model"],
+            "gpt-4o-mini",
+        )
+        self.assertEqual(
+            listener_raw["translate"]["providers"]["openai_compatible"]["api_key"],
+            "openai-token",
+        )
+        self.assertEqual(
+            listener_raw["translate"]["providers"]["openai_compatible"]["timeout_seconds"],
+            11.0,
+        )
+        self.assertEqual(
+            saved["translate"]["providers"]["openai_compatible"]["api_key"]["source"],
+            "direct",
+        )
+
+    def test_save_config_snapshot_rejects_openai_env_mode(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+
+        with self.assertRaises(ConfigValidationError) as ctx:
+            save_config_snapshot(
+                str(listener_path),
+                {
+                    "translate": {
+                        "enabled": True,
+                        "provider": "openai_compatible",
+                        "source_lang": "ZH",
+                        "target_lang": "EN",
+                        "providers": {
+                            "openai_compatible": {
+                                "base_url": "https://openrouter.local/v1",
+                                "model": "gpt-4o-mini",
+                                "timeout_seconds": 11.0,
+                            }
+                        },
+                    },
+                    "display": {
+                        "english_only": True,
+                        "tts_auto_read_active_chat": True,
+                        "on_translate_fail": "show_cn_with_reason",
+                    },
+                    "tts": {
+                        "provider": "windows_system",
+                        "providers": {},
+                    },
+                    "secret_updates": {
+                        "translate": {
+                            "openai_compatible": {
+                                "api_key": {
+                                    "mode": "env",
+                                    "env_key": "OPENAI_API_KEY",
+                                }
+                            }
+                        }
+                    },
+                },
+            )
+
+        self.assertEqual(
+            ctx.exception.field_errors["translate.providers.openai_compatible.api_key"],
+            "env mode is not supported",
+        )
 
     def test_save_config_snapshot_rejects_invalid_payload_without_mutating_files(self):
         listener_path, tencent_path, temp_dir = self._create_runtime_files()
@@ -269,7 +418,11 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                             "provider": "deeplx",
                             "source_lang": "auto",
                             "target_lang": "EN",
-                            "timeout_seconds": 8.0,
+                            "providers": {
+                                "deeplx": {
+                                    "timeout_seconds": 8.0,
+                                }
+                            },
                         },
                         "display": {
                             "english_only": True,
@@ -280,6 +433,7 @@ class RuntimeConfigStoreTest(unittest.TestCase):
                             "provider": "tencent_cloud",
                             "providers": {
                                 "tencent_cloud": {
+                                    "config_path": "tencent_tts.json",
                                     "voice_type": 0,
                                 }
                             },

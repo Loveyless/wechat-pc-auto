@@ -9,6 +9,7 @@ if __package__:
     from .sidebar_shared import (
         SUPPORTED_TRANSLATE_PROVIDERS,
         load_json_config,
+        read_config_float,
         save_json_config_atomic,
         validate_positive_float,
     )
@@ -44,6 +45,7 @@ else:
     from sidebar_shared import (
         SUPPORTED_TRANSLATE_PROVIDERS,
         load_json_config,
+        read_config_float,
         save_json_config_atomic,
         validate_positive_float,
     )
@@ -77,6 +79,7 @@ else:
 
 DEEPLX_ENV_KEY = "DEEPLX_URL"
 CONFIG_APPLY_STRATEGY = "restart_required"
+OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
 SUPPORTED_TRANSLATE_FAIL_BEHAVIORS = (
     "show_cn_with_reason",
     "show_cn",
@@ -95,6 +98,11 @@ def build_config_snapshot(config_path: str) -> dict[str, Any]:
     listener_raw = load_json_config(runtime_config.config_path)
     translate_cfg = _read_section(listener_raw, "translate")
     tts_cfg = _read_section(listener_raw, "tts")
+    deeplx_translate_raw = _resolve_translate_provider_payload(translate_cfg, "deeplx")
+    openai_translate_raw = _resolve_translate_provider_payload(
+        translate_cfg,
+        OPENAI_COMPATIBLE_PROVIDER,
+    )
 
     doubao_path, doubao_resolved_path = _provider_config_paths("doubao", tts_cfg, runtime_config.config_dir)
     tencent_path, tencent_resolved_path = _provider_config_paths(
@@ -112,13 +120,13 @@ def build_config_snapshot(config_path: str) -> dict[str, Any]:
             "available_providers": list(SUPPORTED_TRANSLATE_PROVIDERS),
             "source_lang": runtime_config.translate.source_lang,
             "target_lang": runtime_config.translate.target_lang,
-            "timeout_seconds": runtime_config.translate.timeout_seconds,
-            "deeplx_url": _build_secret_status(
-                translate_cfg,
-                "deeplx_url",
-                DEEPLX_ENV_FIELD,
-                default_env_key=DEEPLX_ENV_KEY,
-            ),
+            "providers": {
+                "deeplx": _build_deeplx_translate_provider_snapshot(deeplx_translate_raw),
+                OPENAI_COMPATIBLE_PROVIDER: _build_openai_translate_provider_snapshot(
+                    openai_translate_raw
+                ),
+                "passthrough": {},
+            },
         },
         "display": {
             "english_only": runtime_config.display.english_only,
@@ -130,8 +138,8 @@ def build_config_snapshot(config_path: str) -> dict[str, Any]:
             "available_providers": list(SUPPORTED_TTS_PROVIDERS),
             "providers": {
                 "windows_system": {},
-                "doubao": _build_doubao_provider_snapshot(doubao_raw),
-                "tencent_cloud": _build_tencent_provider_snapshot(tencent_raw),
+                "doubao": _build_doubao_provider_snapshot(doubao_raw, doubao_path),
+                "tencent_cloud": _build_tencent_provider_snapshot(tencent_raw, tencent_path),
             },
         },
         "runtime": _build_runtime_meta(runtime_config.config_path),
@@ -155,6 +163,8 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
     next_translate = _read_section(next_listener, "translate")
     next_display = _read_section(next_listener, "display")
     next_tts = _read_section(next_listener, "tts")
+    next_translate_providers = _read_section(next_translate, "providers")
+    next_tts_providers = _read_section(next_tts, "providers")
 
     translate_enabled = _read_bool(
         translate_payload,
@@ -175,37 +185,50 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
         runtime_config.translate.target_lang,
         field_path="translate.target_lang",
     )
-    translate_timeout = _read_float(
-        translate_payload,
-        "timeout_seconds",
-        runtime_config.translate.timeout_seconds,
-        field_path="translate.timeout_seconds",
-    )
-    translate_timeout = validate_positive_float("translate.timeout_seconds", translate_timeout)
     next_translate["enabled"] = translate_enabled
     next_translate["provider"] = translate_provider
     next_translate["source_lang"] = translate_source_lang
     next_translate["target_lang"] = translate_target_lang
-    next_translate["timeout_seconds"] = translate_timeout
-    _apply_secret_update(
-        next_translate,
-        key="deeplx_url",
-        env_key_field=DEEPLX_ENV_FIELD,
-        update=translate_secret_updates.get("deeplx_url"),
-        field_path="translate.deeplx_url",
-        default_env_key=DEEPLX_ENV_KEY,
-        allow_custom_env_key=False,
+    next_translate.pop("timeout_seconds", None)
+    next_translate.pop("deeplx_url", None)
+    next_translate.pop(DEEPLX_ENV_FIELD, None)
+    translate_provider_payloads = _read_section(translate_payload, "providers")
+    next_deeplx_translate = _build_next_deeplx_translate_payload(
+        base_payload=_resolve_translate_provider_payload(next_translate, "deeplx"),
+        payload=_read_section(translate_provider_payloads, "deeplx"),
+        secret_updates=_read_section(translate_secret_updates, "deeplx"),
+    )
+    next_openai_translate = _build_next_openai_translate_payload(
+        base_payload=_read_section(next_translate_providers, OPENAI_COMPATIBLE_PROVIDER),
+        payload=_read_section(translate_provider_payloads, OPENAI_COMPATIBLE_PROVIDER),
+        secret_updates=_read_section(translate_secret_updates, OPENAI_COMPATIBLE_PROVIDER),
     )
     effective_deeplx_url = _resolve_effective_secret_value(
-        next_translate,
+        next_deeplx_translate,
         "deeplx_url",
         DEEPLX_ENV_FIELD,
         default_env_key=DEEPLX_ENV_KEY,
     )
+    effective_openai_api_key = _resolve_effective_secret_value(
+        next_openai_translate,
+        "api_key",
+        "",
+    )
     try:
-        validate_translate_config(translate_enabled, translate_provider, effective_deeplx_url)
+        validate_translate_config(
+            translate_enabled,
+            translate_provider,
+            effective_deeplx_url,
+            openai_base_url=str(next_openai_translate.get("base_url") or "").strip(),
+            openai_model=str(next_openai_translate.get("model") or "").strip(),
+            openai_api_key=effective_openai_api_key,
+        )
     except RuntimeError as exc:
         raise _wrap_translate_validation_error(exc) from exc
+    next_translate_providers["deeplx"] = next_deeplx_translate
+    next_translate_providers[OPENAI_COMPATIBLE_PROVIDER] = next_openai_translate
+    next_translate_providers["passthrough"] = _read_section(next_translate_providers, "passthrough")
+    next_translate["providers"] = next_translate_providers
 
     next_display["english_only"] = _read_bool(
         display_payload,
@@ -238,18 +261,28 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
     provider_path = ""
     provider_resolved_path = ""
     previous_provider_raw: dict[str, Any] | None = None
+    provider_payloads = _read_section(tts_payload, "providers")
+    next_doubao_cfg = _read_section(next_tts_providers, "doubao")
+    next_tencent_cfg = _read_section(next_tts_providers, "tencent_cloud")
 
     if selected_provider == "doubao":
-        provider_path, provider_resolved_path = _provider_config_paths(
+        current_doubao_path, _ = _provider_config_paths(
             "doubao",
             _read_section(listener_raw, "tts"),
             config_dir,
         )
+        provider_path = _read_string(
+            _read_section(provider_payloads, "doubao"),
+            "config_path",
+            current_doubao_path,
+            field_path="tts.providers.doubao.config_path",
+        )
+        provider_path = provider_path.strip() or DOUBAO_TTS_DEFAULT_CONFIG_PATH
+        provider_resolved_path = resolve_config_file_path(provider_path, base_dir=config_dir)
         previous_provider_raw = _load_optional_json(
             provider_resolved_path,
             _default_doubao_provider_payload(),
         )
-        provider_payloads = _read_section(tts_payload, "providers")
         next_provider_raw = _build_next_doubao_provider_payload(
             base_payload=previous_provider_raw,
             payload=_read_section(provider_payloads, "doubao"),
@@ -259,18 +292,25 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
             load_doubao_tts_settings_from_payload(next_provider_raw)
         except RuntimeError as exc:
             raise _wrap_provider_validation_error("doubao", exc) from exc
-        next_tts["config_path"] = provider_path
+        next_doubao_cfg["config_path"] = provider_path
     elif selected_provider == "tencent_cloud":
-        provider_path, provider_resolved_path = _provider_config_paths(
+        current_tencent_path, _ = _provider_config_paths(
             "tencent_cloud",
             _read_section(listener_raw, "tts"),
             config_dir,
         )
+        provider_path = _read_string(
+            _read_section(provider_payloads, "tencent_cloud"),
+            "config_path",
+            current_tencent_path,
+            field_path="tts.providers.tencent_cloud.config_path",
+        )
+        provider_path = provider_path.strip() or TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH
+        provider_resolved_path = resolve_config_file_path(provider_path, base_dir=config_dir)
         previous_provider_raw = _load_optional_json(
             provider_resolved_path,
             _default_tencent_provider_payload(),
         )
-        provider_payloads = _read_section(tts_payload, "providers")
         next_provider_raw = _build_next_tencent_provider_payload(
             base_payload=previous_provider_raw,
             payload=_read_section(provider_payloads, "tencent_cloud"),
@@ -280,10 +320,12 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
             load_tencent_cloud_tts_settings_from_payload(next_provider_raw)
         except RuntimeError as exc:
             raise _wrap_provider_validation_error("tencent_cloud", exc) from exc
-        next_tts["config_path"] = provider_path
-    else:
-        next_tts.pop("config_path", None)
+        next_tencent_cfg["config_path"] = provider_path
 
+    next_tts_providers["doubao"] = next_doubao_cfg
+    next_tts_providers["tencent_cloud"] = next_tencent_cfg
+    next_tts["providers"] = next_tts_providers
+    next_tts.pop("config_path", None)
     next_listener["translate"] = next_translate
     next_listener["display"] = next_display
     next_listener["tts"] = next_tts
@@ -306,10 +348,42 @@ def _build_runtime_meta(config_path: str) -> dict[str, Any]:
     }
 
 
-def _build_doubao_provider_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
+def _build_deeplx_translate_provider_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
+    timeout_seconds = read_config_float(raw, "timeout_seconds", 8.0)
+    timeout_seconds = validate_positive_float(
+        "translate.providers.deeplx.timeout_seconds",
+        timeout_seconds,
+    )
+    return {
+        "timeout_seconds": timeout_seconds,
+        "deeplx_url": _build_secret_status(
+            raw,
+            "deeplx_url",
+            DEEPLX_ENV_FIELD,
+            default_env_key=DEEPLX_ENV_KEY,
+        ),
+    }
+
+
+def _build_openai_translate_provider_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
+    timeout_seconds = read_config_float(raw, "timeout_seconds", 8.0)
+    timeout_seconds = validate_positive_float(
+        "translate.providers.openai_compatible.timeout_seconds",
+        timeout_seconds,
+    )
+    return {
+        "base_url": str(raw.get("base_url") or "").strip(),
+        "model": str(raw.get("model") or "").strip(),
+        "timeout_seconds": timeout_seconds,
+        "api_key": _build_secret_status(raw, "api_key", ""),
+    }
+
+
+def _build_doubao_provider_snapshot(raw: dict[str, Any], config_path: str) -> dict[str, Any]:
     payload = _default_doubao_provider_payload()
     payload.update(raw)
     return {
+        "config_path": config_path,
         "endpoint": str(payload.get("endpoint") or DOUBAO_TTS_DEFAULT_ENDPOINT),
         "resource_id": str(payload.get("resource_id") or ""),
         "speaker": str(payload.get("speaker") or ""),
@@ -335,10 +409,11 @@ def _build_doubao_provider_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_tencent_provider_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
+def _build_tencent_provider_snapshot(raw: dict[str, Any], config_path: str) -> dict[str, Any]:
     payload = _default_tencent_provider_payload()
     payload.update(raw)
     return {
+        "config_path": config_path,
         "endpoint": str(payload.get("endpoint") or TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT),
         "region": str(payload.get("region") or ""),
         "voice_type": int(payload.get("voice_type") or 0),
@@ -369,6 +444,75 @@ def _build_tencent_provider_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
             default_env_key=TENCENT_CLOUD_TTS_DEFAULT_SECRET_KEY_ENV_KEY,
         ),
     }
+
+
+def _build_next_deeplx_translate_payload(
+    *,
+    base_payload: dict[str, Any],
+    payload: dict[str, Any],
+    secret_updates: dict[str, Any],
+) -> dict[str, Any]:
+    next_payload = copy.deepcopy(base_payload)
+    timeout_seconds = _read_float(
+        payload,
+        "timeout_seconds",
+        read_config_float(base_payload, "timeout_seconds", 8.0),
+        field_path="translate.providers.deeplx.timeout_seconds",
+    )
+    next_payload["timeout_seconds"] = validate_positive_float(
+        "translate.providers.deeplx.timeout_seconds",
+        timeout_seconds,
+    )
+    _apply_secret_update(
+        next_payload,
+        key="deeplx_url",
+        env_key_field=DEEPLX_ENV_FIELD,
+        update=secret_updates.get("deeplx_url"),
+        field_path="translate.providers.deeplx.deeplx_url",
+        default_env_key=DEEPLX_ENV_KEY,
+        allow_custom_env_key=False,
+    )
+    return next_payload
+
+
+def _build_next_openai_translate_payload(
+    *,
+    base_payload: dict[str, Any],
+    payload: dict[str, Any],
+    secret_updates: dict[str, Any],
+) -> dict[str, Any]:
+    next_payload = copy.deepcopy(base_payload)
+    next_payload["base_url"] = _read_string(
+        payload,
+        "base_url",
+        str(base_payload.get("base_url") or ""),
+        field_path="translate.providers.openai_compatible.base_url",
+    ).strip()
+    next_payload["model"] = _read_string(
+        payload,
+        "model",
+        str(base_payload.get("model") or ""),
+        field_path="translate.providers.openai_compatible.model",
+    ).strip()
+    timeout_seconds = _read_float(
+        payload,
+        "timeout_seconds",
+        read_config_float(base_payload, "timeout_seconds", 8.0),
+        field_path="translate.providers.openai_compatible.timeout_seconds",
+    )
+    next_payload["timeout_seconds"] = validate_positive_float(
+        "translate.providers.openai_compatible.timeout_seconds",
+        timeout_seconds,
+    )
+    _apply_secret_update(
+        next_payload,
+        key="api_key",
+        env_key_field="",
+        update=secret_updates.get("api_key"),
+        field_path="translate.providers.openai_compatible.api_key",
+        allow_env_mode=False,
+    )
+    return next_payload
 
 
 def _build_next_doubao_provider_payload(
@@ -626,6 +770,7 @@ def _apply_secret_update(
     field_path: str,
     default_env_key: str = "",
     allow_custom_env_key: bool = True,
+    allow_env_mode: bool = True,
 ) -> None:
     if update is None:
         return
@@ -650,6 +795,8 @@ def _apply_secret_update(
             raw[env_key_field] = ""
         return
 
+    if not allow_env_mode:
+        raise _field_error(field_path, "env mode is not supported")
     env_key = str(update.get("env_key") or default_env_key).strip()
     if not env_key:
         raise _field_error(field_path, "env_key is required")
@@ -692,21 +839,23 @@ def _provider_config_paths(
     tts_cfg: dict[str, Any],
     config_dir: str,
 ) -> tuple[str, str]:
+    providers = _read_section(tts_cfg, "providers")
+    provider_cfg = _read_section(providers, provider)
     current_provider = str(tts_cfg.get("provider") or DEFAULT_TTS_PROVIDER).strip().lower()
     if provider == "doubao":
-        config_path = (
-            str(tts_cfg.get("config_path") or DOUBAO_TTS_DEFAULT_CONFIG_PATH).strip()
-            if current_provider == "doubao"
-            else DOUBAO_TTS_DEFAULT_CONFIG_PATH
-        )
+        default_path = DOUBAO_TTS_DEFAULT_CONFIG_PATH
     elif provider == "tencent_cloud":
-        config_path = (
-            str(tts_cfg.get("config_path") or TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH).strip()
-            if current_provider == "tencent_cloud"
-            else TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH
-        )
+        default_path = TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH
     else:
         return "", ""
+    configured_path = str(provider_cfg.get("config_path") or "").strip()
+    legacy_path = str(tts_cfg.get("config_path") or "").strip()
+    if configured_path:
+        config_path = configured_path
+    elif current_provider == provider and legacy_path:
+        config_path = legacy_path
+    else:
+        config_path = default_path
     resolved_path = resolve_config_file_path(config_path, base_dir=config_dir)
     return config_path, resolved_path
 
@@ -829,8 +978,30 @@ def _field_error(field_path: str, message: str) -> ConfigValidationError:
 def _wrap_translate_validation_error(exc: RuntimeError) -> ConfigValidationError:
     message = str(exc)
     if "DEEPLX_URL" in message or "deeplx_url" in message or "deeplx_url_env" in message:
-        return _field_error("translate.deeplx_url", message)
+        return _field_error("translate.providers.deeplx.deeplx_url", message)
+    if "openai_compatible" in message and "base_url" in message:
+        return _field_error("translate.providers.openai_compatible.base_url", message)
+    if "openai_compatible" in message and "model" in message:
+        return _field_error("translate.providers.openai_compatible.model", message)
+    if "openai_compatible" in message and "api_key" in message:
+        return _field_error("translate.providers.openai_compatible.api_key", message)
     return _field_error("translate", message)
+
+
+def _resolve_translate_provider_payload(
+    translate_cfg: dict[str, Any],
+    provider: str,
+) -> dict[str, Any]:
+    providers = _read_section(translate_cfg, "providers")
+    provider_payload = _read_section(providers, provider)
+    if provider == "deeplx":
+        if "deeplx_url" not in provider_payload and "deeplx_url" in translate_cfg:
+            provider_payload["deeplx_url"] = str(translate_cfg.get("deeplx_url") or "").strip()
+        if DEEPLX_ENV_FIELD not in provider_payload and DEEPLX_ENV_FIELD in translate_cfg:
+            provider_payload[DEEPLX_ENV_FIELD] = str(translate_cfg.get(DEEPLX_ENV_FIELD) or "").strip()
+        if "timeout_seconds" not in provider_payload and "timeout_seconds" in translate_cfg:
+            provider_payload["timeout_seconds"] = translate_cfg.get("timeout_seconds")
+    return provider_payload
 
 
 def _wrap_provider_validation_error(provider: str, exc: RuntimeError) -> ConfigValidationError:
