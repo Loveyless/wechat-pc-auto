@@ -15,14 +15,33 @@ export type DesktopSecretInputDraft = {
   env_key: string
 }
 
-export type DesktopTranslateConfig = {
-  enabled: boolean
-  provider: string
-  available_providers: string[]
-  source_lang: string
-  target_lang: string
+export type DesktopTranslateProvider = "deeplx" | "openai_compatible" | "passthrough"
+
+export type DesktopDeeplxProviderConfig = {
   timeout_seconds: number
   deeplx_url: DesktopSecretStatus
+}
+
+export type DesktopOpenAICompatibleProviderConfig = {
+  base_url: string
+  model: string
+  timeout_seconds: number
+  api_key: DesktopSecretStatus
+}
+
+export type DesktopTranslateProvidersConfig = {
+  deeplx: DesktopDeeplxProviderConfig
+  openai_compatible: DesktopOpenAICompatibleProviderConfig
+  passthrough: Record<string, never>
+}
+
+export type DesktopTranslateConfig = {
+  enabled: boolean
+  provider: DesktopTranslateProvider
+  available_providers: DesktopTranslateProvider[]
+  source_lang: string
+  target_lang: string
+  providers: DesktopTranslateProvidersConfig
 }
 
 export type DesktopDisplayConfig = {
@@ -34,6 +53,7 @@ export type DesktopDisplayConfig = {
 export type DesktopTtsProvider = "windows_system" | "doubao" | "tencent_cloud"
 
 export type DesktopDoubaoProviderConfig = {
+  config_path: string
   endpoint: string
   resource_id: string
   speaker: string
@@ -49,6 +69,7 @@ export type DesktopDoubaoProviderConfig = {
 }
 
 export type DesktopTencentCloudProviderConfig = {
+  config_path: string
   endpoint: string
   region: string
   voice_type: number
@@ -94,19 +115,35 @@ export type DesktopRuntimeConfig = {
   runtime: DesktopRuntimeConfigMeta
 }
 
-export type DesktopTranslateDraft = {
-  enabled: boolean
-  provider: string
-  available_providers: string[]
-  source_lang: string
-  target_lang: string
+export type DesktopDeeplxProviderDraft = {
   timeout_seconds: number
   deeplx_url: DesktopSecretInputDraft
+}
+
+export type DesktopOpenAICompatibleProviderDraft = {
+  base_url: string
+  model: string
+  timeout_seconds: number
+  api_key: DesktopSecretInputDraft
+}
+
+export type DesktopTranslateDraft = {
+  enabled: boolean
+  provider: DesktopTranslateProvider
+  available_providers: DesktopTranslateProvider[]
+  source_lang: string
+  target_lang: string
+  providers: {
+    deeplx: DesktopDeeplxProviderDraft
+    openai_compatible: DesktopOpenAICompatibleProviderDraft
+    passthrough: Record<string, never>
+  }
 }
 
 export type DesktopDisplayDraft = DesktopDisplayConfig
 
 export type DesktopDoubaoProviderDraft = {
+  config_path: string
   endpoint: string
   resource_id: string
   speaker: string
@@ -122,6 +159,7 @@ export type DesktopDoubaoProviderDraft = {
 }
 
 export type DesktopTencentCloudProviderDraft = {
+  config_path: string
   endpoint: string
   region: string
   voice_type: number
@@ -158,7 +196,12 @@ export type DesktopSettingsDraft = {
 
 export type DesktopSecretDrafts = {
   translate: {
-    deeplx_url: DesktopSecretInputDraft
+    deeplx: {
+      deeplx_url: DesktopSecretInputDraft
+    }
+    openai_compatible: {
+      api_key: DesktopSecretInputDraft
+    }
   }
   tts: {
     doubao: {
@@ -181,10 +224,20 @@ export type DesktopSecretUpdate =
 export type DesktopSettingsSavePayload = {
   translate: {
     enabled: boolean
-    provider: string
+    provider: DesktopTranslateProvider
     source_lang: string
     target_lang: string
-    timeout_seconds: number
+    providers: {
+      deeplx: {
+        timeout_seconds: number
+      }
+      openai_compatible: {
+        base_url: string
+        model: string
+        timeout_seconds: number
+      }
+      passthrough: Record<string, never>
+    }
   }
   display: DesktopDisplayConfig
   tts: {
@@ -196,7 +249,12 @@ export type DesktopSettingsSavePayload = {
   }
   secret_updates: {
     translate: {
-      deeplx_url: DesktopSecretUpdate
+      deeplx: {
+        deeplx_url: DesktopSecretUpdate
+      }
+      openai_compatible: {
+        api_key: DesktopSecretUpdate
+      }
     }
     tts: {
       doubao: {

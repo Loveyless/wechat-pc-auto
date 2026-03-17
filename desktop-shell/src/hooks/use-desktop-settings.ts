@@ -45,8 +45,19 @@ export function createDesktopSettingsDraft(config: DesktopRuntimeConfig): Deskto
       available_providers: [...config.translate.available_providers],
       source_lang: config.translate.source_lang,
       target_lang: config.translate.target_lang,
-      timeout_seconds: config.translate.timeout_seconds,
-      deeplx_url: createSecretInputDraft(config.translate.deeplx_url),
+      providers: {
+        deeplx: {
+          timeout_seconds: config.translate.providers.deeplx.timeout_seconds,
+          deeplx_url: createSecretInputDraft(config.translate.providers.deeplx.deeplx_url),
+        },
+        openai_compatible: {
+          base_url: config.translate.providers.openai_compatible.base_url,
+          model: config.translate.providers.openai_compatible.model,
+          timeout_seconds: config.translate.providers.openai_compatible.timeout_seconds,
+          api_key: createSecretInputDraft(config.translate.providers.openai_compatible.api_key),
+        },
+        passthrough: {},
+      },
     },
     display: {
       english_only: config.display.english_only,
@@ -59,6 +70,7 @@ export function createDesktopSettingsDraft(config: DesktopRuntimeConfig): Deskto
       providers: {
         windows_system: {},
         doubao: {
+          config_path: config.tts.providers.doubao.config_path,
           endpoint: config.tts.providers.doubao.endpoint,
           resource_id: config.tts.providers.doubao.resource_id,
           speaker: config.tts.providers.doubao.speaker,
@@ -73,6 +85,7 @@ export function createDesktopSettingsDraft(config: DesktopRuntimeConfig): Deskto
           access_token: createSecretInputDraft(config.tts.providers.doubao.access_token),
         },
         tencent_cloud: {
+          config_path: config.tts.providers.tencent_cloud.config_path,
           endpoint: config.tts.providers.tencent_cloud.endpoint,
           region: config.tts.providers.tencent_cloud.region,
           voice_type: config.tts.providers.tencent_cloud.voice_type,
@@ -107,7 +120,12 @@ export function extractDesktopSecretDrafts(
   }
   return {
     translate: {
-      deeplx_url: cloneDraft(draft.translate.deeplx_url),
+      deeplx: {
+        deeplx_url: cloneDraft(draft.translate.providers.deeplx.deeplx_url),
+      },
+      openai_compatible: {
+        api_key: cloneDraft(draft.translate.providers.openai_compatible.api_key),
+      },
     },
     tts: {
       doubao: {
@@ -130,7 +148,17 @@ function mergeDesktopSecretDrafts(
     ...draft,
     translate: {
       ...draft.translate,
-      deeplx_url: cloneDraft(secretDrafts.translate.deeplx_url),
+      providers: {
+        ...draft.translate.providers,
+        deeplx: {
+          ...draft.translate.providers.deeplx,
+          deeplx_url: cloneDraft(secretDrafts.translate.deeplx.deeplx_url),
+        },
+        openai_compatible: {
+          ...draft.translate.providers.openai_compatible,
+          api_key: cloneDraft(secretDrafts.translate.openai_compatible.api_key),
+        },
+      },
     },
     tts: {
       ...draft.tts,
@@ -138,11 +166,13 @@ function mergeDesktopSecretDrafts(
         ...draft.tts.providers,
         doubao: {
           ...draft.tts.providers.doubao,
+          config_path: draft.tts.providers.doubao.config_path,
           appid: cloneDraft(secretDrafts.tts.doubao.appid),
           access_token: cloneDraft(secretDrafts.tts.doubao.access_token),
         },
         tencent_cloud: {
           ...draft.tts.providers.tencent_cloud,
+          config_path: draft.tts.providers.tencent_cloud.config_path,
           secret_id: cloneDraft(secretDrafts.tts.tencent_cloud.secret_id),
           secret_key: cloneDraft(secretDrafts.tts.tencent_cloud.secret_key),
         },
@@ -180,7 +210,17 @@ export function buildDesktopSettingsSavePayload(
       provider: draft.translate.provider,
       source_lang: draft.translate.source_lang,
       target_lang: draft.translate.target_lang,
-      timeout_seconds: draft.translate.timeout_seconds,
+      providers: {
+        deeplx: {
+          timeout_seconds: draft.translate.providers.deeplx.timeout_seconds,
+        },
+        openai_compatible: {
+          base_url: draft.translate.providers.openai_compatible.base_url,
+          model: draft.translate.providers.openai_compatible.model,
+          timeout_seconds: draft.translate.providers.openai_compatible.timeout_seconds,
+        },
+        passthrough: {},
+      },
     },
     display: {
       english_only: draft.display.english_only,
@@ -191,6 +231,7 @@ export function buildDesktopSettingsSavePayload(
       provider: draft.tts.provider,
       providers: {
         doubao: {
+          config_path: draft.tts.providers.doubao.config_path,
           endpoint: draft.tts.providers.doubao.endpoint,
           resource_id: draft.tts.providers.doubao.resource_id,
           speaker: draft.tts.providers.doubao.speaker,
@@ -203,6 +244,7 @@ export function buildDesktopSettingsSavePayload(
           connect_timeout_seconds: draft.tts.providers.doubao.connect_timeout_seconds,
         },
         tencent_cloud: {
+          config_path: draft.tts.providers.tencent_cloud.config_path,
           endpoint: draft.tts.providers.tencent_cloud.endpoint,
           region: draft.tts.providers.tencent_cloud.region,
           voice_type: draft.tts.providers.tencent_cloud.voice_type,
@@ -223,7 +265,12 @@ export function buildDesktopSettingsSavePayload(
     },
     secret_updates: {
       translate: {
-        deeplx_url: buildDeeplxSecretUpdate(draft.translate.deeplx_url),
+        deeplx: {
+          deeplx_url: buildDeeplxSecretUpdate(draft.translate.providers.deeplx.deeplx_url),
+        },
+        openai_compatible: {
+          api_key: buildSecretUpdate(draft.translate.providers.openai_compatible.api_key),
+        },
       },
       tts: {
         doubao: {
@@ -402,7 +449,10 @@ export type UseDesktopSettingsResult = {
     key: K,
     value: DesktopSettingsDraft["tts"]["providers"]["tencent_cloud"][K],
   ) => void
-  updateTranslateSecret: (value: DesktopSettingsDraft["translate"]["deeplx_url"]) => void
+  updateTranslateSecret: (
+    provider: "deeplx" | "openai_compatible",
+    value: DesktopSecretInputDraft,
+  ) => void
   updateDoubaoSecret: <K extends "appid" | "access_token">(
     key: K,
     value: DesktopSettingsDraft["tts"]["providers"]["doubao"][K],
@@ -648,14 +698,23 @@ export function useDesktopSettings(
           : current,
       )
     },
-    updateTranslateSecret(value) {
+    updateTranslateSecret(provider, value) {
       setSecretDrafts((current) =>
         current
           ? {
               ...current,
               translate: {
                 ...current.translate,
-                deeplx_url: value,
+                [provider]:
+                  provider === "deeplx"
+                    ? {
+                        ...current.translate.deeplx,
+                        deeplx_url: value,
+                      }
+                    : {
+                        ...current.translate.openai_compatible,
+                        api_key: value,
+                      },
               },
             }
           : current,

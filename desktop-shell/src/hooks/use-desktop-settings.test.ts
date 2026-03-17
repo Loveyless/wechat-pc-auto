@@ -15,14 +15,28 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
     translate: {
       enabled: true,
       provider: "deeplx",
-      available_providers: ["deeplx", "passthrough"],
+      available_providers: ["deeplx", "openai_compatible", "passthrough"],
       source_lang: "auto",
       target_lang: "EN",
-      timeout_seconds: 8,
-      deeplx_url: {
-        configured: true,
-        source: "env",
-        env_key: "DEEPLX_URL",
+      providers: {
+        deeplx: {
+          timeout_seconds: 8,
+          deeplx_url: {
+            configured: true,
+            source: "env",
+            env_key: "DEEPLX_URL",
+          },
+        },
+        openai_compatible: {
+          base_url: "https://openrouter.local/v1",
+          model: "gpt-4o-mini",
+          timeout_seconds: 12,
+          api_key: {
+            configured: true,
+            source: "direct",
+          },
+        },
+        passthrough: {},
       },
     },
     display: {
@@ -36,6 +50,7 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
       providers: {
         windows_system: {},
         doubao: {
+          config_path: "config/doubao_tts.json",
           endpoint: "wss://doubao.local",
           resource_id: "res-id",
           speaker: "speaker-a",
@@ -58,6 +73,7 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
           },
         },
         tencent_cloud: {
+          config_path: "config/tencent_tts.json",
           endpoint: "tts.tencentcloudapi.com",
           region: "ap-shanghai",
           voice_type: 501008,
@@ -126,8 +142,10 @@ describe("desktop settings state", () => {
     const draft = createDesktopSettingsDraft(createRuntimeConfig())
 
     draft.tts.provider = "doubao"
-    draft.translate.deeplx_url.mode = "env"
-    draft.translate.deeplx_url.env_key = "DEEPLX_URL_OVERRIDE"
+    draft.translate.providers.deeplx.deeplx_url.mode = "env"
+    draft.translate.providers.deeplx.deeplx_url.env_key = "DEEPLX_URL_OVERRIDE"
+    draft.translate.providers.openai_compatible.api_key.mode = "direct"
+    draft.translate.providers.openai_compatible.api_key.value = "next-openai-token"
     draft.tts.providers.doubao.appid.mode = "direct"
     draft.tts.providers.doubao.appid.value = "new-app-id"
     draft.tts.providers.doubao.access_token.mode = "clear"
@@ -135,9 +153,14 @@ describe("desktop settings state", () => {
     const payload = buildDesktopSettingsSavePayload(draft)
 
     expect(payload.translate.provider).toBe("deeplx")
-    expect(payload.secret_updates.translate.deeplx_url).toEqual({
+    expect(payload.translate.providers.deeplx.timeout_seconds).toBe(8)
+    expect(payload.secret_updates.translate.deeplx.deeplx_url).toEqual({
       mode: "env",
       env_key: "DEEPLX_URL",
+    })
+    expect(payload.secret_updates.translate.openai_compatible.api_key).toEqual({
+      mode: "direct",
+      value: "next-openai-token",
     })
     expect(payload.secret_updates.tts.doubao.appid).toEqual({
       mode: "direct",
