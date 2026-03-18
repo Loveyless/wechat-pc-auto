@@ -303,4 +303,40 @@ describe("settings workspace", () => {
     expect(applyMarkup).toContain("仅保存")
     expect(applyMarkup).toContain("保存并应用")
   })
+
+  it("renders all boolean config fields as accessible switches", () => {
+    const windowsMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "windows_system",
+          managedApply: false,
+        })}
+      />,
+    )
+    const doubaoMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "doubao",
+          managedApply: false,
+        })}
+      />,
+    )
+    const tencentMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "tencent_cloud",
+          managedApply: false,
+        })}
+      />,
+    )
+
+    expect(windowsMarkup.match(/role=\"switch\"/g)?.length ?? 0).toBe(3)
+    expect(doubaoMarkup.match(/role=\"switch\"/g)?.length ?? 0).toBe(4)
+    expect(tencentMarkup.match(/role=\"switch\"/g)?.length ?? 0).toBe(4)
+    expect(windowsMarkup).toContain("aria-checked=\"true\"")
+    expect(tencentMarkup).toContain("aria-checked=\"false\"")
+  })
 })

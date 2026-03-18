@@ -45,9 +45,16 @@ type AdvancedSectionProps = {
   children: ReactNode
 }
 
+type BooleanSwitchProps = {
+  value: boolean
+  onToggle: () => void
+  enabledLabel?: string
+  disabledLabel?: string
+}
+
 function Section({ title, detail, children }: SectionProps) {
   return (
-    <section className="rounded-[1rem] border border-border-subtle bg-surface-panel-raised/88 px-3 py-3 shadow-[0_8px_22px_rgba(29,38,50,0.04)]">
+    <section className="min-w-0 rounded-[1rem] border border-border-subtle bg-surface-panel-raised/88 px-3 py-3 shadow-[0_8px_22px_rgba(29,38,50,0.04)]">
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
         {title}
       </p>
@@ -59,10 +66,10 @@ function Section({ title, detail, children }: SectionProps) {
 
 function Field({ label, description, error, children }: FieldProps) {
   return (
-    <label className="grid gap-1.5">
-      <div>
+    <label className="grid min-w-0 gap-1.5">
+      <div className="min-w-0">
         <p className="text-[12px] font-semibold text-text-primary">{label}</p>
-        <p className="text-[11px] leading-5 text-text-secondary">{description}</p>
+        <p className="settings-text-wrap text-[11px] leading-5 text-text-secondary">{description}</p>
       </div>
       {children}
       {error ? <p className="text-[11px] text-state-danger">{error}</p> : null}
@@ -72,13 +79,58 @@ function Field({ label, description, error, children }: FieldProps) {
 
 function AdvancedSection({ summary, detail, children }: AdvancedSectionProps) {
   return (
-    <details className="rounded-[0.95rem] border border-border-subtle bg-workspace-canvas-strong/70 px-3 py-3">
+    <details className="min-w-0 rounded-[0.95rem] border border-border-subtle bg-workspace-canvas-strong/70 px-3 py-3">
       <summary className="cursor-pointer list-none text-[12px] font-semibold text-text-primary">
         {summary}
       </summary>
-      <p className="mt-1 text-[11px] leading-5 text-text-secondary">{detail}</p>
+      <p className="settings-text-wrap mt-1 text-[11px] leading-5 text-text-secondary">{detail}</p>
       <div className="mt-3 grid gap-3">{children}</div>
     </details>
+  )
+}
+
+function BooleanSwitch({
+  value,
+  onToggle,
+  enabledLabel = "已启用",
+  disabledLabel = "已关闭",
+}: BooleanSwitchProps) {
+  const currentLabel = value ? enabledLabel : disabledLabel
+
+  return (
+    <button
+      aria-checked={value}
+      className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+        value
+          ? "border-state-ready/70 bg-state-ready-soft/80 text-state-ready"
+          : "border-border-strong bg-surface-panel text-text-secondary"
+      }`}
+      data-settings-switch="true"
+      onClick={onToggle}
+      role="switch"
+      type="button"
+    >
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold">{currentLabel}</span>
+        <span className="mt-0.5 block text-[11px] text-text-secondary">
+          {value ? "当前为开启态" : "当前为关闭态"}
+        </span>
+      </span>
+      <span
+        aria-hidden="true"
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors ${
+          value
+            ? "border-state-ready bg-state-ready"
+            : "border-border-strong bg-surface-panel-muted"
+        }`}
+      >
+        <span
+          className={`inline-block h-5 w-5 rounded-full bg-surface-panel-raised shadow-[0_2px_6px_rgba(29,38,50,0.16)] transition-transform ${
+            value ? "translate-x-[1.2rem]" : "translate-x-[0.1rem]"
+          }`}
+        />
+      </span>
+    </button>
   )
 }
 
@@ -150,17 +202,17 @@ function SecretEditor({
   const modeValue = !allowEnv && draft.mode === "env" ? "keep" : draft.mode
 
   return (
-    <div className="rounded-[0.95rem] border border-border-subtle bg-workspace-canvas-strong/70 px-3 py-3">
+    <div className="min-w-0 rounded-[0.95rem] border border-border-subtle bg-workspace-canvas-strong/70 px-3 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
+        <div className="min-w-0">
           <p className="text-[12px] font-semibold text-text-primary">{label}</p>
-          <p className="text-[11px] leading-5 text-text-secondary">{description}</p>
+          <p className="settings-text-wrap text-[11px] leading-5 text-text-secondary">{description}</p>
         </div>
-        <span className="rounded-full bg-surface-panel px-2.5 py-1 text-[11px] text-text-secondary">
+        <span className="settings-text-wrap max-w-full rounded-full bg-surface-panel px-2.5 py-1 text-[11px] text-text-secondary">
           {statusLabel(draft)}
         </span>
       </div>
-      <div className="mt-3 grid gap-2">
+      <div className="mt-3 grid min-w-0 gap-2">
         <select
           className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
           value={modeValue}
@@ -188,7 +240,7 @@ function SecretEditor({
           />
         ) : null}
         {allowEnv && draft.mode === "env" && fixedEnvKey ? (
-          <div className="rounded-lg border border-dashed border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-secondary">
+          <div className="settings-text-wrap rounded-lg border border-dashed border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-secondary">
             固定环境变量：{fixedEnvKey}
           </div>
         ) : null}
@@ -219,7 +271,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
   if (settings.loading && !draft) {
     return (
-      <aside className="flex h-full min-h-0 flex-col border-l border-border-subtle bg-surface-panel/92">
+      <aside className="settings-workspace flex h-full min-h-0 flex-col border-l border-border-subtle bg-surface-panel/92">
         <div className="flex min-h-0 flex-1 p-3">
           <ShellEmptyState
             eyebrow="Loading Settings"
@@ -234,7 +286,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
   if (!draft) {
     return (
-      <aside className="flex h-full min-h-0 flex-col border-l border-border-subtle bg-surface-panel/92">
+      <aside className="settings-workspace flex h-full min-h-0 flex-col border-l border-border-subtle bg-surface-panel/92">
         <div className="flex min-h-0 flex-1 p-3">
           <ShellEmptyState
             eyebrow="Settings Unavailable"
@@ -254,27 +306,9 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
   const ttsProvider = draft.tts.provider as DesktopTtsProvider
   const providerSections = resolveDesktopSettingsProviderSections(ttsProvider)
-  const renderToggle = (
-    value: boolean,
-    onToggle: () => void,
-    enabledLabel = "已启用",
-    disabledLabel = "已关闭",
-  ) => (
-    <button
-      className={`rounded-lg border px-3 py-2 text-left text-sm ${
-        value
-          ? "border-state-ready bg-state-ready-soft text-state-ready"
-          : "border-border-strong bg-surface-panel text-text-secondary"
-      }`}
-      type="button"
-      onClick={onToggle}
-    >
-      {value ? enabledLabel : disabledLabel}
-    </button>
-  )
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-l border-border-subtle bg-surface-panel/92">
+    <aside className="settings-workspace flex h-full min-h-0 flex-col border-l border-border-subtle bg-surface-panel/92">
       <div className="shrink-0 border-b border-border-subtle px-3 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -284,7 +318,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
             <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-text-primary">
               持久化配置
             </h2>
-            <p className="mt-1 text-[12px] leading-5 text-text-secondary">
+            <p className="settings-text-wrap mt-1 text-[12px] leading-5 text-text-secondary">
               写入目标：{draft.runtime.config_path || "未返回 config_path"}
             </p>
           </div>
@@ -299,20 +333,23 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
         </div>
       </div>
 
-      <div className="shell-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div className="shell-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3">
         <div className="flex flex-col gap-3">
           <Section
             title="Translate"
             detail="翻译是持久化默认值。只渲染当前 provider 的字段，secret 仍然是 write-only。"
           >
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="settings-field-grid grid gap-3">
               <Field label="翻译开关" description="控制启动默认值" error={fieldError("translate.enabled")}>
-                {renderToggle(draft.translate.enabled, () =>
-                  updateDraft((current) => ({
-                    ...current,
-                    translate: { ...current.translate, enabled: !current.translate.enabled },
-                  })),
-                )}
+                <BooleanSwitch
+                  onToggle={() =>
+                    updateDraft((current) => ({
+                      ...current,
+                      translate: { ...current.translate, enabled: !current.translate.enabled },
+                    }))
+                  }
+                  value={draft.translate.enabled}
+                />
               </Field>
               <Field label="Provider" description="只改持久化默认值" error={fieldError("translate.provider")}>
                 <select
@@ -337,7 +374,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
               </Field>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="settings-field-grid grid gap-3">
               <Field
                 label="Source Lang"
                 description="translate.source_lang"
@@ -427,7 +464,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
             {resolveDesktopSettingsTranslateSections(draft.translate.provider).showOpenAICompatibleFields ? (
               <>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="settings-field-grid grid gap-3">
                   <Field
                     label="Base URL"
                     description="translate.providers.openai_compatible.base_url"
@@ -541,29 +578,33 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
             title="Display"
             detail="这里是下次启动默认值。顶部 runtime quick toggle 仍然只影响当前运行态。"
           >
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="settings-field-grid grid gap-3">
               <Field label="English Only" description="只展示英文输出" error={fieldError("display.english_only")}>
-                {renderToggle(draft.display.english_only, () =>
-                  updateDraft((current) => ({
-                    ...current,
-                    display: { ...current.display, english_only: !current.display.english_only },
-                  })),
-                )}
+                <BooleanSwitch
+                  onToggle={() =>
+                    updateDraft((current) => ({
+                      ...current,
+                      display: { ...current.display, english_only: !current.display.english_only },
+                    }))
+                  }
+                  value={draft.display.english_only}
+                />
               </Field>
               <Field label="默认自动朗读" description="持久化默认值，不是顶部 runtime toggle" error={fieldError("display.tts_auto_read_active_chat")}>
-                {renderToggle(
-                  draft.display.tts_auto_read_active_chat,
-                  () =>
+                <BooleanSwitch
+                  disabledLabel="默认关闭"
+                  enabledLabel="默认开启"
+                  onToggle={() =>
                     updateDraft((current) => ({
                       ...current,
                       display: {
                         ...current.display,
                         tts_auto_read_active_chat: !current.display.tts_auto_read_active_chat,
                       },
-                    })),
-                  "默认开启",
-                  "默认关闭",
-                )}
+                    }))
+                  }
+                  value={draft.display.tts_auto_read_active_chat}
+                />
               </Field>
             </div>
             <Field label="翻译失败展示策略" description="直接对应 display.on_translate_fail" error={fieldError("display.on_translate_fail")}>
@@ -621,7 +662,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
             {providerSections.showDoubaoFields ? (
               <>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="settings-field-grid grid gap-3">
                   <Field
                     label="Config Path"
                     description="tts.providers.doubao.config_path"
@@ -763,7 +804,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                   summary="高级参数"
                   detail="次级音频调参保留在折叠区，避免把首屏变成 provider 私有参数垃圾堆。"
                 >
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="settings-field-grid grid gap-3">
                     <Field
                       label="Audio Format"
                       description="当前只支持 wav"
@@ -942,9 +983,8 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                       description="provider 私有缓存开关"
                       error={fieldError("tts.providers.doubao.use_cache")}
                     >
-                      {renderToggle(
-                        draft.tts.providers.doubao.use_cache,
-                        () =>
+                      <BooleanSwitch
+                        onToggle={() =>
                           updateDraft((current) => ({
                             ...current,
                             tts: {
@@ -957,8 +997,10 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                                 },
                               },
                             },
-                          })),
-                      )}
+                          }))
+                        }
+                        value={draft.tts.providers.doubao.use_cache}
+                      />
                     </Field>
                   </div>
                 </AdvancedSection>
@@ -967,7 +1009,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
             {providerSections.showTencentFields ? (
               <>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="settings-field-grid grid gap-3">
                   <Field
                     label="Config Path"
                     description="tts.providers.tencent_cloud.config_path"
@@ -1113,7 +1155,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                   summary="高级参数"
                   detail="采样、情绪和超时仍可调，但不该堆在首屏污染主路径配置。"
                 >
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="settings-field-grid grid gap-3">
                     <Field
                       label="Codec"
                       description="当前只支持 wav"
@@ -1448,9 +1490,8 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                       description="provider 私有字幕开关"
                       error={fieldError("tts.providers.tencent_cloud.enable_subtitle")}
                     >
-                      {renderToggle(
-                        draft.tts.providers.tencent_cloud.enable_subtitle,
-                        () =>
+                      <BooleanSwitch
+                        onToggle={() =>
                           updateDraft((current) => ({
                             ...current,
                             tts: {
@@ -1464,8 +1505,10 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                                 },
                               },
                             },
-                          })),
-                      )}
+                          }))
+                        }
+                        value={draft.tts.providers.tencent_cloud.enable_subtitle}
+                      />
                     </Field>
                   </div>
                 </AdvancedSection>

@@ -139,6 +139,22 @@
 }
 
 @layer utilities {
+  .settings-workspace input,
+  .settings-workspace select,
+  .settings-workspace [data-settings-switch="true"] {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .settings-workspace .settings-field-grid {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  }
+
+  .settings-workspace .settings-text-wrap {
+    overflow-wrap: anywhere;
+  }
+
   .shell-scrollbar {
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
