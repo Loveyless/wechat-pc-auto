@@ -128,7 +128,7 @@ npm run tauri dev
 - 开发运行：`backend_main.py + npm run dev`
 - sidecar 构建：`python scripts/build_desktop_shell_sidecars.py --python python`
 - 前端回归：`cd desktop-shell && npm test`
-- 前端构建 + Rust 回归：`cd desktop-shell && npm run build && cd src-tauri && cargo test`
+- 前端构建 + Rust 回归：`cd desktop-shell && npm run build && npm run test:rust`
 - release smoke：`python scripts/smoke_desktop_shell_release.py`
 
 最小源码态验证：
@@ -138,8 +138,7 @@ python listener_app/backend_main.py --config ".\config\listener.json"
 cd desktop-shell
 npm test
 npm run build
-cd src-tauri
-cargo test
+npm run test:rust
 ```
 
 桌面壳真正的最小交付闸口是：
@@ -149,14 +148,13 @@ python scripts/build_desktop_shell_sidecars.py --python python
 cd desktop-shell
 npm test
 npm run build
-cd src-tauri
-cargo test
-cd ..\..
+npm run test:rust
+cd ..
 python scripts/smoke_desktop_shell_release.py
 ```
 
-`cargo test` 在干净环境里会读取 `desktop-shell/src-tauri/tauri.conf.json` 的 `frontendDist=../dist`。
-所以别再跳过 `npm run build`；你本地偶尔“直接 cargo test 也能过”，通常只是因为上一次构建残留了 `desktop-shell/dist`。
+`npm run test:rust` 仍然会读取 `desktop-shell/src-tauri/tauri.conf.json` 的 `frontendDist=../dist`，只是额外通过 `TAURI_CONFIG` 清空了测试态 `bundle.externalBin`。
+所以别再跳过 `npm run build`；你本地偶尔“直接 cargo test 也能过”，通常只是因为上一次构建残留了 `desktop-shell/dist` 和 sidecar 二进制。
 
 ## 发布边界
 

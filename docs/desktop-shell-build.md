@@ -80,13 +80,12 @@ npm run tauri build
 cd desktop-shell
 npm test
 npm run build
-
-cd src-tauri
-cargo test
+npm run test:rust
 ```
 
 别把 `npm run build` 省掉。
-`desktop-shell/src-tauri/tauri.conf.json` 把 `frontendDist` 固定指到 `../dist`；在干净环境里不先产出这个目录，`cargo test` 会直接在 `tauri::generate_context!()` 这里炸掉。
+`desktop-shell/src-tauri/tauri.conf.json` 把 `frontendDist` 固定指到 `../dist`；在干净环境里不先产出这个目录，`npm run test:rust` 仍会在 `tauri::generate_context!()` 这里炸掉。
+`npm run test:rust` 会额外通过 `desktop-shell/src-tauri/tauri.test.conf.json` 注入 `TAURI_CONFIG`，只在测试态清空 `bundle.externalBin`；fast regression 不该为了跑 Rust 单测去先打 sidecar。
 
 ## 产物
 
@@ -171,7 +170,7 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 1. 执行 `python scripts/build_desktop_shell_sidecars.py --python python`
 2. 执行 `cd desktop-shell && npm test`
 3. 执行 `cd desktop-shell && npm run build`
-4. 执行 `cd desktop-shell/src-tauri && cargo test`
+4. 执行 `cd desktop-shell && npm run test:rust`
 5. 执行 `python scripts/smoke_desktop_shell_release.py`
 6. 只有这五步都过，才允许把 release 壳当成可交付产物
 
@@ -191,7 +190,7 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 - `cd desktop-shell && npm install`
 - `cd desktop-shell && npm test`
 - `cd desktop-shell && npm run build`
-- `cd desktop-shell/src-tauri && cargo test`
+- `cd desktop-shell && npm run test:rust`
 - `python scripts/smoke_desktop_shell_release.py`
 
 当前 sidecar 构建会额外显式收集 `charset_normalizer`，并通过仓库内 PyInstaller hook 动态补齐它的发行版级 `__mypyc` 顶层模块；否则 frozen 包里 `requests` 会把真实导入失败降级成 `RequestsDependencyWarning`。

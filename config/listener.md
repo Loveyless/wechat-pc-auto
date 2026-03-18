@@ -48,8 +48,7 @@ npm run tauri dev
 cd desktop-shell
 npm test
 npm run build
-cd src-tauri
-cargo test
+npm run test:rust
 ```
 
 release 壳交付闸口：

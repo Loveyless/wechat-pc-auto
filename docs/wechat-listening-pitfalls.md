@@ -474,6 +474,22 @@
   - `http://127.0.0.1:8765/healthz` 返回 `{"status":"ok"}`
   - `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log` 出现 `spawned backend sidecar pid=...`
 
+### 28.0) fast regression 的 Rust 单测不该依赖 sidecar 二进制
+现象：
+- 干净 CI 上直接跑 `cd desktop-shell/src-tauri && cargo test`，会在编译期报 `resource path binaries\\wechat-auto-backend-<target>.exe doesn't exist`。
+- 本地偶尔过，只是因为 `desktop-shell/src-tauri/binaries/` 残留了上次打包产物，不是测试链真的对。
+
+根因：
+- `desktop-shell/src-tauri/build.rs` 会执行 `tauri_build::build()`，它会读取 `desktop-shell/src-tauri/tauri.conf.json` 的 `bundle.externalBin`。
+- `desktop-shell/src-tauri/src/main.rs` 的 `tauri::generate_context!()` 仍要求真实 Tauri 配置存在，所以测试态不能粗暴跳过整份配置。
+- `desktop-shell/package.json` 的 `pretauri` 只会在 `npm run tauri ...` 前构建 sidecar；裸 `cargo test` 根本不会走这条链。
+
+处理：
+- Rust 单测统一走 `cd desktop-shell && npm run test:rust`。
+- 这条命令会把 `desktop-shell/src-tauri/tauri.test.conf.json` 通过 `TAURI_CONFIG` 合并进测试态配置，只清空 `bundle.externalBin`，不改 `frontendDist`。
+- 所以 fast regression 仍然必须先跑 `npm run build` 产出 `desktop-shell/dist`，但不需要先打 sidecar。
+- sidecar 打包正确性继续由 `python scripts/build_desktop_shell_sidecars.py` 和 `python scripts/smoke_desktop_shell_release.py` 兜底；别把 Rust 单测误当成打包 smoke。
+
 ### 28.1) 把源码态配置和安装版配置混成一套
 现象：
 - 安装路径明明不在仓库里，但重装后翻译和 TTS 还是“自动就能用”。
