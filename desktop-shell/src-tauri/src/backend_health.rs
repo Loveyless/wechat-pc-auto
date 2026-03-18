@@ -82,6 +82,7 @@ fn extract_http_body(response: &str) -> Option<&str> {
         .or_else(|| response.split_once("\n\n").map(|(_, body)| body))
 }
 
+#[cfg(test)]
 pub fn response_is_healthy(response: &str) -> bool {
     matches!(
         parse_health_response(response),
@@ -212,7 +213,10 @@ mod tests {
         let response =
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"status\": \"odd_state\"}";
         let payload = parse_health_response(response).expect("payload should parse");
-        assert_eq!(payload.status, BackendHealthStatus::Unknown("odd_state".to_string()));
+        assert_eq!(
+            payload.status,
+            BackendHealthStatus::Unknown("odd_state".to_string())
+        );
         assert_eq!(describe_health_snapshot(&payload), "status=odd_state");
     }
 }
