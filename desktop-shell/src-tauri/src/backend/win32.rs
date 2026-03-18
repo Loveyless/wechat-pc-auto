@@ -1,4 +1,6 @@
-use std::{ffi::OsStr, os::windows::ffi::OsStrExt, ptr::null_mut};
+use std::{
+    env, ffi::OsStr, os::windows::ffi::OsStrExt, path::PathBuf, process::Command, ptr::null_mut,
+};
 
 use windows_sys::Win32::{
     Foundation::{
@@ -109,6 +111,32 @@ pub fn process_start_token(pid: u32) -> Option<String> {
     ))
 }
 
+pub fn kill_process_tree(pid: u32) -> Result<(), String> {
+    if pid == 0 {
+        return Ok(());
+    }
+
+    let output = Command::new(resolve_taskkill_path())
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .output()
+        .map_err(|err| format!("launch taskkill failed pid={pid}: {err}"))?;
+
+    if output.status.success() || !process_is_alive(pid) {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("exit status {}", output.status)
+    };
+    Err(format!("taskkill failed pid={pid}: {detail}"))
+}
+
 fn open_process_for_query(pid: u32) -> Option<HANDLE> {
     if pid == 0 {
         return None;
@@ -122,4 +150,14 @@ fn open_process_for_query(pid: u32) -> Option<HANDLE> {
 
 fn to_wide(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
+}
+
+fn resolve_taskkill_path() -> PathBuf {
+    if let Some(windir) = env::var_os("WINDIR") {
+        let candidate = PathBuf::from(windir).join("System32").join("taskkill.exe");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    PathBuf::from("taskkill")
 }

@@ -24,6 +24,7 @@ if __package__:
         start_worker_process,
         stderr_reader,
         stdout_reader,
+        terminate_process_tree,
     )
     from .sidebar_shared import (
         CHAT_CACHE_LIMIT,
@@ -75,6 +76,7 @@ else:
         start_worker_process,
         stderr_reader,
         stdout_reader,
+        terminate_process_tree,
     )
     from sidebar_shared import (
         CHAT_CACHE_LIMIT,
@@ -391,10 +393,10 @@ class BackendRuntimeService:
         self._closing.set()
         self._worker_restart_deadline = 0.0
         worker = self._worker
+        self._worker = None
         if worker is not None:
             try:
-                if worker.poll() is None:
-                    worker.terminate()
+                terminate_process_tree(worker)
             except Exception:
                 pass
         self._signal_translate_worker_stop()

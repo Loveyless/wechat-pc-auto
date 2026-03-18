@@ -21,11 +21,10 @@ use tauri_plugin_shell::{
 };
 
 use crate::backend::win32::{
-    acquire_bootstrap_lock, process_is_alive, process_start_token, BackendBootstrapLock,
+    acquire_bootstrap_lock, kill_process_tree, process_is_alive, process_start_token,
+    BackendBootstrapLock,
 };
-use crate::backend_health::{
-    describe_health_snapshot, probe_backend_health, BackendHealthProbe,
-};
+use crate::backend_health::{describe_health_snapshot, probe_backend_health, BackendHealthProbe};
 
 const BACKEND_HOST: &str = "127.0.0.1";
 const BACKEND_HTTP_PORT: u16 = 8765;
@@ -36,6 +35,8 @@ const BACKEND_BOOTSTRAP_LOCK_TIMEOUT_MS: u32 = 20_000;
 const BACKEND_SIDECAR_NAME: &str = "wechat-auto-backend";
 const BACKEND_BOOTSTRAP_MUTEX_NAMESPACE: &str = "Local\\com.wechatauto.shell.backend-bootstrap";
 const BACKEND_MARKER_FILE: &str = "backend-sidecar.json";
+const BACKEND_OWNER_PID_ENV: &str = "WECHAT_AUTO_OWNER_PID";
+const BACKEND_OWNER_START_TOKEN_ENV: &str = "WECHAT_AUTO_OWNER_START_TOKEN";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,15 +118,37 @@ impl ManagedBackendState {
             clear_backend_marker_if_matches(&self.runtime_root, Some(marker));
         }
         let mut guard = self.child.lock().unwrap();
-        if let Some(child) = guard.take() {
-            let _ = child.kill();
+        let child = guard.take();
+        let pid = child
+            .as_ref()
+            .map(CommandChild::pid)
+            .or_else(|| marker.as_ref().map(|value| value.pid));
+        let Some(pid) = pid else {
+            return;
+        };
+        match kill_process_tree(pid) {
+            Ok(()) => append_bootstrap_log(
+                &self.runtime_root,
+                &format!("killed owned backend process tree pid={pid}"),
+            ),
+            Err(error) => {
+                append_bootstrap_log(
+                    &self.runtime_root,
+                    &format!("kill owned backend process tree failed pid={pid}: {error}"),
+                );
+                if let Some(child) = child {
+                    let _ = child.kill();
+                }
+            }
         }
     }
 
     fn take_owned_child_for_restart(&self) -> Result<(CommandChild, BackendPidMarker), String> {
         let marker = {
             let metadata = self.metadata.lock().unwrap();
-            if !metadata.owns_child || !metadata.info.owns_backend || !metadata.info.restart_supported
+            if !metadata.owns_child
+                || !metadata.info.owns_backend
+                || !metadata.info.restart_supported
             {
                 return Err("backend is not owned by the current shell".to_string());
             }
@@ -177,8 +200,7 @@ impl ManagedBackendState {
 
         match spawn_backend_sidecar(app, &self.runtime_root) {
             Ok((child, marker)) => {
-                let info =
-                    build_backend_info(&self.runtime_root, true, true, true, String::new());
+                let info = build_backend_info(&self.runtime_root, true, true, true, String::new());
                 self.replace_backend_state(info.clone(), Some(child), true, Some(marker));
                 Ok(info)
             }
@@ -669,6 +691,9 @@ fn spawn_backend_sidecar<R: Runtime>(
 ) -> Result<(CommandChild, BackendPidMarker), String> {
     let config_path = runtime_root.join("config").join("listener.json");
     let runtime_root_value = runtime_root.display().to_string();
+    let owner_pid = std::process::id();
+    let owner_pid_value = owner_pid.to_string();
+    let owner_start_token = process_start_token(owner_pid).unwrap_or_default();
     append_bootstrap_log(
         runtime_root,
         &format!(
@@ -693,6 +718,8 @@ fn spawn_backend_sidecar<R: Runtime>(
             "8766",
         ])
         .env("WECHAT_AUTO_RUNTIME_ROOT", &runtime_root_value)
+        .env(BACKEND_OWNER_PID_ENV, &owner_pid_value)
+        .env(BACKEND_OWNER_START_TOKEN_ENV, &owner_start_token)
         .current_dir(runtime_root);
 
     let (mut rx, child) = sidecar_command

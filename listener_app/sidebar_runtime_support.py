@@ -275,20 +275,39 @@ def _get_pid_start_token(pid: int) -> str:
         return ""
 
 
-def _is_lock_owner_alive(lock_payload: dict[str, Any]) -> bool:
-    pid = as_int(lock_payload.get("pid"), 0)
-    if not _is_pid_alive(pid):
+def _normalize_process_start_token(value: Any) -> str:
+    token = str(value or "").strip().lower()
+    if not token:
+        return ""
+    if len(token) == 16 and all(ch in "0123456789abcdef" for ch in token):
+        try:
+            return str(int(token, 16))
+        except ValueError:
+            return token
+    if token.isdigit():
+        return str(int(token, 10))
+    return token
+
+
+def is_process_identity_alive(pid: int, start_token: str = "") -> bool:
+    if not _is_pid_alive(int(pid)):
         return False
 
-    expected_token = str(lock_payload.get("start_token", "")).strip()
+    expected_token = _normalize_process_start_token(start_token)
     if not expected_token:
         return True
 
-    current_token = _get_pid_start_token(pid)
+    current_token = _normalize_process_start_token(_get_pid_start_token(int(pid)))
     if not current_token:
-        # 无法读取启动时间时退化为 PID 存活判断，避免误删活动锁。
+        # 无法读取启动时间时退化为 PID 存活判断，避免误判活进程已经失联。
         return True
     return current_token == expected_token
+
+
+def _is_lock_owner_alive(lock_payload: dict[str, Any]) -> bool:
+    pid = as_int(lock_payload.get("pid"), 0)
+    expected_token = str(lock_payload.get("start_token", "")).strip()
+    return is_process_identity_alive(pid, expected_token)
 
 
 def is_target_already_running(target: str) -> bool:
@@ -409,6 +428,53 @@ def release_managed_target_locks():
     lock_paths = list(_TARGET_LOCK_PATHS)
     _TARGET_LOCK_PATHS = []
     _release_lock_paths(lock_paths)
+
+
+def resolve_taskkill_path() -> str:
+    windir = str(os.environ.get("WINDIR", "")).strip()
+    if windir:
+        candidate = os.path.join(windir, "System32", "taskkill.exe")
+        if os.path.exists(candidate):
+            return candidate
+    resolved = shutil.which("taskkill.exe") or shutil.which("taskkill")
+    return resolved or "taskkill"
+
+
+def terminate_process_tree(
+    proc: subprocess.Popen | None,
+    *,
+    stop_timeout: float = WORKER_STOP_TIMEOUT_SECONDS,
+    force_timeout: float = WORKER_FORCE_KILL_TIMEOUT_SECONDS,
+) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                [resolve_taskkill_path(), "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+            proc.wait(timeout=max(stop_timeout + force_timeout, 0.1))
+            return
+        except Exception:
+            pass
+
+    try:
+        proc.terminate()
+        proc.wait(timeout=max(stop_timeout, 0.1))
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        pass
+
+    try:
+        proc.kill()
+        proc.wait(timeout=max(force_timeout, 0.1))
+    except Exception:
+        pass
 
 
 def start_worker_process(

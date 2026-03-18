@@ -19,15 +19,26 @@ class FakeWorkerProcess:
         self.stdout = []
         self.stderr = []
         self._return_code = None
+        self.terminate_calls = 0
+        self.kill_calls = 0
+        self.wait_calls = []
 
     def poll(self):
         return self._return_code
 
     def terminate(self):
+        self.terminate_calls += 1
         self._return_code = 0
 
     def kill(self):
+        self.kill_calls += 1
         self._return_code = -9
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        if self._return_code is None:
+            self._return_code = 0
+        return self._return_code
 
 
 class FakeTTSPlayer:
@@ -79,8 +90,10 @@ class BackendRuntimeTest(unittest.TestCase):
     @mock.patch("listener_app.backend_runtime.cleanup_stale_target_locks", return_value=0)
     @mock.patch("listener_app.backend_runtime.create_tts_player", return_value=(FakeTTSPlayer(), "tts ready"))
     @mock.patch("listener_app.backend_runtime.start_worker_process", return_value=FakeWorkerProcess())
+    @mock.patch("listener_app.backend_runtime.terminate_process_tree")
     def test_start_and_stop_without_tk(
         self,
+        terminate_process_tree,
         _start_worker_process,
         _create_tts_player,
         _cleanup_stale_target_locks,
@@ -96,6 +109,7 @@ class BackendRuntimeTest(unittest.TestCase):
         self.assertEqual(snapshot["tts"]["provider"], "windows_system")
         self.assertTrue(snapshot["tts"]["available"])
         service.stop()
+        terminate_process_tree.assert_called_once()
 
     @mock.patch("listener_app.backend_runtime.release_managed_target_locks")
     @mock.patch("listener_app.backend_runtime.set_managed_target_lock_paths")
@@ -103,8 +117,10 @@ class BackendRuntimeTest(unittest.TestCase):
     @mock.patch("listener_app.backend_runtime.cleanup_stale_target_locks", return_value=0)
     @mock.patch("listener_app.backend_runtime.create_tts_player", return_value=(FakeTTSPlayer(), "tts ready"))
     @mock.patch("listener_app.backend_runtime.start_worker_process", return_value=FakeWorkerProcess())
+    @mock.patch("listener_app.backend_runtime.terminate_process_tree")
     def test_start_allows_empty_targets_for_all_sessions_path(
         self,
+        terminate_process_tree,
         _start_worker_process,
         _create_tts_player,
         _cleanup_stale_target_locks,
@@ -119,6 +135,7 @@ class BackendRuntimeTest(unittest.TestCase):
         self.assertEqual(snapshot["runtime"]["monitor_scope"], "all_sessions")
         acquire_target_lock.assert_not_called()
         service.stop()
+        terminate_process_tree.assert_called_once()
 
     def test_message_event_creates_preview_message(self):
         service = BackendRuntimeService(config_path=self._write_config())
@@ -196,6 +213,20 @@ class BackendRuntimeTest(unittest.TestCase):
         health = service.get_health_snapshot()
         self.assertEqual(health["status"], HEALTH_STATUS_STARTUP_FAILED)
         self.assertEqual(health["detail"], "missing deeplx url")
+
+    @mock.patch("listener_app.backend_runtime.release_managed_target_locks")
+    @mock.patch("listener_app.backend_runtime.terminate_process_tree")
+    def test_stop_uses_process_tree_cleanup_for_worker(
+        self,
+        terminate_process_tree,
+        _release_managed_target_locks,
+    ):
+        worker = FakeWorkerProcess()
+        service = BackendRuntimeService(config_path=self._write_config())
+        service._worker = worker
+        service.stop()
+        terminate_process_tree.assert_called_once_with(worker)
+        self.assertIsNone(service._worker)
 
 
 if __name__ == "__main__":

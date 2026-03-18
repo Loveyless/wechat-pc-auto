@@ -18,6 +18,11 @@ fn focus_existing_window<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+fn cleanup_managed_backend<R: Runtime>(app_handle: &tauri::AppHandle<R>) {
+    let state = app_handle.state::<ManagedBackendState>();
+    state.kill_owned_child();
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -40,10 +45,10 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                let state = app_handle.state::<ManagedBackendState>();
-                state.kill_owned_child();
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                cleanup_managed_backend(app_handle);
             }
+            _ => {}
         });
 }

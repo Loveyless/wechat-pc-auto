@@ -55,6 +55,7 @@ def _load_sidebar_module():
 
 
 sidebar = _load_sidebar_module()
+sidebar_runtime_support_module = importlib.import_module("listener_app.sidebar_runtime_support")
 
 
 class RuntimeSharedHelpersTest(unittest.TestCase):
@@ -878,6 +879,32 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertEqual(sidebar.compute_worker_restart_delay(4), 24.0)
         self.assertEqual(sidebar.compute_worker_restart_delay(5), 30.0)
         self.assertEqual(sidebar.compute_worker_restart_delay(9), 30.0)
+
+    def test_is_process_identity_alive_accepts_decimal_start_token(self):
+        with mock.patch.object(
+            sidebar_runtime_support_module,
+            "_is_pid_alive",
+            return_value=True,
+        ), mock.patch.object(
+            sidebar_runtime_support_module,
+            "_get_pid_start_token",
+            return_value="134182929806212390",
+        ):
+            self.assertTrue(sidebar.is_process_identity_alive(1234, "134182929806212390"))
+
+    def test_is_process_identity_alive_accepts_rust_hex_start_token(self):
+        decimal_token = "134182929806212390"
+        rust_hex_token = f"{int(decimal_token):016x}"
+        with mock.patch.object(
+            sidebar_runtime_support_module,
+            "_is_pid_alive",
+            return_value=True,
+        ), mock.patch.object(
+            sidebar_runtime_support_module,
+            "_get_pid_start_token",
+            return_value=decimal_token,
+        ):
+            self.assertTrue(sidebar.is_process_identity_alive(1234, rust_hex_token))
 
 
 if __name__ == "__main__":
