@@ -19,6 +19,10 @@ Tk 回退打包链已经下线，不要再把仓库理解成“双桌面入口�
   - `group_listener_worker.exe`
 - 运行时配置、日志、锁不再写回源码目录，而是落到：
   - `%LOCALAPPDATA%\com.wechatauto.shell`
+- 仓库跟踪的默认 bundle 配置现在以“首启可进入设置页”为目标：
+  - `translate.enabled=false`
+  - `tts.provider=windows_system`
+  - fresh runtime root 不依赖 `.env.local` 也应能启动
 
 别再把“密钥仍然外置”误读成“不是一体化”。
 真正的边界只有一个：`.env.local` 不会被自动打进安装包。
@@ -112,6 +116,16 @@ Tauri 壳启动后，运行时根目录固定在：
 - `logs/desktop-shell-bootstrap.log`
 - `logs/.runtime/backend-sidecar.json`
 
+别把源码态和壳运行时当成同一套配置：
+
+- `npm run tauri dev`
+- `wechat-auto-shell.exe`
+- installer 安装后的应用
+
+上面这几条都吃 `%LOCALAPPDATA%\\com.wechatauto.shell` 这套运行时配置，不吃仓库里的 `config/listener.json`。
+仓库里的 `config/listener.json` 只对应源码态 `python listener_app/backend_main.py --config ".\\config\\listener.json"`。
+桌面壳设置页保存时，也只会写当前 backend 正在使用的那套配置，不会自动同步到仓库目录。
+
 ## 启动契约
 
 - `/healthz` 只有在 HTTP 200 且响应 JSON 的 `status == "ok"` 时才算 ready。
@@ -124,6 +138,8 @@ Tauri 壳启动后，运行时根目录固定在：
 
 - 首次启动时，把 bundle 里的 `config/*.json` 拷到运行时目录
 - 运行时目录里已经存在的配置，不覆盖
+- 所以“默认配置已改安全”只对 fresh runtime root 生效；已有用户配置不会被安装包强行覆盖
+- 这也是为什么“重新安装后还沿用旧翻译/TTS 配置”并不奇怪：你本机 `%LOCALAPPDATA%\\com.wechatauto.shell` 里如果已经有旧配置，壳会继续复用它
 
 ## `.env.local` 规则
 
@@ -141,6 +157,12 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 
 但默认仍不自动复制 `.env.local` 进产物。
 原因很简单：这玩意通常带密钥，自动打包出去就是泄漏。
+
+别把这句话理解错：
+
+- fresh install 不带 `.env.local`，默认也应该能进壳和设置页
+- 只有启用 `translate.enabled=true + provider=deeplx`、`translate.enabled=true + provider=openai_compatible`，或切到 `doubao` / `tencent_cloud` 时，才要求额外 URL / 凭据
+- `openai_compatible` 当前要求直接提供 `base_url`、`model`、`api_key`，不支持 `api_key_env`
 
 ## 发布闸口
 
@@ -215,10 +237,11 @@ Windows 下常见表现就是：
 
 优先看两类问题：
 
-- `translate.enabled=true` 但 `translate.deeplx_url` / `DEEPLX_URL` 没给
-- `.env.local` 放错位置
+- 运行时目录里已经残留旧配置，导致没有吃到新的安全默认值
+- 你自己把 `translate.enabled=true`、`tts.provider=doubao` 或 `tts.provider=tencent_cloud` 打开了，但没补对应 URL / 凭据
 
 这类问题现在会 fail-fast，不会再假装“壳起了所以算成功”。
+判断时先分清 fresh runtime root 和已有 runtime root，别把旧用户配置污染误判成 installer 默认值回归。
 
 ## 回滚边界
 
