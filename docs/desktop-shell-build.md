@@ -217,6 +217,24 @@ Windows 下常见表现就是：
 - `desktop-shell-bootstrap.log` 里是否同一轮出现了两次 `spawning backend sidecar`
 - `backend-sidecar.json` 记录的 pid/token 是否被无意义覆盖
 
+### 1.1) 关掉安装版窗口后还残留 backend / worker
+
+这不是“小问题”，这是退出链路没收干净。
+
+当前 sidecar 和 worker 都是 PyInstaller `onefile`，Windows 下常见会是一棵父/子进程树。
+如果退出时只杀根 pid，不杀整棵树，窗口虽然没了，真正跑 payload 的进程还能继续活着。
+
+正确验收不是“窗口关了”，而是同时满足：
+
+- 关闭壳后 `http://127.0.0.1:8765/healthz` 不再可达
+- 任务管理器里不再残留 `wechat-auto-backend.exe` / `group_listener_worker.exe`
+- `desktop-shell-bootstrap.log` 有退出清理记录
+
+另外，installer 路径现在不该只靠“壳正常关闭时杀树”。
+backend 还要带 owner watchdog：壳启动 sidecar 时传入 `owner_pid + owner_start_token`，
+backend 每 `3s` 探测一次 owner，连续失联 `30s` 后自退。
+这层是异常退出兜底，不是替代正常 close cleanup。
+
 ### 2) 冷启动时先看到 `reconnecting`
 
 现在如果还看到这个，优先怀疑前端状态机回归了。

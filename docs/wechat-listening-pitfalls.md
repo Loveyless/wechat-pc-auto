@@ -522,6 +522,31 @@
 - 二次启动只做两件事：记录 `single-instance relaunch detected, focus existing window`，然后聚焦已有 `main` 窗口。
 - release 验证必须实际跑 `python scripts/smoke_desktop_shell_release.py`，确认整轮里只有一次 `spawning backend sidecar`。
 
+### 29.2) 安装版点右上角关闭后，backend / worker 不能留后台残活
+现象：
+- 安装版桌面壳打开后点关闭，窗口没了，但任务管理器里还能看到 `wechat-auto-backend.exe`、`group_listener_worker.exe`，或者其对应的 Python payload 继续活着。
+- 再次启动 installer 版时，`/healthz` 已经先通了，表现成“像是自动续命”。
+
+根因：
+- 当前 sidecar / worker 都是 PyInstaller `onefile`，Windows 下常见是“父进程 + payload 子进程”的进程树。
+- 如果退出时只杀根进程 pid，不杀整棵树，就可能只打掉 bootloader，把真正跑 runtime 的 payload 留在后台。
+- `desktop-shell/src-tauri/src/main.rs` 只监听 `RunEvent::Exit` 也不够稳，用户点关闭按钮先经过的是窗口销毁和 `ExitRequested` 路径。
+
+处理：
+- `desktop-shell/src-tauri/src/main.rs` 必须至少在 `RunEvent::ExitRequested` 和 `RunEvent::Exit` 两条路径都触发 sidecar 清理，不能只赌最后一个事件。
+- `desktop-shell/src-tauri/src/backend/bootstrap.rs` 里的 `ManagedBackendState.kill_owned_child()` 必须按 Windows 进程树清理 `wechat-auto-backend.exe`，不能只调 `CommandChild.kill()`。
+- `listener_app/backend_runtime.py` 停 worker 时也必须走进程树清理；`group_listener_worker.exe` 同样是 `onefile`，只 `terminate()` 根 pid 不够。
+- Windows 下统一按 `taskkill /PID <pid> /T /F` 处理 tree cleanup；改成单 pid kill 属于回归。
+- 仅靠“壳正常退出时杀树”还不够；backend 还要有 owner watchdog：
+  - sidecar 启动时由壳注入 `owner_pid + owner_start_token`
+  - backend 定期向操作系统确认 owner 是否还活着，而且还是原来那一个进程
+  - 当前推荐探针周期 `3s`、失联宽限 `30s`
+  - watchdog 是异常退出兜底，不是拿来替代正常 close cleanup
+- 验证不要只看窗口是否消失；必须在关闭后确认：
+  - `http://127.0.0.1:8765/healthz` 不再可达
+  - 任务管理器里不再残留 `wechat-auto-backend.exe` / `group_listener_worker.exe`
+  - `%LOCALAPPDATA%\\com.wechatauto.shell\\logs\\desktop-shell-bootstrap.log` 能看到退出清理痕迹
+
 ### 30) GUI 配置保存不是热更新，也不是文件直通车
 现象：
 - 桌面壳设置页能读写配置后，最容易出现两种误判：
