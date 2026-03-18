@@ -1,4 +1,5 @@
 import unittest
+from io import StringIO
 from unittest import mock
 
 from listener_app import backend_main
@@ -7,6 +8,8 @@ from listener_app import backend_main
 class BackendMainTest(unittest.TestCase):
     def test_main_keeps_api_alive_long_enough_to_report_startup_failed(self):
         order = []
+        stdout = StringIO()
+        stderr = StringIO()
 
         class FakeService:
             def __init__(self, config_path):
@@ -54,6 +57,12 @@ class BackendMainTest(unittest.TestCase):
                 backend_main.OWNER_START_TOKEN_ENV: "",
             },
             clear=False,
+        ), mock.patch(
+            "sys.stdout",
+            stdout,
+        ), mock.patch(
+            "sys.stderr",
+            stderr,
         ):
             with self.assertRaises(SystemExit) as exc_ctx:
                 backend_main.main()
@@ -69,9 +78,13 @@ class BackendMainTest(unittest.TestCase):
                 "service.stop",
             ],
         )
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("[backend] startup failed: boom", stderr.getvalue())
 
     def test_main_exits_when_owner_watchdog_times_out(self):
         order = []
+        stdout = StringIO()
+        stderr = StringIO()
 
         class FakeService:
             def __init__(self, config_path):
@@ -125,6 +138,12 @@ class BackendMainTest(unittest.TestCase):
             },
             clear=False,
         ), mock.patch(
+            "sys.stdout",
+            stdout,
+        ), mock.patch(
+            "sys.stderr",
+            stderr,
+        ), mock.patch(
             "sys.argv",
             ["backend_main.py", "--config", "config/listener.json"],
         ):
@@ -141,6 +160,14 @@ class BackendMainTest(unittest.TestCase):
                 "service.stop",
             ],
         )
+        stdout_text = stdout.getvalue()
+        self.assertIn("[backend] owner watchdog enabled pid=4321 probe=0.0s grace=0.5s", stdout_text)
+        self.assertIn("[backend] owner watchdog lost owner pid=4321, grace=0.5s", stdout_text)
+        self.assertIn(
+            "[backend] owner watchdog exiting because owner pid=4321 is gone",
+            stdout_text,
+        )
+        self.assertEqual(stderr.getvalue(), "")
 
 
 if __name__ == "__main__":

@@ -490,6 +490,21 @@
 - 所以 fast regression 仍然必须先跑 `npm run build` 产出 `desktop-shell/dist`，但不需要先打 sidecar。
 - sidecar 打包正确性继续由 `python scripts/build_desktop_shell_sidecars.py` 和 `python scripts/smoke_desktop_shell_release.py` 兜底；别把 Rust 单测误当成打包 smoke。
 
+### 28.05) packaging smoke 报 `backend stderr:` 不一定是 backend 真坏了，可能只是日志流分错了
+现象：
+- `python scripts/smoke_desktop_shell_release.py` 已经等到 `/healthz` ready，但还是因为 bootstrap log 里出现 `backend stderr:` 直接失败。
+- 常见表现是 log 里只有 `owner watchdog enabled/lost/recovered/exiting` 这类生命周期提示，没有 traceback，也没有 `startup failed`。
+
+根因：
+- `scripts/smoke_desktop_shell_release.py` 会把 `backend stderr:` 视为 release 脏信号，见 `scripts/packaging_manifest.json` 的 forbidden patterns。
+- `desktop-shell/src-tauri/src/backend/bootstrap.rs` 会把 sidecar stderr 原样写进 `%LOCALAPPDATA%\\com.wechatauto.shell\\logs\\desktop-shell-bootstrap.log`。
+- `listener_app/backend_main.py` 里的 owner watchdog 属于正常生命周期信息，不该走 stderr；真错误才应该走 stderr。
+
+处理：
+- owner watchdog 的 `enabled/lost/recovered/exiting` 统一走 stdout。
+- `startup failed`、依赖检查失败、非法 owner pid 这类异常继续走 stderr，不要为了过 smoke 把真错误静音。
+- 遇到 `backend stderr:` 时，先看具体文案；如果只是正常生命周期提示，修日志分流，不要去放宽 smoke 规则。
+
 ### 28.1) 把源码态配置和安装版配置混成一套
 现象：
 - 安装路径明明不在仓库里，但重装后翻译和 TTS 还是“自动就能用”。

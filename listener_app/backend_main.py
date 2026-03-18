@@ -31,6 +31,14 @@ class OwnerProcessIdentity:
     start_token: str
 
 
+def log_backend_info(message: str) -> None:
+    print(message, flush=True)
+
+
+def log_backend_error(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+
+
 def load_owner_process_identity() -> OwnerProcessIdentity | None:
     raw_pid = str(os.getenv(OWNER_PID_ENV, "")).strip()
     if not raw_pid:
@@ -38,11 +46,7 @@ def load_owner_process_identity() -> OwnerProcessIdentity | None:
     try:
         pid = int(raw_pid)
     except ValueError:
-        print(
-            f"[backend] ignore invalid owner pid from env {OWNER_PID_ENV}={raw_pid!r}",
-            file=sys.stderr,
-            flush=True,
-        )
+        log_backend_error(f"[backend] ignore invalid owner pid from env {OWNER_PID_ENV}={raw_pid!r}")
         return None
     if pid <= 0:
         return None
@@ -69,16 +73,16 @@ def main() -> None:
         try:
             config = load_json_config(config_path)
         except Exception as exc:
-            print(f"[backend] tts dependency check failed: load config failed: {exc}", file=sys.stderr)
+            log_backend_error(f"[backend] tts dependency check failed: load config failed: {exc}")
             raise SystemExit(2)
         tts_cfg = config.get("tts", {}) if isinstance(config.get("tts", {}), dict) else {}
         try:
             ok, detail = check_tts_dependency_packaging(tts_cfg)
         except RuntimeError as exc:
-            print(f"[backend] tts dependency check failed: {exc}", file=sys.stderr)
+            log_backend_error(f"[backend] tts dependency check failed: {exc}")
             raise SystemExit(2)
-        stream = sys.stdout if ok else sys.stderr
-        print(f"[backend] {detail}", file=stream, flush=True)
+        log_fn = log_backend_info if ok else log_backend_error
+        log_fn(f"[backend] {detail}")
         raise SystemExit(0 if ok else 2)
 
     service = BackendRuntimeService(config_path=config_path)
@@ -95,20 +99,18 @@ def main() -> None:
     owner_missing_deadline = 0.0
     next_owner_probe_at = 0.0
     if owner_identity is not None:
-        print(
+        log_backend_info(
             "[backend] owner watchdog enabled "
             f"pid={owner_identity.pid} "
             f"probe={OWNER_WATCHDOG_POLL_SECONDS:.1f}s "
-            f"grace={OWNER_WATCHDOG_GRACE_SECONDS:.1f}s",
-            file=sys.stderr,
-            flush=True,
+            f"grace={OWNER_WATCHDOG_GRACE_SECONDS:.1f}s"
         )
     try:
         service.start()
     except Exception as exc:
         startup_failed_exit_code = 2
         service.mark_startup_failed(str(exc))
-        print(f"[backend] startup failed: {exc}", file=sys.stderr, flush=True)
+        log_backend_error(f"[backend] startup failed: {exc}")
         startup_failure_deadline = time.time() + STARTUP_FAILURE_GRACE_SECONDS
     try:
         while True:
@@ -121,28 +123,20 @@ def main() -> None:
             next_owner_probe_at = now_ts + OWNER_WATCHDOG_POLL_SECONDS
             if is_process_identity_alive(owner_identity.pid, owner_identity.start_token):
                 if owner_missing_deadline:
-                    print(
-                        f"[backend] owner watchdog recovered pid={owner_identity.pid}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                    log_backend_info(f"[backend] owner watchdog recovered pid={owner_identity.pid}")
                 owner_missing_deadline = 0.0
                 continue
             if owner_missing_deadline == 0.0:
                 owner_missing_deadline = now_ts + OWNER_WATCHDOG_GRACE_SECONDS
-                print(
+                log_backend_info(
                     "[backend] owner watchdog lost owner "
                     f"pid={owner_identity.pid}, "
-                    f"grace={OWNER_WATCHDOG_GRACE_SECONDS:.1f}s",
-                    file=sys.stderr,
-                    flush=True,
+                    f"grace={OWNER_WATCHDOG_GRACE_SECONDS:.1f}s"
                 )
                 continue
             if now_ts >= owner_missing_deadline:
-                print(
-                    f"[backend] owner watchdog exiting because owner pid={owner_identity.pid} is gone",
-                    file=sys.stderr,
-                    flush=True,
+                log_backend_info(
+                    f"[backend] owner watchdog exiting because owner pid={owner_identity.pid} is gone"
                 )
                 raise SystemExit(0)
     except KeyboardInterrupt:
