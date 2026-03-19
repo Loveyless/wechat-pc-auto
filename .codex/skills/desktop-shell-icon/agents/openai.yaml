@@ -1,0 +1,4 @@
+interface:
+  display_name: "Desktop Shell Icon"
+  short_description: "维护桌面壳图标、README 展示与 Windows 打包接线"
+  default_prompt: "Use $desktop-shell-icon to update WeChat Auto Shell icon assets and validate the Windows packaging chain."
