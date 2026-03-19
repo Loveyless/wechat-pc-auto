@@ -3,6 +3,8 @@ name: windows-packaging-smoke
 on:
   pull_request:
   push:
+    branches:
+      - "**"
   workflow_dispatch:
 
 permissions:
@@ -55,8 +57,8 @@ jobs:
         run: npm run build
 
       - name: Run desktop-shell Rust tests
-        working-directory: desktop-shell/src-tauri
-        run: cargo test
+        working-directory: desktop-shell
+        run: npm run test:rust
 
       - name: Run desktop-shell release smoke
         run: python scripts/smoke_desktop_shell_release.py

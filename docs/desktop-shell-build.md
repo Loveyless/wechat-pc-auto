@@ -184,6 +184,26 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 - 断言整轮 smoke 里只出现一次 `spawning backend sidecar`
 - 断言本轮 bootstrap log 里不能出现 `backend stderr:`、`backend error:`、`bootstrap failed:` 或 traceback / panic 片段
 
+## GitHub Tag 发布
+
+- 推送 `v*` tag 会触发 `windows-release-on-tag`
+- 这条 workflow 只跑 Windows，不做跨平台发包
+- 它会先执行：
+  - `python scripts/build_desktop_shell_sidecars.py --python python`
+  - `cd desktop-shell && npm test`
+  - `cd desktop-shell && npm run build`
+  - `cd desktop-shell && npm run test:rust`
+  - `cd desktop-shell && npm run tauri -- build`
+- 然后执行 `python scripts/smoke_desktop_shell_release.py --skip-build`
+- 只有 smoke 通过后，才会把这些产物附到 GitHub Release：
+  - `wechat-auto-shell.exe`
+  - `wechat-auto-backend.exe`
+  - `group_listener_worker.exe`
+  - `msi`
+  - `nsis setup.exe`
+  - `SHA256SUMS.txt`
+- 分支 / PR 上的 `windows-fast-regression` 和 `windows-packaging-smoke` 继续负责回归，不负责发版；tag 发布由 `windows-release-on-tag` 接管，避免同一个 tag 重复跑多套 Windows 重活
+
 2026-03-11 已在当前仓库实际跑过：
 
 - `python scripts/build_desktop_shell_sidecars.py --python python`

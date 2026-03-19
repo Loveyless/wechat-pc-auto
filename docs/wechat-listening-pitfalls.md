@@ -505,6 +505,25 @@
 - `startup failed`、依赖检查失败、非法 owner pid 这类异常继续走 stderr，不要为了过 smoke 把真错误静音。
 - 遇到 `backend stderr:` 时，先看具体文案；如果只是正常生命周期提示，修日志分流，不要去放宽 smoke 规则。
 
+### 28.06) tag 发布不能绕过 Windows release smoke
+现象：
+- 有些仓库会在打 tag 后直接上传 installer / setup.exe，看起来很省事，但一旦构建链和真实启动链脱节，就会把“能编译”误当成“能交付”。
+- 这种错最坏的地方不是 CI 红了，而是包已经发出去了，用户才替你做 smoke。
+
+根因：
+- `npm run tauri -- build` 只能证明 Tauri/sidecar 构建成功，不能证明 release 壳真的能拉起 backend、通过 `/healthz`、守住 single-instance、也不能证明 bootstrap log 干净。
+- tag 发布如果不复用 `python scripts/smoke_desktop_shell_release.py`，就等于又发明了一条和现有发布闸口不一致的发版链。
+
+处理：
+- `windows-release-on-tag` 必须先执行完整 Windows 发布闸口，再发布产物：
+  - sidecar build
+  - frontend test/build
+  - `npm run test:rust`
+  - `npm run tauri -- build`
+  - `python scripts/smoke_desktop_shell_release.py --skip-build`
+- 只有 smoke 通过后，才允许把 `wechat-auto-shell.exe`、sidecar、`msi`、`nsis setup.exe` 和 `SHA256SUMS.txt` 挂到 GitHub Release。
+- 分支 / PR 上继续跑 `windows-fast-regression` 和 `windows-packaging-smoke`；`v*` tag 则交给 `windows-release-on-tag`，不要让同一个 tag 触发多套重复 Windows 重活。
+
 ### 28.1) 把源码态配置和安装版配置混成一套
 现象：
 - 安装路径明明不在仓库里，但重装后翻译和 TTS 还是“自动就能用”。

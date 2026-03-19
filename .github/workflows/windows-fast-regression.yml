@@ -3,6 +3,8 @@ name: windows-fast-regression
 on:
   pull_request:
   push:
+    branches:
+      - "**"
   workflow_dispatch:
 
 permissions:
