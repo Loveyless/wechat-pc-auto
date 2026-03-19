@@ -524,6 +524,24 @@
 - 只有 smoke 通过后，才允许把 `wechat-auto-shell.exe`、sidecar、`msi`、`nsis setup.exe` 和 `SHA256SUMS.txt` 挂到 GitHub Release。
 - 分支 / PR 上继续跑 `windows-fast-regression` 和 `windows-packaging-smoke`；`v*` tag 则交给 `windows-release-on-tag`，不要让同一个 tag 触发多套重复 Windows 重活。
 
+### 28.07) Windows 包没图标，通常不是 Tauri 坏了，是你把图标链路只接了一半
+现象：
+- `wechat-auto-shell.exe`、`msi` 或 `nsis setup.exe` 带着默认空白图标，看起来像没做完的内部包。
+- 更隐蔽的一种情况是：主程序图标换了，但 `nsis` 安装器还是默认图标。
+
+根因：
+- `desktop-shell/src-tauri/tauri.conf.json` 的 `bundle.icon` 只覆盖可执行文件和 WiX 产物，不能自动把 NSIS installer icon 补上。
+- `bundle.windows.nsis.installerIcon` 不显式配置时，Tauri 生成的 `installer.nsi` 会把 `INSTALLERICON` 留空。
+- 仓库里如果只留一个占位 `icon.ico`，那打包链当然也只会把占位符带进产物。
+
+处理：
+- 图标设计源统一放在 `desktop-shell/src-tauri/icons/icon.svg`。
+- Windows 打包输入统一放在 `desktop-shell/src-tauri/icons/icon.ico`，不要再塞一个 70 字节占位文件自欺欺人。
+- `desktop-shell/src-tauri/tauri.conf.json` 里同时维护：
+  - `bundle.icon`
+  - `bundle.windows.nsis.installerIcon`
+- 需要重生图标时，执行 `python scripts/generate_desktop_shell_icon.py`，然后至少重跑一次 `cd desktop-shell && npm run tauri -- build`，确认生成出来的 `installer.nsi` 不再是空 `INSTALLERICON`。
+
 ### 28.1) 把源码态配置和安装版配置混成一套
 现象：
 - 安装路径明明不在仓库里，但重装后翻译和 TTS 还是“自动就能用”。

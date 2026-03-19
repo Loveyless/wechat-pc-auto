@@ -27,6 +27,11 @@
       "binaries/wechat-auto-backend",
       "binaries/group_listener_worker"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    },
     "icon": [
       "icons/icon.ico"
     ]

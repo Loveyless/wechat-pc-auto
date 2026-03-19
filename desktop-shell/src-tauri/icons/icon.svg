@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">WeChat Auto Shell Icon</title>
+  <desc id="desc">A blue rounded square with a cream preview panel and an amber audio meter.</desc>
+  <rect x="18" y="18" width="220" height="220" rx="54" fill="#2569c7" />
+  <rect x="46" y="52" width="118" height="116" rx="28" fill="#fbf7ef" />
+  <rect x="72" y="82" width="68" height="14" rx="7" fill="#1d2632" />
+  <rect x="72" y="108" width="54" height="12" rx="6" fill="#1d2632" />
+  <rect x="72" y="130" width="64" height="12" rx="6" fill="#1d2632" />
+  <rect x="170" y="62" width="44" height="126" rx="22" fill="#b87819" />
+  <rect x="180" y="138" width="6" height="28" rx="3" fill="#1852a6" />
+  <rect x="192" y="118" width="6" height="48" rx="3" fill="#1852a6" />
+  <rect x="204" y="126" width="6" height="40" rx="3" fill="#1852a6" />
+</svg>

@@ -97,6 +97,13 @@ npm run test:rust
 - `desktop-shell/src-tauri/target/release/bundle/msi/*.msi`
 - `desktop-shell/src-tauri/target/release/bundle/nsis/*-setup.exe`
 
+Windows 图标链路也别再搞丢：
+
+- `desktop-shell/src-tauri/icons/icon.svg` 是仓库里的图标设计源
+- `desktop-shell/src-tauri/icons/icon.ico` 是 Windows 可执行文件和安装器的打包输入
+- `desktop-shell/src-tauri/tauri.conf.json` 必须同时维护 `bundle.icon` 和 `bundle.windows.nsis.installerIcon`
+- 需要重生图标时，执行 `python scripts/generate_desktop_shell_icon.py`
+
 sidecar 源文件同时会被放进：
 
 - `desktop-shell/src-tauri/binaries/`
