@@ -54,22 +54,36 @@ def clamp_channel(value: float) -> int:
 
 
 def render_icon(size: int) -> bytes:
-    shellBlue = Color(37, 105, 199)
-    panelCream = Color(251, 247, 239)
-    ink = Color(29, 38, 50)
-    accentAmber = Color(184, 120, 25)
-    accentBlue = Color(24, 82, 166)
+    shellGreen = Color(3, 219, 108)
+    shellGlow = Color(229, 255, 239, 62)
+    panelShadow = Color(1, 28, 17, 40)
+    panelInk = Color(5, 43, 27)
+    panelHeader = Color(60, 104, 80)
+    panelCream = Color(246, 255, 250)
+    lineSoft = Color(179, 248, 208)
+    lineMuted = Color(122, 219, 166)
+    capsuleShadow = Color(1, 28, 17, 34)
+    capsuleCream = Color(241, 255, 247)
+    meterDeep = Color(3, 98, 51)
+    meterMid = Color(3, 164, 81)
 
     shapes = [
-        RoundedRect(18.0, 18.0, 238.0, 238.0, 54.0, shellBlue),
-        RoundedRect(46.0, 52.0, 164.0, 168.0, 28.0, panelCream),
-        RoundedRect(72.0, 82.0, 140.0, 96.0, 7.0, ink),
-        RoundedRect(72.0, 108.0, 126.0, 120.0, 6.0, ink),
-        RoundedRect(72.0, 130.0, 136.0, 142.0, 6.0, ink),
-        RoundedRect(170.0, 62.0, 214.0, 188.0, 22.0, accentAmber),
-        RoundedRect(180.0, 138.0, 186.0, 166.0, 3.0, accentBlue),
-        RoundedRect(192.0, 118.0, 198.0, 166.0, 3.0, accentBlue),
-        RoundedRect(204.0, 126.0, 210.0, 166.0, 3.0, accentBlue),
+        RoundedRect(18.0, 18.0, 238.0, 238.0, 58.0, shellGreen),
+        RoundedRect(34.0, 30.0, 214.0, 118.0, 42.0, shellGlow),
+        RoundedRect(54.0, 58.0, 180.0, 192.0, 34.0, panelShadow),
+        RoundedRect(46.0, 50.0, 172.0, 184.0, 34.0, panelInk),
+        RoundedRect(62.0, 66.0, 78.0, 82.0, 8.0, panelCream),
+        RoundedRect(88.0, 68.0, 150.0, 80.0, 6.0, panelHeader),
+        RoundedRect(62.0, 98.0, 148.0, 112.0, 7.0, panelCream),
+        RoundedRect(62.0, 122.0, 138.0, 134.0, 6.0, lineSoft),
+        RoundedRect(62.0, 144.0, 122.0, 156.0, 6.0, lineMuted),
+        RoundedRect(62.0, 166.0, 112.0, 178.0, 6.0, shellGreen),
+        RoundedRect(176.0, 76.0, 216.0, 196.0, 20.0, capsuleShadow),
+        RoundedRect(168.0, 68.0, 208.0, 188.0, 20.0, capsuleCream),
+        RoundedRect(178.0, 132.0, 186.0, 168.0, 4.0, meterDeep),
+        RoundedRect(190.0, 112.0, 198.0, 168.0, 4.0, shellGreen),
+        RoundedRect(202.0, 124.0, 210.0, 168.0, 4.0, meterMid),
+        RoundedRect(178.0, 88.0, 210.0, 96.0, 4.0, lineSoft),
     ]
 
     sampleGrid = 4
@@ -154,16 +168,23 @@ def build_ico(iconSizes: list[int]) -> bytes:
 def build_svg() -> str:
     return """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
   <title id="title">WeChat Auto Shell Icon</title>
-  <desc id="desc">A blue rounded square with a cream preview panel and an amber audio meter.</desc>
-  <rect x="18" y="18" width="220" height="220" rx="54" fill="#2569c7" />
-  <rect x="46" y="52" width="118" height="116" rx="28" fill="#fbf7ef" />
-  <rect x="72" y="82" width="68" height="14" rx="7" fill="#1d2632" />
-  <rect x="72" y="108" width="54" height="12" rx="6" fill="#1d2632" />
-  <rect x="72" y="130" width="64" height="12" rx="6" fill="#1d2632" />
-  <rect x="170" y="62" width="44" height="126" rx="22" fill="#b87819" />
-  <rect x="180" y="138" width="6" height="28" rx="3" fill="#1852a6" />
-  <rect x="192" y="118" width="6" height="48" rx="3" fill="#1852a6" />
-  <rect x="204" y="126" width="6" height="40" rx="3" fill="#1852a6" />
+  <desc id="desc">A vivid green shell icon with a dark message panel and a bright audio meter capsule.</desc>
+  <rect x="18" y="18" width="220" height="220" rx="58" fill="#03db6c" />
+  <rect x="34" y="30" width="180" height="88" rx="42" fill="#e5ffef" fill-opacity="0.243" />
+  <rect x="54" y="58" width="126" height="134" rx="34" fill="#011c11" fill-opacity="0.157" />
+  <rect x="46" y="50" width="126" height="134" rx="34" fill="#052b1b" />
+  <rect x="62" y="66" width="16" height="16" rx="8" fill="#f6fffa" />
+  <rect x="88" y="68" width="62" height="12" rx="6" fill="#3c6850" />
+  <rect x="62" y="98" width="86" height="14" rx="7" fill="#f6fffa" />
+  <rect x="62" y="122" width="76" height="12" rx="6" fill="#b3f8d0" />
+  <rect x="62" y="144" width="60" height="12" rx="6" fill="#7adba6" />
+  <rect x="62" y="166" width="50" height="12" rx="6" fill="#03db6c" />
+  <rect x="176" y="76" width="40" height="120" rx="20" fill="#011c11" fill-opacity="0.133" />
+  <rect x="168" y="68" width="40" height="120" rx="20" fill="#f1fff7" />
+  <rect x="178" y="132" width="8" height="36" rx="4" fill="#036233" />
+  <rect x="190" y="112" width="8" height="56" rx="4" fill="#03db6c" />
+  <rect x="202" y="124" width="8" height="44" rx="4" fill="#03a451" />
+  <rect x="178" y="88" width="32" height="8" rx="4" fill="#b3f8d0" />
 </svg>
 """
 
