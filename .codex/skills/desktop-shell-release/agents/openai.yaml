@@ -1,0 +1,4 @@
+interface:
+  display_name: "Desktop Shell Release"
+  short_description: "维护桌面壳版本同步、tag 发布与 release 验证闭环"
+  default_prompt: "Use $desktop-shell-release to sync WeChat Auto Shell versions, validate the release gate, and publish a release tag."
