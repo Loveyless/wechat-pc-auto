@@ -1,25 +1,38 @@
-# wechat-pc-auto
+<p align="center">
+  <img src="./desktop-shell/src-tauri/icons/icon.svg" alt="WeChat Auto Shell" width="112" height="112" />
+</p>
 
-当前只支持一条桌面主路径：
+# WeChat Auto Shell
 
-- Python 本地后端：`listener_app/backend_main.py`
-- 桌面前端：`desktop-shell/`（React + Vite + Tauri）
-- 本地契约：`HTTP + WebSocket`
+一个面向 Windows 的微信预览监听桌面壳：低打扰看左侧会话变化，把新消息整理到本地界面里，按需接翻译和 TTS。
 
-别再把仓库理解成“双 UI 并存”。Tk 回退链路已经下线，现在只有 Tauri 桌面壳是正式桌面 UI。
+它不是聊天机器人，不做主动发消息，不做自动回复，也不尝试读取完整聊天记录。它适合的是“看见左侧会话变化，快速浏览、翻译、朗读”的场景。
 
-## 这条分支做什么
+## 适合谁
 
-- 只维护 `session-only`
-- 只维护左侧会话预览 `preview-only`
-- 只维护单 worker 扫描左侧可见会话
-- 只维护 Python runtime + 本地 API + 桌面壳
-- 不再提供发送消息、发送文件、自动回复、写输入框等主动操作能力
+- 想低打扰跟踪微信群/私聊的最新预览内容
+- 想把微信里的英文/中英文消息顺手翻成可读文本
+- 想在 Windows 上用本地桌面壳查看状态、日志和消息流
+- 想要一个不改微信客户端的监听方案
 
-如果你要的是“低打扰抓左侧会话预览，顺手翻成英文练习”，这条路对。
-如果你要的是“完整聊天正文审计 / 自动回复 / 主动发消息”，这个仓库不做。
+## 核心能力
 
-## 安装
+- 监听微信左侧可见会话预览，自动提取最新变化
+- 桌面壳展示会话列表、消息卡片、运行状态和健康信息
+- 支持翻译 provider：`deeplx`、`openai_compatible`、`passthrough`
+- 支持 TTS：`windows_system`、`doubao`、`tencent_cloud`
+- 支持单实例桌面壳，第二次启动只聚焦已有窗口
+- 运行时配置、日志和锁都落在 `%LOCALAPPDATA%\com.wechatauto.shell`
+
+## 你需要先接受的限制
+
+- 当前抓的是左侧会话预览，不是右侧聊天区全文
+- 长消息会被微信预览截断，后半段拿不回来
+- 当前只覆盖左侧可见会话，看不见的会话本轮抓不到
+- 这套方案适合低干扰浏览和翻译，不适合完整审计或归档
+- 不提供发送消息、发送文件、自动回复、写输入框等主动操作
+
+## 安装与启动
 
 先装 Python 依赖：
 
@@ -34,84 +47,27 @@ cd desktop-shell
 npm install
 ```
 
-接入 DeepLX / 云 TTS 时，真实密钥建议放 `.env.local`：
+### 源码态启动
 
-```bash
-DEEPLX_URL=http://127.0.0.1:1188/translate
-VOLCENGINE_TTS_APPID=<your-appid>
-VOLCENGINE_TTS_ACCESS_TOKEN=<your-access-token>
-TENCENTCLOUD_SECRET_ID=<your-secret-id>
-TENCENTCLOUD_SECRET_KEY=<your-secret-key>
-```
-
-`.env.local` 的读取位置要分清：
-
-- 源码态：仓库根目录 `.env.local`
-- Tauri 壳：优先 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`
-- Tauri 壳兜底：`wechat-auto-shell.exe` 同目录 `.env.local`
-
-默认不会把 `.env.local` 打进安装包。原因很直接：这玩意通常带密钥，自动分发就是泄漏。
-当前仓库跟踪的默认 `config/listener.json` 也不再把 DeepLX / 腾讯云 TTS 当成首启硬依赖：
-
-- `translate.enabled=false`
-- `tts.provider=windows_system`
-
-所以 fresh install 即使没有 `.env.local`，也应该先能打开桌面壳并进入设置页。
-只有在你启用 DeepLX / OpenAI-compatible 翻译、豆包或腾讯云 TTS 时，才需要再补 URL / 凭据。
-
-翻译 provider 现在支持 `deeplx` / `openai_compatible` / `passthrough`：
-
-- `deeplx`：继续支持 `DEEPLX_URL`
-- `openai_compatible`：需要在 `translate.providers.openai_compatible` 里补 `base_url`、`model`、`api_key`
-- `passthrough`：不请求外部翻译 provider
-
-别把 OpenAI-compatible 的 `api_key` 当成 `.env.local` 契约的一部分。
-当前配置 owner 和桌面壳 GUI 都只认直接值写入，不支持 `api_key_env`。
-
-配置目录也要分清，别再混成一套：
-
-- 源码态：`python listener_app/backend_main.py --config ".\\config\\listener.json"` + `npm run dev`
-  - 吃仓库里的 `config/listener.json`
-  - 读仓库根目录 `.env.local`
-- Tauri 壳 / 安装版：`npm run tauri dev`、`wechat-auto-shell.exe`、installer 安装后的应用
-  - 吃 `%LOCALAPPDATA%\\com.wechatauto.shell\\config\\listener.json`
-  - 优先读 `%LOCALAPPDATA%\\com.wechatauto.shell\\.env.local`
-
-这两套配置目录不会自动同步。
-设置页保存时，只会写当前连接的 backend 正在使用的那套配置，不会顺手把源码态和安装版态一起改掉。
-
-## 启动
-
-### 1. 启动 Python 本地后端
+开一个终端启动后端：
 
 ```bash
 python listener_app/backend_main.py --config ".\config\listener.json"
 ```
 
-默认端口：
-
-- HTTP：`http://127.0.0.1:8765`
-- WebSocket：`ws://127.0.0.1:8766/events`
-
-### 2. 启动桌面前端开发页
+再开一个终端启动前端开发页：
 
 ```bash
 cd desktop-shell
 npm run dev
 ```
 
-前端开发页默认地址：`http://127.0.0.1:1420`
+- HTTP 默认地址：`http://127.0.0.1:8765`
+- WebSocket 默认地址：`ws://127.0.0.1:8766/events`
 
-如需覆盖后端地址：
+### Tauri 桌面壳
 
-```bash
-VITE_BACKEND_HTTP_URL=http://127.0.0.1:8765
-VITE_BACKEND_WS_URL=ws://127.0.0.1:8766/events
-```
-
-### 3. 可选：启动 Tauri 壳
-
-如果本机已经装好 Rust toolchain（`cargo` / `rustc`）：
+如果本机已经装好 Rust toolchain：
 
 ```bash
 cd desktop-shell
@@ -119,29 +75,50 @@ npm run tauri dev
 ```
 
 `npm run tauri dev` 会先构建 PyInstaller sidecar，再由 Tauri 壳托管 backend。
-没有 Rust toolchain 时，只能先跑 `npm run dev` 验证前端页面和本地 API，不要装作壳已经可用。
 
-## 测试与构建
-
-当前主路径要分清五件事：
-
-- 开发运行：`backend_main.py + npm run dev`
-- sidecar 构建：`python scripts/build_desktop_shell_sidecars.py --python python`
-- 前端回归：`cd desktop-shell && npm test`
-- 前端构建 + Rust 回归：`cd desktop-shell && npm run build && npm run test:rust`
-- release smoke：`python scripts/smoke_desktop_shell_release.py`
-
-最小源码态验证：
+### 打包
 
 ```bash
-python listener_app/backend_main.py --config ".\config\listener.json"
+cd desktop-shell
+npm run tauri build
+```
+
+这一步会产出 Windows 桌面壳、backend sidecar 和 worker sidecar。首次启动时，如果没有 `.env.local`，默认也应该能先进入壳和设置页。
+
+## 默认配置
+
+仓库跟踪的默认配置是“首启可用”的，不把密钥当成硬依赖：
+
+- `translate.enabled=false`
+- `tts.provider=windows_system`
+
+如果你要接 DeepLX、OpenAI-compatible 翻译，或者启用豆包 / 腾讯云 TTS，再补对应 URL 和凭据即可。
+
+## 发布产物
+
+`npm run tauri build` 当前会产出：
+
+- `wechat-auto-shell.exe`
+- `wechat-auto-backend.exe`
+- `group_listener_worker.exe`
+- `msi`
+- `nsis setup.exe`
+
+第二次启动 `wechat-auto-shell.exe` 时，只会聚焦已有窗口，不会再拉第二份壳或 backend。
+Windows 打包图标现在统一来自 `desktop-shell/src-tauri/icons/icon.svg` 和它生成的 `icon.ico`；别再拿空壳默认图标糊弄发布产物。
+
+## 开发与构建
+
+如果你在本地做回归，最少跑这几步：
+
+```bash
 cd desktop-shell
 npm test
 npm run build
 npm run test:rust
 ```
 
-桌面壳真正的最小交付闸口是：
+更完整的交付闸口是：
 
 ```bash
 python scripts/build_desktop_shell_sidecars.py --python python
@@ -149,118 +126,25 @@ cd desktop-shell
 npm test
 npm run build
 npm run test:rust
-cd ..
 python scripts/smoke_desktop_shell_release.py
 ```
 
-`npm run test:rust` 仍然会读取 `desktop-shell/src-tauri/tauri.conf.json` 的 `frontendDist=../dist`，只是额外通过 `TAURI_CONFIG` 清空了测试态 `bundle.externalBin`。
-所以别再跳过 `npm run build`；你本地偶尔“直接 cargo test 也能过”，通常只是因为上一次构建残留了 `desktop-shell/dist` 和 sidecar 二进制。
-
-## 发布边界
-
-- 正式交付目标是 `desktop-shell/` 这条桌面壳主路径。
-- release 壳如果回归，允许回退到源码态主路径 `backend_main.py + npm run dev`，或者 `npm run tauri dev` 做开发期排障。
-- 不要再发明“旧 UI fallback”；那条链已经下线，继续保留只会破坏边界一致性。
-- 桌面壳现在是 `single-instance`：第二次启动只聚焦已有窗口，不允许再起第二个壳窗口或再补拉一份 backend sidecar。
-
-详细命令、产物位置和验收边界看 `docs/desktop-shell-build.md`。
-
-## 当前架构
-
-- `listener_app/backend_main.py`
-  源码态后端入口；负责启动 runtime 与本地 API。
-- `listener_app/backend_runtime.py`
-  运行时编排层；负责 worker 监督、翻译、TTS、会话状态与 `/healthz` 健康语义。
-- `listener_app/runtime_api.py`
-  本地 HTTP + WebSocket 契约层。
-- `listener_app/runtime_config.py`
-  当前主路径唯一配置 schema owner。
-- `listener_app/runtime_engine.py`
-  运行时状态机与事件分发。
-- `listener_app/runtime_store.py`
-  会话/消息存储与去重边界。
-- `listener_app/group_listener_worker.py`
-  单进程 UIA 监听 worker；主路径按 `all_sessions` 扫描左侧可见会话。
-- `listener_app/sidebar_translate_runtime.py`
-  翻译 provider、DeepLX runtime 与失败 fallback。
-- `listener_app/sidebar_runtime_support.py`
-  worker 启停支撑、日志轮转、运行时锁与 stdout/stderr reader。
-- `listener_app/sidebar_tts.py`
-  Windows System / 豆包 / 腾讯云 TTS runtime。
-- `listener_app/sidebar_shared.py`
-  共享常量、路径/配置工具、文本归一化与通用校验。
-- `desktop-shell/`
-  React + Vite + Tauri 桌面壳；通过本地 HTTP + WebSocket 消费运行时状态。
-- `wechat_auto/window.py`
-  微信主窗口定位与过滤。
-- `wechat_auto/controls.py`
-  UIA 控件树定位与会话列表文本解析。
-
-## 你必须接受的限制
-
-- 当前抓的是左侧会话预览，不是右侧聊天区全文。
-- 长消息会被微信预览截断，程序拿不回后半段。
-- 连续刷屏时只能抓到轮询时刻露出来的那些预览变化，不可能零漏。
-- 当前主路径监听的是左侧可见会话；看不见的会话，本轮就抓不到。
-- 这套东西适合“低打扰监听 + 翻译学习”，不适合“完整审计 / 完整归档”。
-
-## 打包现状
-
-- `desktop-shell` 可以通过 `npm run tauri build` 产出一体化桌面壳 `exe / msi / nsis`
-- 壳启动后会自动拉起 `wechat-auto-backend.exe` 和 `group_listener_worker.exe`
-- 运行时配置、日志和锁落到 `%LOCALAPPDATA%\com.wechatauto.shell`
-- sidecar 当前用的是 PyInstaller `onefile`；任务管理器里看到同名双进程通常是 bootloader + payload，不等于重复启动
-
-真正还保留的边界只有两条：
-
-- `.env.local` 不会自动塞进安装包，用户要自己提供
-- release 壳必须通过 `scripts/smoke_desktop_shell_release.py`，不能只看 build 成功
-
-补一句关键事实：不带 `.env.local` 不等于“包一定起不来”。
-当前默认 bundle 配置应该允许首启进壳；真正需要外置的是 DeepLX 和云 TTS 的 URL / 密钥，不是桌面壳本身。
-
 ## 配置与排障
 
-- 配置字段说明：`config/listener.md`
-- 主路径测试 / 构建 / 发布闸口：`docs/desktop-shell-build.md`
-- 监听坑位、健康契约、打包排障：`docs/wechat-listening-pitfalls.md`
+- 配置说明：`config/listener.md`
+- 桌面壳测试与构建：`docs/desktop-shell-build.md`
+- 监听、健康契约和打包坑位：`docs/wechat-listening-pitfalls.md`
 
 ## 项目结构
 
 ```text
 config/
-├── doubao_tts.json
-├── listener.json
-├── listener.md
-└── tencent_tts.json
 desktop-shell/
-├── src/
-├── src-tauri/
-└── package.json
 docs/
-├── desktop-shell-build.md
-└── wechat-listening-pitfalls.md
 listener_app/
-├── backend_main.py
-├── backend_runtime.py
-├── group_listener_worker.py
-├── runtime_api.py
-├── runtime_config.py
-├── runtime_engine.py
-├── runtime_models.py
-├── runtime_store.py
-├── sidebar_runtime_support.py
-├── sidebar_shared.py
-├── sidebar_translate_runtime.py
-└── sidebar_tts.py
 wechat_auto/
-├── __init__.py
-├── controls.py
-├── core.py
-├── logger.py
-└── window.py
 ```
 
-## 开源协议
+## 协议
 
 MIT License
