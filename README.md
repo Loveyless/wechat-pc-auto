@@ -2,7 +2,7 @@
   <img src="./desktop-shell/src-tauri/icons/icon.svg" alt="WeChat Auto Shell" width="112" height="112" />
 </p>
 
-<img width="1490" height="806" alt="image" src="https://github.com/user-attachments/assets/c84fd7af-f42c-46a3-a3d5-fc09aaab5bed" />
+<img width="1490" height="806" alt="image" src="https://github.com/user-attachments/assets/51f58dd2-f642-4b7c-97f0-b923c9136eff" />
 
 # WeChat Auto Shell
 
