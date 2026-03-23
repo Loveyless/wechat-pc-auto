@@ -184,13 +184,29 @@ export function resolveMessagePresentation(
   fidelityTone: StatusBadgeTone
   translationLabel: string | null
   translationTone: StatusBadgeTone | null
+  showPendingIndicator: boolean
+  pendingText: string | null
 } {
+  if (message.pendingTranslation) {
+    return {
+      primaryText: "",
+      fidelityLabel: message.captureLevel === "preview" ? "预览" : "全文",
+      fidelityTone: message.captureLevel === "preview" ? "preview" : "accent",
+      translationLabel: "翻译中",
+      translationTone: "info",
+      showPendingIndicator: true,
+      pendingText: "等待翻译…",
+    }
+  }
+
   return {
     primaryText: message.display || message.translated || message.original,
     fidelityLabel: message.captureLevel === "preview" ? "预览" : "全文",
     fidelityTone: message.captureLevel === "preview" ? "preview" : "accent",
-    translationLabel: message.pendingTranslation ? "翻译中" : null,
-    translationTone: message.pendingTranslation ? "info" : null,
+    translationLabel: null,
+    translationTone: null,
+    showPendingIndicator: false,
+    pendingText: null,
   }
 }
 

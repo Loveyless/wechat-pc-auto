@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core"
+import { getCurrentWindow } from "@tauri-apps/api/window"
 
 import type {
   BackendEvent,
@@ -160,6 +161,24 @@ export async function setTtsAutoReadEnabled(enabled: boolean) {
     method: "POST",
     body: JSON.stringify({ enabled }),
   })
+}
+
+export async function getWindowPinnedState() {
+  if (!isTauri()) {
+    return false
+  }
+  return getCurrentWindow()
+    .isAlwaysOnTop()
+    .catch(() => false)
+}
+
+export async function setWindowPinnedState(pinned: boolean) {
+  if (!isTauri()) {
+    return false
+  }
+  const window = getCurrentWindow()
+  await window.setAlwaysOnTop(pinned)
+  return window.isAlwaysOnTop()
 }
 
 export async function fetchRuntimeConfig() {

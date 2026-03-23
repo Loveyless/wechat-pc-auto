@@ -1,9 +1,11 @@
 import { useEffect, useState, useSyncExternalStore } from "react"
+import { isTauri } from "@tauri-apps/api/core"
 
 import { Button } from "@/components/ui/button"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { useDesktopShell } from "@/hooks/use-desktop-shell"
 import { useDesktopSettings } from "@/hooks/use-desktop-settings"
+import { getWindowPinnedState, setWindowPinnedState } from "@/lib/api"
 import { ShellConnectionBanner } from "@/components/shell/shell-connection-banner"
 import { MessageStreamPane } from "@/components/shell/message-stream-pane"
 import { RuntimeOverviewPanel } from "@/components/shell/runtime-overview-panel"
@@ -52,9 +54,12 @@ export function DesktopShell() {
   )
   const [showStatusPanels, setShowStatusPanels] = useState(false)
   const [showOriginal, setShowOriginal] = useState(false)
+  const [windowPinned, setWindowPinned] = useState(false)
+  const [windowPinPending, setWindowPinPending] = useState(false)
   const [ttsTogglePending, setTtsTogglePending] = useState(false)
   const [desktopSidebarVisible, setDesktopSidebarVisible] = useState(true)
   const [compactSidebarVisible, setCompactSidebarVisible] = useState(false)
+  const windowPinSupported = isTauri()
   const settings = useDesktopSettings(shell.backendInfo, {
     onApply: shell.refreshConnection,
   })
@@ -76,6 +81,18 @@ export function DesktopShell() {
       setCompactSidebarVisible(false)
     }
   }, [isUltraCompact])
+
+  useEffect(() => {
+    let cancelled = false
+    void getWindowPinnedState().then((pinned) => {
+      if (!cancelled) {
+        setWindowPinned(pinned)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const toggleSidebarVisibility = () => {
     if (isUltraCompact) {
@@ -150,6 +167,28 @@ export function DesktopShell() {
                 variant={showOriginal ? "default" : "outline"}
               >
                 {showOriginal ? "原文开" : "原文关"}
+              </Button>
+              <Button
+                aria-pressed={windowPinned}
+                disabled={!windowPinSupported || windowPinPending}
+                onClick={() => {
+                  const nextPinned = !windowPinned
+                  setWindowPinPending(true)
+                  void setWindowPinnedState(nextPinned)
+                    .then((confirmedPinned) => {
+                      setWindowPinned(confirmedPinned)
+                    })
+                    .catch((error) => {
+                      console.error("toggle always-on-top failed", error)
+                    })
+                    .finally(() => {
+                      setWindowPinPending(false)
+                    })
+                }}
+                size="sm"
+                variant={windowPinned ? "default" : "outline"}
+              >
+                {windowPinned ? "置顶开" : "置顶关"}
               </Button>
               <Button
                 aria-pressed={shell.ttsState.auto_read_enabled}

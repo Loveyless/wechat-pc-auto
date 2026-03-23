@@ -43,6 +43,7 @@
 - 默认行为必须低干扰：
   - 不抢焦点（除非 `listen.focus_refresh=true`）
   - 不置顶（除非用户手动开启“置顶”开关）
+  - 当前“置顶”只改桌面壳主窗口的临时窗口状态，不回写 `listener.json`
 
 ## 关键坑位与处理
 
@@ -285,6 +286,8 @@
 - 在主进程进入翻译前，先过滤明显的媒体占位文本（图片、视频、动画表情、语音等）。
 - 当前额外启用了一条激进兜底：凡是整条消息被 ASCII 方括号完整包住（`[ ... ]`），一律按占位文本过滤，不再送翻译。
 - 桌面壳顶部功能区提供“原文”开关，默认关闭；打开后才在消息阅读区展开原始预览。
+- 当消息 `pendingTranslation=true` 且“原文”关闭时，消息正文区只显示等待中的转圈占位，不展示中文原文；翻译完成后再替换成译文。
+- 当消息 `pendingTranslation=true` 且“原文”打开时，可以直接展示中文；这时不再额外显示 loading 占位。
 - 这类“原文”开关属于前端显示状态，不回写运行配置。
 - `Right` / `Ctrl+Right` 都会复用同一个“原文”开关状态，而不是额外维护一套快捷键私有状态；否则复选框状态和实际显示很容易跑偏。
 
@@ -444,6 +447,7 @@
   - 最近更新时间
   - 未读数
 - 当前消息卡必须把 `display/translated` 作为第一阅读层；原始预览只留在次级区块；`captureLevel=preview` 和 `pendingTranslation=true` 继续显示，但只能作为次级状态提示。
+- `pendingTranslation=true` 时，正文区是否进入 loading 态取决于“原文”开关：关闭时必须 loading，打开时允许直接展示中文原文。
 - 当前桌面壳必须显式区分 `no sessions` 和 `no messages` 两种空态，且这两种空态的优先级低于 `startup_failed` / `degraded` / `reconnecting` 这类异常态。
 
 ### 28) `npm run tauri build` 现在已经能做一体化桌面壳；密钥仍然外置，但 fresh install 不该被密钥卡死
@@ -732,3 +736,4 @@ npm run tauri build
 - 默认行为必须是低干扰：
   - 不抢焦点（除非 `listen.focus_refresh=true`）
   - 不置顶（除非用户手动开启“置顶”开关）
+  - 当前“置顶”只作用于当前桌面壳窗口；重启后默认仍按非置顶启动

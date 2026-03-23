@@ -45,21 +45,43 @@ describe("shell view model", () => {
     expect(resolveUnreadTone(0)).toBe("neutral")
   })
 
-  it("prioritizes display text and preserves preview and translating cues", () => {
+  it("prioritizes display text after translation is ready", () => {
     expect(
       resolveMessagePresentation({
         display: "display",
         translated: "translated",
         original: "original",
         captureLevel: "preview",
-        pendingTranslation: true,
+        pendingTranslation: false,
       }),
     ).toEqual({
       primaryText: "display",
       fidelityLabel: "预览",
       fidelityTone: "preview",
+      translationLabel: null,
+      translationTone: null,
+      showPendingIndicator: false,
+      pendingText: null,
+    })
+  })
+
+  it("hides original text and exposes loading state while translation is pending", () => {
+    expect(
+      resolveMessagePresentation({
+        display: "中文原文",
+        translated: "",
+        original: "中文原文",
+        captureLevel: "preview",
+        pendingTranslation: true,
+      }),
+    ).toEqual({
+      primaryText: "",
+      fidelityLabel: "预览",
+      fidelityTone: "preview",
       translationLabel: "翻译中",
       translationTone: "info",
+      showPendingIndicator: true,
+      pendingText: "等待翻译…",
     })
   })
 

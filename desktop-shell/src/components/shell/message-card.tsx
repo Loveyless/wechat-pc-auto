@@ -9,7 +9,12 @@ type MessageCardProps = {
 
 export function MessageCard({ message, showOriginal }: MessageCardProps) {
   const presentation = resolveMessagePresentation(message)
+  const showPendingOriginalAsPrimary = Boolean(
+    presentation.showPendingIndicator && showOriginal && message.original,
+  )
   const canShowOriginal = Boolean(
+    !showPendingOriginalAsPrimary &&
+    !presentation.showPendingIndicator &&
     message.original && message.original !== presentation.primaryText,
   )
 
@@ -31,9 +36,23 @@ export function MessageCard({ message, showOriginal }: MessageCardProps) {
         </div>
       </div>
 
-      <p className="mt-1.5 whitespace-pre-wrap break-words text-[13px] font-medium leading-6 text-text-primary">
-        {presentation.primaryText}
-      </p>
+      {presentation.showPendingIndicator && !showPendingOriginalAsPrimary ? (
+        <div
+          aria-live="polite"
+          className="mt-1.5 flex items-center gap-2 rounded-[0.8rem] border border-state-info/15 bg-state-info-soft/70 px-3 py-2 text-[13px] font-medium text-state-info"
+          role="status"
+        >
+          <span
+            aria-hidden="true"
+            className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-state-info/25 border-t-state-info"
+          />
+          <span>{presentation.pendingText}</span>
+        </div>
+      ) : (
+        <p className="mt-1.5 whitespace-pre-wrap break-words text-[13px] font-medium leading-6 text-text-primary">
+          {showPendingOriginalAsPrimary ? message.original : presentation.primaryText}
+        </p>
+      )}
 
       {showOriginal && canShowOriginal ? (
         <div className="mt-2 border-l-2 border-border-subtle pl-2.5">
