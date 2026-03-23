@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechat-pc-auto"                
-version = "0.1.0"
+version = "0.1.1"
 description = "Stable WeChat PC session-preview listener with sidebar translation"
 readme = "README.md"
 authors = [{name = "YourName", email = "your@email.com"}]
