@@ -2,6 +2,8 @@
   <img src="./desktop-shell/src-tauri/icons/icon.svg" alt="WeChat Auto Shell" width="112" height="112" />
 </p>
 
+<img width="1490" height="806" alt="image" src="https://github.com/user-attachments/assets/51f58dd2-f642-4b7c-97f0-b923c9136eff" />
+
 # WeChat Auto Shell
 
 一个面向 Windows 的微信预览监听桌面壳。它做的事很单一：盯住微信左侧会话列表，把最新预览整理到独立界面里，并按需接翻译和朗读。
