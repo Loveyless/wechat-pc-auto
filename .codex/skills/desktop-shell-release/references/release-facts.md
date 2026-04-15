@@ -50,12 +50,10 @@
 - 触发条件：`v*` tag
 - 会重复跑完整 Windows 发布闸口
 - 会上传这些资产：
-  - `wechat-auto-shell.exe`
-  - `wechat-auto-backend.exe`
-  - `group_listener_worker.exe`
   - `msi`
   - `nsis setup.exe`
   - `SHA256SUMS.txt`
+- `wechat-auto-shell.exe`、`wechat-auto-backend.exe`、`group_listener_worker.exe` 保留为本地 build 输出和 workflow artifact，不作为 GitHub Release 对外下载项
 - `github.ref_name` 包含 `-` 时，GitHub Release 会被标成 prerelease
 
 ## 验证观察点

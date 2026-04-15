@@ -72,17 +72,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path 'release-assets' | Out-Null
-          $releaseAssetPaths = @(
-            (Resolve-Path 'desktop-shell/src-tauri/target/release/wechat-auto-shell.exe').Path
-            (Resolve-Path 'desktop-shell/src-tauri/target/release/wechat-auto-backend.exe').Path
-            (Resolve-Path 'desktop-shell/src-tauri/target/release/group_listener_worker.exe').Path
-          )
-          $releaseAssetPaths += Get-ChildItem 'desktop-shell/src-tauri/target/release/bundle/msi/*.msi' | Select-Object -ExpandProperty FullName
-          $releaseAssetPaths += Get-ChildItem 'desktop-shell/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -ExpandProperty FullName
-          if ($releaseAssetPaths.Count -eq 0) {
-            throw 'no release assets found'
+          $publicReleaseAssetPaths = @()
+          $publicReleaseAssetPaths += Get-ChildItem 'desktop-shell/src-tauri/target/release/bundle/msi/*.msi' | Select-Object -ExpandProperty FullName
+          $publicReleaseAssetPaths += Get-ChildItem 'desktop-shell/src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -ExpandProperty FullName
+          if ($publicReleaseAssetPaths.Count -eq 0) {
+            throw 'no public release assets found'
           }
-          $checksumLines = foreach ($path in ($releaseAssetPaths | Sort-Object)) {
+          $checksumLines = foreach ($path in ($publicReleaseAssetPaths | Sort-Object)) {
             $hash = (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLower()
             "$hash  $(Split-Path $path -Leaf)"
           }
@@ -91,7 +87,7 @@ jobs:
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-release-assets-${{ github.ref_name }}
+          name: windows-build-assets-${{ github.ref_name }}
           if-no-files-found: error
           path: |
             desktop-shell/src-tauri/target/release/wechat-auto-shell.exe
@@ -108,9 +104,6 @@ jobs:
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            desktop-shell/src-tauri/target/release/wechat-auto-shell.exe
-            desktop-shell/src-tauri/target/release/wechat-auto-backend.exe
-            desktop-shell/src-tauri/target/release/group_listener_worker.exe
             desktop-shell/src-tauri/target/release/bundle/msi/*.msi
             desktop-shell/src-tauri/target/release/bundle/nsis/*-setup.exe
             release-assets/SHA256SUMS.txt

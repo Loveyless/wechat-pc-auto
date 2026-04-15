@@ -97,6 +97,9 @@ npm run test:rust
 - `desktop-shell/src-tauri/target/release/bundle/msi/*.msi`
 - `desktop-shell/src-tauri/target/release/bundle/nsis/*-setup.exe`
 
+这些都是本地 build 目录产物，不等于 GitHub Release 对外附件。
+当前对外 release 只发布 `msi`、`nsis setup.exe` 和 `SHA256SUMS.txt`；raw shell / backend / worker exe 保留为本地构建和 workflow artifact。
+
 Windows 图标链路也别再搞丢：
 
 - `desktop-shell/src-tauri/icons/icon.svg` 是仓库里的图标设计源
@@ -203,12 +206,10 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
   - `cd desktop-shell && npm run tauri -- build`
 - 然后执行 `python scripts/smoke_desktop_shell_release.py --skip-build`
 - 只有 smoke 通过后，才会把这些产物附到 GitHub Release：
-  - `wechat-auto-shell.exe`
-  - `wechat-auto-backend.exe`
-  - `group_listener_worker.exe`
   - `msi`
   - `nsis setup.exe`
   - `SHA256SUMS.txt`
+- `wechat-auto-shell.exe`、`wechat-auto-backend.exe`、`group_listener_worker.exe` 继续保留在本地 build 输出和 workflow artifact，用于维护与排障，不作为 GitHub Release 对外下载项
 - 分支 / PR 上的 `windows-fast-regression` 和 `windows-packaging-smoke` 继续负责回归，不负责发版；tag 发布由 `windows-release-on-tag` 接管，避免同一个 tag 重复跑多套 Windows 重活
 
 2026-03-11 已在当前仓库实际跑过：

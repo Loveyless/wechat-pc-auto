@@ -525,7 +525,8 @@
   - `npm run test:rust`
   - `npm run tauri -- build`
   - `python scripts/smoke_desktop_shell_release.py --skip-build`
-- 只有 smoke 通过后，才允许把 `wechat-auto-shell.exe`、sidecar、`msi`、`nsis setup.exe` 和 `SHA256SUMS.txt` 挂到 GitHub Release。
+- 只有 smoke 通过后，才允许把 `msi`、`nsis setup.exe` 和 `SHA256SUMS.txt` 挂到 GitHub Release。
+- raw `wechat-auto-shell.exe`、`wechat-auto-backend.exe`、`group_listener_worker.exe` 继续留在本地 build 输出和 workflow artifact，别再把内部 sidecar 当最终用户下载面。
 - 分支 / PR 上继续跑 `windows-fast-regression` 和 `windows-packaging-smoke`；`v*` tag 则交给 `windows-release-on-tag`，不要让同一个 tag 触发多套重复 Windows 重活。
 
 ### 28.07) Windows 包没图标，通常不是 Tauri 坏了，是你把图标链路只接了一半
