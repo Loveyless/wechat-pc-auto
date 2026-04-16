@@ -15,7 +15,9 @@ Tk 回退链已经下线，不要再按旧 UI 的字段和行为理解这份配�
 - `desktop-shell/` 通过本地 `HTTP + WebSocket` 消费后端
   - `http://127.0.0.1:8765`
   - `ws://127.0.0.1:8766/events`
-- `desktop-shell/` 的 `npm run tauri dev` / `npm run tauri build` 会先构建 PyInstaller sidecar，再由 Tauri 壳自动拉起 backend
+- `desktop-shell/` 的 `npm run tauri dev` 会先构建 PyInstaller sidecar，再由 Tauri 壳自动拉起 backend
+- release app 默认构建命令是 `cd desktop-shell && npm run tauri -- build --bundles app`
+- `cd desktop-shell && npm run tauri build` 仍可产出完整 `DMG`，但它属于 GUI 专项验收，不是当前默认自动化闸口
 - Tauri 壳运行时根目录固定在 `~/Library/Application Support/com.wechatauto.shell`
 - 仓库跟踪的默认 `listener.json` 以“首启可进入桌面壳和设置页”为目标：
   - `translate.enabled=false`
@@ -51,12 +53,22 @@ npm run build
 npm run test:rust
 ```
 
-release 壳交付闸口：
+release 壳默认交付闸口：
 
 ```bash
-python3 scripts/build_desktop_shell_sidecars.py --python python3
-python3 scripts/smoke_desktop_shell_release.py
+cd desktop-shell
+npm run tauri -- build --bundles app
+python3 ../scripts/smoke_desktop_shell_release.py --skip-build --shell-exe "src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell"
 ```
+
+如需完整 `DMG` 验收，单独执行：
+
+```bash
+cd desktop-shell
+npm run tauri build
+```
+
+`DMG` 最后一步依赖 Finder AppleScript；如果 `.app` build + smoke 已通过，而 `DMG` 卡在 `bundle_dmg.sh` / `osascript`，应把它归类为 GUI 专项验收问题，而不是当前桌面壳默认发布闸口回归。
 
 更完整的测试 / 构建说明看 `docs/desktop-shell-build.md`。
 
