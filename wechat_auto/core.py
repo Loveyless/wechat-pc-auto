@@ -20,3 +20,11 @@ class WxAuto:
     def get_current_sessions(self) -> list:
         """获取当前会话列表"""
         return self._window_manager.get_current_sessions()
+
+    def get_window_state(self) -> str:
+        """返回最近一次窗口加载状态。"""
+        return self._window_manager.get_last_state()
+
+    def get_window_detail(self) -> str:
+        """返回最近一次窗口加载详情。"""
+        return self._window_manager.get_last_detail()

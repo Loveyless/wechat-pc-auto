@@ -1,251 +1,438 @@
-import ctypes
+from __future__ import annotations
+
+import json
+import subprocess
+import textwrap
 import time
-from ctypes import wintypes
+from dataclasses import dataclass
+from typing import Any, Callable
 
-import uiautomation as auto
-
-from .controls import find_session_list, normalize_session_name
 from .logger import log
 
+WECHAT_PROCESS_CANDIDATES = ("WeChat", "Weixin")
+JXA_TIMEOUT_SECONDS = 4.0
+POLL_RETRY_INTERVAL_SECONDS = 0.05
+POPUP_ROLE_TOKENS = ("menu", "popover", "sheet", "dialog")
+POPUP_SUBROLE_TOKENS = ("dialog", "systemdialog", "floating")
 
-class _WinApi:
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    SW_SHOW = 5
-    SW_RESTORE = 9
 
-    def __init__(self):
-        self.user32 = ctypes.windll.user32
-        self.kernel32 = ctypes.windll.kernel32
+class JxaAutomationError(RuntimeError):
+    """JXA 调用失败。"""
 
-        self.EnumWindows = self.user32.EnumWindows
-        self.EnumWindowsProc = ctypes.WINFUNCTYPE(
-            ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
+
+class AccessibilityPermissionError(JxaAutomationError):
+    """当前进程没有辅助功能权限。"""
+
+
+def _is_accessibility_error(message: str) -> bool:
+    text = str(message or "").strip().lower()
+    if not text:
+        return False
+    return (
+        "-25211" in text
+        or "assistive access" in text
+        or "辅助访问" in text
+        or "辅助功能" in text
+        or "not allowed assistive access" in text
+    )
+
+
+def _run_jxa_json(script: str, timeout: float = JXA_TIMEOUT_SECONDS) -> Any:
+    try:
+        completed = subprocess.run(
+            ["osascript", "-l", "JavaScript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
         )
-        self.GetWindowTextLengthW = self.user32.GetWindowTextLengthW
-        self.GetWindowTextW = self.user32.GetWindowTextW
-        self.GetClassNameW = self.user32.GetClassNameW
-        self.GetWindowThreadProcessId = self.user32.GetWindowThreadProcessId
-        self.IsWindowVisible = self.user32.IsWindowVisible
-        self.ShowWindow = self.user32.ShowWindow
-        self.SetForegroundWindow = self.user32.SetForegroundWindow
+    except subprocess.TimeoutExpired as exc:
+        raise JxaAutomationError(f"osascript timeout after {timeout:.1f}s") from exc
 
-        self.OpenProcess = self.kernel32.OpenProcess
-        self.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        self.OpenProcess.restype = wintypes.HANDLE
+    stdout = str(completed.stdout or "").strip()
+    stderr = str(completed.stderr or "").strip()
+    if completed.returncode != 0:
+        detail = stderr or stdout or f"osascript failed with exit={completed.returncode}"
+        if _is_accessibility_error(detail):
+            raise AccessibilityPermissionError(detail)
+        raise JxaAutomationError(detail)
 
-        self.QueryFullProcessImageNameW = self.kernel32.QueryFullProcessImageNameW
-        self.QueryFullProcessImageNameW.argtypes = [
-            wintypes.HANDLE,
-            wintypes.DWORD,
-            wintypes.LPWSTR,
-            ctypes.POINTER(wintypes.DWORD),
-        ]
-        self.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    if not stdout:
+        return None
 
-        self.CloseHandle = self.kernel32.CloseHandle
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise JxaAutomationError(f"invalid JXA JSON payload: {stdout[:200]}") from exc
 
-    def window_title(self, hwnd) -> str:
-        size = self.GetWindowTextLengthW(hwnd)
-        buf = ctypes.create_unicode_buffer(size + 1)
-        self.GetWindowTextW(hwnd, buf, size + 1)
-        return buf.value
 
-    def window_class(self, hwnd) -> str:
-        buf = ctypes.create_unicode_buffer(256)
-        self.GetClassNameW(hwnd, buf, 256)
-        return buf.value
+@dataclass
+class WindowCandidate:
+    process_name: str
+    pid: int
+    title: str
+    role: str
+    subrole: str
+    miniaturized: bool
+    position: list[int] | None
+    size: list[int] | None
 
-    def process_image_name(self, pid: int) -> str:
-        handle = self.OpenProcess(self.PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return ""
-        try:
-            size = wintypes.DWORD(260)
-            buf = ctypes.create_unicode_buffer(size.value)
-            ok = self.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size))
-            if not ok:
-                return ""
-            return buf.value.split("\\")[-1]
-        finally:
-            self.CloseHandle(handle)
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any], *, process_name: str, pid: int) -> "WindowCandidate":
+        title = str(payload.get("title") or "").strip()
+        role = str(payload.get("role") or "").strip()
+        subrole = str(payload.get("subrole") or "").strip()
+        raw_position = payload.get("position")
+        raw_size = payload.get("size")
+        position = [int(v) for v in raw_position] if isinstance(raw_position, list) else None
+        size = [int(v) for v in raw_size] if isinstance(raw_size, list) else None
+        return cls(
+            process_name=process_name,
+            pid=int(pid),
+            title=title,
+            role=role,
+            subrole=subrole,
+            miniaturized=bool(payload.get("miniaturized")),
+            position=position,
+            size=size,
+        )
 
-    def activate_hwnd(self, hwnd: int):
-        self.ShowWindow(hwnd, self.SW_RESTORE)
-        self.ShowWindow(hwnd, self.SW_SHOW)
-        self.SetForegroundWindow(hwnd)
+    @property
+    def area(self) -> int:
+        if not self.size or len(self.size) != 2:
+            return 0
+        return max(0, int(self.size[0])) * max(0, int(self.size[1]))
+
+
+class MacWeChatWindow:
+    """给现有 worker 保持近似 UIA 风格的窗口句柄外观。"""
+
+    def __init__(self, manager: "WeChatWindow", candidate: WindowCandidate):
+        self._manager = manager
+        self._process_name = candidate.process_name
+        self._pid = candidate.pid
+        self._title = candidate.title
+
+    def Exists(self, timeout: float = 0.0) -> bool:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            if self._manager.current_main_window() is not None:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(POLL_RETRY_INTERVAL_SECONDS)
+
+    def SwitchToThisWindow(self) -> bool:
+        return self._manager.activate_current_window()
+
+    def IsMinimize(self) -> bool:
+        current = self._manager.current_main_window()
+        return bool(current and current.miniaturized)
+
+    def Restore(self) -> bool:
+        return self._manager.restore_current_window()
+
+    def has_popup_or_menu(self) -> bool:
+        return self._manager.has_popup_or_menu()
+
+    def run_jxa(self, script: str, timeout: float = JXA_TIMEOUT_SECONDS) -> Any:
+        return self._manager.run_jxa(script, timeout=timeout)
+
+    @property
+    def process_name(self) -> str:
+        return self._process_name
+
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    @property
+    def title(self) -> str:
+        return self._title
 
 
 class WeChatWindow:
-    def __init__(self):
-        self.window = None
-        self._winapi = _WinApi()
+    def __init__(
+        self,
+        *,
+        script_runner: Callable[[str, float], Any] | None = None,
+    ):
+        self.window: MacWeChatWindow | None = None
+        self._script_runner = script_runner or _run_jxa_json
+        self._last_state = "idle"
+        self._last_detail = ""
+        self._last_process_name = ""
+        self._last_pid = 0
 
-    def _enum_wechat_windows(self) -> list[dict]:
-        targets = {"WeChat.exe", "Weixin.exe"}
-        result = []
+    def run_jxa(self, script: str, *, timeout: float = JXA_TIMEOUT_SECONDS) -> Any:
+        return self._script_runner(script, timeout)
 
-        def callback(hwnd, _):
-            try:
-                title = self._winapi.window_title(hwnd)
-                cls = self._winapi.window_class(hwnd)
+    def _set_status(self, state: str, detail: str) -> None:
+        self._last_state = str(state or "").strip() or "unknown"
+        self._last_detail = str(detail or "").strip()
 
-                pid = wintypes.DWORD()
-                self._winapi.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                exe_name = self._winapi.process_image_name(pid.value)
+    def get_last_state(self) -> str:
+        return self._last_state
 
-                if exe_name not in targets:
-                    return True
+    def get_last_detail(self) -> str:
+        return self._last_detail
 
-                score = 0
-                if self._winapi.IsWindowVisible(hwnd):
-                    score += 100
-                if title in ("微信", "Weixin"):
-                    score += 80
-                if "Qt" in cls or "WeChatMainWnd" in cls or "UnrealWindow" in cls:
-                    score += 50
-                if "MainWindow" in cls:
-                    score += 120
-                cls_lower = cls.lower()
-                if (
-                    "popover" in cls_lower
-                    or "trayicon" in cls_lower
-                    or "shadow" in cls_lower
-                    or "toolsavebits" in cls_lower
-                ):
-                    score -= 180
-                if title:
-                    score += 15
+    def _build_process_query_script(self) -> str:
+        process_names = ", ".join(json.dumps(name) for name in WECHAT_PROCESS_CANDIDATES)
+        return textwrap.dedent(
+            f"""
+            const systemEvents = Application("System Events");
+            const candidates = [{process_names}];
+            function readProcess(name) {{
+              try {{
+                const proc = systemEvents.processes.byName(name);
+                const pid = Number(proc.unixId());
+                const procName = String(proc.name() || "");
+                if (!procName || !pid) {{
+                  return null;
+                }}
+                return {{ name: procName, pid: pid }};
+              }} catch (error) {{
+                return null;
+              }}
+            }}
+            let found = null;
+            for (const name of candidates) {{
+              const current = readProcess(name);
+              if (current) {{
+                found = current;
+                break;
+              }}
+            }}
+            JSON.stringify(found);
+            """
+        ).strip()
 
-                if score > 0:
-                    result.append(
-                        {
-                            "hwnd": int(hwnd),
-                            "pid": int(pid.value),
-                            "exe": exe_name,
-                            "title": title,
-                            "class": cls,
-                            "score": score,
-                        }
-                    )
-            except Exception:
-                pass
-            return True
+    def _build_window_query_script(self, process_name: str) -> str:
+        quoted_name = json.dumps(process_name)
+        return textwrap.dedent(
+            f"""
+            const systemEvents = Application("System Events");
+            const proc = systemEvents.processes.byName({quoted_name});
+            const windows = proc.windows();
+            const items = windows.map(window => {{
+              let position = null;
+              let size = null;
+              try {{
+                position = window.position();
+              }} catch (error) {{
+                position = null;
+              }}
+              try {{
+                size = window.size();
+              }} catch (error) {{
+                size = null;
+              }}
+              return {{
+                title: String(window.name() || ""),
+                role: String(window.role() || ""),
+                subrole: String(window.subrole() || ""),
+                miniaturized: Boolean(window.miniaturized()),
+                position: position,
+                size: size,
+              }};
+            }});
+            JSON.stringify(items);
+            """
+        ).strip()
 
-        self._winapi.EnumWindows(self._winapi.EnumWindowsProc(callback), 0)
-        result.sort(key=lambda x: x["score"], reverse=True)
-        return result
+    def _build_activate_script(self, process_name: str) -> str:
+        quoted_name = json.dumps(process_name)
+        return textwrap.dedent(
+            f"""
+            const app = Application({quoted_name});
+            app.activate();
+            JSON.stringify({{ ok: true }});
+            """
+        ).strip()
 
-    def _window_from_native(self):
-        candidates = self._enum_wechat_windows()
-        if not candidates:
+    def _build_restore_script(self, process_name: str) -> str:
+        quoted_name = json.dumps(process_name)
+        return textwrap.dedent(
+            f"""
+            const systemEvents = Application("System Events");
+            const proc = systemEvents.processes.byName({quoted_name});
+            const windows = proc.windows();
+            if (windows.length > 0) {{
+              try {{
+                windows[0].miniaturized = false;
+              }} catch (error) {{
+                // 有些 WeChat 版本不暴露 miniaturized，可忽略并直接 activate。
+              }}
+            }}
+            const app = Application({quoted_name});
+            app.activate();
+            JSON.stringify({{ ok: true }});
+            """
+        ).strip()
+
+    def _query_process_info(self) -> dict[str, Any] | None:
+        payload = self.run_jxa(self._build_process_query_script())
+        if not isinstance(payload, dict):
             return None
+        name = str(payload.get("name") or "").strip()
+        pid = int(payload.get("pid") or 0)
+        if not name or pid <= 0:
+            return None
+        return {"name": name, "pid": pid}
 
-        for picked in candidates:
-            try:
-                self._winapi.activate_hwnd(picked["hwnd"])
-                time.sleep(0.4)
-                ctrl = auto.ControlFromHandle(picked["hwnd"])
-            except Exception as e:
-                log(f"句柄挂接失败(hwnd={picked['hwnd']})，原因：{e}")
-                continue
-
-            if ctrl and ctrl.Exists(0.8):
-                cls_name = (ctrl.ClassName or "").strip()
-                cls_lower = cls_name.lower()
-                is_main_window = (
-                    "mainwindow" in cls_lower
-                    or cls_name in ("WeChatMainWndForPC", "WeChatMainWnd", "QWidget", "UnrealWindow")
-                )
-                if not is_main_window:
-                    log(f"跳过非主窗口句柄(hwnd={picked['hwnd']}, class='{cls_name}')")
-                    continue
-                log(
-                    "通过进程句柄定位微信窗口成功，"
-                    f"exe={picked['exe']} class='{ctrl.ClassName}' title='{ctrl.Name}'"
-                )
-                return ctrl
-        return None
-
-    def _window_from_uia_fallback(self):
-        possible_classes = [
-            "mmui::MainWindow",
-            "WeChatMainWndForPC",
-            "WeChatMainWnd",
-            "WeChatLoginWndForPC",
-            "QWidget",
-            "UnrealWindow",
+    def _query_window_candidates(self, process_name: str, pid: int) -> list[WindowCandidate]:
+        payload = self.run_jxa(self._build_window_query_script(process_name))
+        if not isinstance(payload, list):
+            return []
+        return [
+            WindowCandidate.from_payload(item, process_name=process_name, pid=pid)
+            for item in payload
+            if isinstance(item, dict)
         ]
-        for cls in possible_classes:
-            ctrl = auto.WindowControl(searchDepth=1, ClassName=cls)
-            if ctrl.Exists(0.3):
-                log(f"通过 UIA 类名定位到窗口，ClassName = '{cls}'")
-                return ctrl
 
-        # 兜底：标题包含“微信”且排除命令行窗口
-        ctrl = auto.WindowControl(searchDepth=1, NameContains="微信")
-        if ctrl.Exists(0.3) and "cmd.exe" not in (ctrl.Name or "").lower():
-            log(f"通过标题兜底定位到窗口，ClassName = '{ctrl.ClassName or '未知'}'")
-            return ctrl
-        return None
+    def _is_popup_candidate(self, candidate: WindowCandidate) -> bool:
+        role = candidate.role.strip().lower()
+        subrole = candidate.subrole.strip().lower()
+        title = candidate.title.strip().lower()
+        if any(token in role for token in POPUP_ROLE_TOKENS):
+            return True
+        if any(token in subrole for token in POPUP_SUBROLE_TOKENS):
+            return True
+        return any(token in title for token in ("菜单", "弹窗", "popup"))
 
-    def _activate_window(self):
-        hwnd = 0
+    def _candidate_score(self, candidate: WindowCandidate) -> int:
+        score = 0
+        if not self._is_popup_candidate(candidate):
+            score += 200
+        title_lower = candidate.title.lower()
+        if "微信" in candidate.title or "wechat" in title_lower or "weixin" in title_lower:
+            score += 60
+        if candidate.subrole.strip().lower() in ("", "axstandardwindow", "standard window"):
+            score += 40
+        if not candidate.miniaturized:
+            score += 30
+        score += min(candidate.area // 20000, 120)
+        return score
+
+    def _pick_main_window(self, candidates: list[WindowCandidate]) -> WindowCandidate | None:
+        normal_windows = [item for item in candidates if not self._is_popup_candidate(item)]
+        if not normal_windows:
+            return None
+        return max(normal_windows, key=self._candidate_score)
+
+    def current_main_window(self) -> WindowCandidate | None:
+        process = self._query_process_info()
+        if not process:
+            return None
+        process_name = str(process["name"])
+        pid = int(process["pid"])
+        candidates = self._query_window_candidates(process_name, pid)
+        return self._pick_main_window(candidates)
+
+    def has_popup_or_menu(self) -> bool:
+        process = self._query_process_info()
+        if not process:
+            return False
+        process_name = str(process["name"])
+        pid = int(process["pid"])
+        candidates = self._query_window_candidates(process_name, pid)
+        return any(self._is_popup_candidate(item) for item in candidates)
+
+    def activate_current_window(self) -> bool:
+        process_name = self._last_process_name or ""
+        if not process_name:
+            process = self._query_process_info()
+            if not process:
+                return False
+            process_name = str(process["name"])
         try:
-            hwnd = int(self.window.NativeWindowHandle)
-        except Exception:
-            hwnd = 0
-
-        if hwnd:
-            self._winapi.activate_hwnd(hwnd)
-            time.sleep(0.3)
-
-        self.window.SwitchToThisWindow()
-        time.sleep(0.3)
-        if self.window.IsMinimize():
-            self.window.Restore()
-            time.sleep(0.6)
-            self.window.SwitchToThisWindow()
-            time.sleep(0.3)
-
-    def load(self) -> bool:
-        """
-        定位并激活微信主窗口。优先按进程句柄定位，避免误匹配其他窗口。
-        """
-        log("尝试定位并激活微信窗口...")
-        self.window = self._window_from_native()
-        if not self.window:
-            log("进程句柄定位失败，尝试 UIA 兜底定位...")
-            self.window = self._window_from_uia_fallback()
-
-        if not self.window or not self.window.Exists():
-            log("最终仍未找到微信主窗口，请手动打开微信并确保已登录")
+            self.run_jxa(self._build_activate_script(process_name))
+            return True
+        except JxaAutomationError:
             return False
 
-        self._activate_window()
-        log("微信窗口已成功激活并置于前台")
+    def restore_current_window(self) -> bool:
+        process_name = self._last_process_name or ""
+        if not process_name:
+            process = self._query_process_info()
+            if not process:
+                return False
+            process_name = str(process["name"])
+        try:
+            self.run_jxa(self._build_restore_script(process_name))
+            return True
+        except JxaAutomationError:
+            return False
+
+    def load(self) -> bool:
+        log("尝试定位微信进程与主窗口...")
+        self.window = None
+
+        process = self._query_process_info()
+        if not process:
+            self._last_process_name = ""
+            self._last_pid = 0
+            self._set_status("waiting_wechat", "wechat process not running")
+            log("未发现 WeChat 进程，等待微信启动")
+            return False
+
+        self._last_process_name = str(process["name"])
+        self._last_pid = int(process["pid"])
+
+        try:
+            candidates = self._query_window_candidates(self._last_process_name, self._last_pid)
+        except AccessibilityPermissionError:
+            detail = "accessibility permission required for WeChat window inspection"
+            self._set_status("permission_required", detail)
+            log("缺少辅助功能权限，无法读取微信窗口")
+            return False
+        except JxaAutomationError as exc:
+            detail = f"failed to query WeChat windows: {exc}"
+            self._set_status("window_query_failed", detail)
+            log(f"读取微信窗口失败：{exc}")
+            return False
+
+        if not candidates:
+            detail = "wechat process is running but no readable window is available"
+            self._set_status("waiting_wechat", detail)
+            log("微信进程存在，但当前没有可读主窗口")
+            return False
+
+        picked = self._pick_main_window(candidates)
+        if picked is None:
+            detail = "wechat popup/menu/dialog blocks the main window"
+            self._set_status("ui_paused", detail)
+            log("检测到微信弹窗或菜单遮挡主窗口，暂不进入监听")
+            return False
+
+        self.window = MacWeChatWindow(self, picked)
+        self._set_status("ready", f"connected to {self._last_process_name} pid={self._last_pid}")
+        self.activate_current_window()
+        log(f"已连接微信主窗口 pid={self._last_pid} title={picked.title!r}")
         return True
 
-    def get_current_sessions(self) -> list:
-        """获取当前会话名称列表（前 30 个）。"""
+    def get_current_sessions(self) -> list[str]:
+        """保留只读会话查询入口，具体读取逻辑在 controls.py 中实现。"""
         if not self.window or not self.window.Exists():
             log("微信窗口不存在，无法获取会话列表")
             return []
 
-        self._activate_window()
+        from .controls import find_session_list, normalize_session_name
+
         session_list = find_session_list(self.window)
         if not session_list or not session_list.Exists(0.5):
             log("未找到会话列表控件")
             return []
 
-        names = []
+        names: list[str] = []
         for item in session_list.GetChildren()[:30]:
-            raw = item.Name or ""
+            raw = getattr(item, "Name", "") or ""
             name = normalize_session_name(raw)
             if name and name not in names:
                 names.append(name)
-
         log(f"获取到 {len(names)} 个会话")
         return names
 
-    def get_window(self):
+    def get_window(self) -> MacWeChatWindow | None:
         return self.window
