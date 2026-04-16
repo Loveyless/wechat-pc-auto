@@ -16,8 +16,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGING_MANIFEST_PATH = REPO_ROOT / "scripts" / "packaging_manifest.json"
 DESKTOP_SHELL_ROOT = REPO_ROOT / "desktop-shell"
 SRC_TAURI_ROOT = DESKTOP_SHELL_ROOT / "src-tauri"
-DEFAULT_SHELL_EXE = SRC_TAURI_ROOT / "target" / "release" / "wechat-auto-shell.exe"
-DEFAULT_RUNTIME_ROOT = Path(os.environ["LOCALAPPDATA"]) / "com.wechatauto.shell"
 DEFAULT_HEALTH_URL = "http://127.0.0.1:8765/healthz"
 
 
@@ -35,6 +33,32 @@ def load_forbidden_bootstrap_log_patterns() -> tuple[str, ...]:
 FORBIDDEN_BOOTSTRAP_LOG_PATTERNS = load_forbidden_bootstrap_log_patterns()
 
 
+def default_shell_executable_candidates() -> list[Path]:
+    if os.name == "nt":
+        return [SRC_TAURI_ROOT / "target" / "release" / "wechat-auto-shell.exe"]
+    return [
+        SRC_TAURI_ROOT / "target" / "release" / "wechat-auto-shell",
+        SRC_TAURI_ROOT
+        / "target"
+        / "release"
+        / "bundle"
+        / "macos"
+        / "WeChat Auto Shell.app"
+        / "Contents"
+        / "MacOS"
+        / "WeChat Auto Shell",
+    ]
+
+
+def default_runtime_root() -> Path:
+    if os.name == "nt":
+        localappdata = str(os.environ.get("LOCALAPPDATA", "")).strip()
+        if localappdata:
+            return Path(localappdata) / "com.wechatauto.shell"
+        return Path.home() / "AppData" / "Local" / "com.wechatauto.shell"
+    return Path.home() / "Library" / "Application Support" / "com.wechatauto.shell"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build and smoke-test the Tauri desktop shell release flow."
@@ -46,12 +70,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--shell-exe",
-        default=str(DEFAULT_SHELL_EXE),
-        help="Path to wechat-auto-shell.exe",
+        default="",
+        help="Path to the release shell executable. Omit to auto-detect the current platform default.",
     )
     parser.add_argument(
         "--runtime-root",
-        default=str(DEFAULT_RUNTIME_ROOT),
+        default=str(default_runtime_root()),
         help="Expected runtime root used by the shell.",
     )
     parser.add_argument(
@@ -102,6 +126,16 @@ def resolve_tool_path(tool: str) -> str:
         if resolved:
             return resolved
     raise RuntimeError(f"required tool not found on PATH: {tool}")
+
+
+def resolve_shell_executable(shell_exe: str) -> Path:
+    if str(shell_exe).strip():
+        return Path(shell_exe).resolve()
+    candidates = default_shell_executable_candidates()
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate.resolve()
+    return candidates[0].resolve()
 
 
 def fetch_backend_health(health_url: str) -> dict[str, str] | None:
@@ -246,14 +280,31 @@ def launch_process(executable: Path) -> subprocess.Popen[bytes]:
 def force_kill_process_tree(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         return
-    subprocess.run(
-        [resolve_tool_path("taskkill"), "/PID", str(process.pid), "/T", "/F"],
-        capture_output=True,
-        check=False,
-    )
+    if os.name == "nt":
+        subprocess.run(
+            [resolve_tool_path("taskkill"), "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+        return
+
     try:
+        process.terminate()
         process.wait(timeout=10)
+        return
     except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        pass
+
+    try:
+        process.kill()
+        process.wait(timeout=5)
+    except Exception:
         pass
 
 
@@ -263,6 +314,15 @@ def ensure_clean_start(health_url: str) -> None:
             "health endpoint is already reachable before smoke test; "
             f"stop the existing shell/backend first ({summarize_non_clean_start(health_url)})"
         )
+
+
+def wait_for_backend_shutdown(health_url: str, timeout: float) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if fetch_backend_health(health_url) is None:
+            return
+        time.sleep(0.5)
+    raise RuntimeError(f"backend health endpoint still reachable after shell cleanup: {health_url}")
 
 
 def maybe_build_release(skip_build: bool) -> None:
@@ -290,7 +350,7 @@ def assert_log_contains(log_delta: str, needle: str, *, timeout: float, log_path
 
 def main() -> None:
     args = parse_args()
-    shell_exe = Path(args.shell_exe).resolve()
+    shell_exe = resolve_shell_executable(args.shell_exe)
     runtime_root = Path(args.runtime_root).resolve()
     log_path = bootstrap_log_path(runtime_root)
     log_offset = log_path.stat().st_size if log_path.exists() else 0
@@ -336,6 +396,9 @@ def main() -> None:
         )
         log_delta = read_log_delta(log_path, log_offset)
         fail_on_forbidden_log_patterns(log_delta)
+
+        force_kill_process_tree(first_shell)
+        wait_for_backend_shutdown(args.health_url, timeout=args.ready_timeout)
 
         print(f"Release smoke passed: {shell_exe}")
         print(f"Verified health endpoint: {args.health_url}")

@@ -1,4 +1,5 @@
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest import mock
 
@@ -75,6 +76,74 @@ class SmokeDesktopShellReleaseTest(unittest.TestCase):
             payload = smoke.fetch_backend_health("http://127.0.0.1:8765/healthz")
         self.assertEqual(payload["status"], "_invalid_payload")
         self.assertEqual(payload["detail"], "health payload is not valid JSON")
+
+    def test_default_runtime_root_uses_macos_app_support(self):
+        with mock.patch.object(smoke.os, "name", "posix"), mock.patch.object(
+            smoke.Path, "home", return_value=Path("/Users/test")
+        ):
+            runtime_root = smoke.default_runtime_root()
+        self.assertEqual(
+            runtime_root,
+            Path("/Users/test/Library/Application Support/com.wechatauto.shell"),
+        )
+
+    def test_resolve_shell_executable_uses_existing_candidate(self):
+        with TemporaryDirectory() as temp_dir:
+            missing = Path(temp_dir) / "missing-shell"
+            existing = Path(temp_dir) / "wechat-auto-shell"
+            existing.write_text("", encoding="utf-8")
+            with mock.patch.object(
+                smoke,
+                "default_shell_executable_candidates",
+                return_value=[missing, existing],
+            ):
+                resolved = smoke.resolve_shell_executable("")
+        self.assertEqual(resolved, existing.resolve())
+
+    def test_force_kill_process_tree_uses_graceful_shutdown_on_posix(self):
+        class FakeProcess:
+            def __init__(self) -> None:
+                self.pid = 123
+                self.terminate_called = False
+                self.kill_called = False
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminate_called = True
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                self.kill_called = True
+
+        process = FakeProcess()
+        with mock.patch.object(smoke.os, "name", "posix"):
+            smoke.force_kill_process_tree(process)
+        self.assertTrue(process.terminate_called)
+        self.assertFalse(process.kill_called)
+
+    def test_wait_for_backend_shutdown_succeeds_when_health_disappears(self):
+        with mock.patch.object(
+            smoke,
+            "fetch_backend_health",
+            side_effect=[
+                {
+                    "status": "ok",
+                    "detail": "",
+                    "worker_state": "running",
+                },
+                None,
+            ],
+        ), mock.patch.object(
+            smoke,
+            "time",
+        ) as time_mock:
+            time_mock.time.side_effect = [0.0, 0.0, 0.1]
+            time_mock.sleep.return_value = None
+            smoke.wait_for_backend_shutdown("http://127.0.0.1:8765/healthz", 2.0)
 
 
 if __name__ == "__main__":
