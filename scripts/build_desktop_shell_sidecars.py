@@ -69,13 +69,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def platform_binary_extension() -> str:
+    return ".exe" if os.name == "nt" else ""
+
+
+def built_sidecar_name(name: str) -> str:
+    return f"{name}{platform_binary_extension()}"
+
+
+def installed_sidecar_name(name: str, target_triple: str) -> str:
+    return f"{name}-{target_triple}{platform_binary_extension()}"
+
+
 def resolve_tool_path(tool: str) -> str:
     direct = which(tool)
     if direct:
         return direct
-    cargo_bin = Path.home() / ".cargo" / "bin" / (tool if tool.endswith(".exe") else f"{tool}.exe")
-    if cargo_bin.exists():
-        return str(cargo_bin)
+    cargo_bin_dir = Path.home() / ".cargo" / "bin"
+    candidates = [tool]
+    extension = platform_binary_extension()
+    if extension and not tool.endswith(extension):
+        candidates.append(f"{tool}{extension}")
+    for candidate in candidates:
+        cargo_bin = cargo_bin_dir / candidate
+        if cargo_bin.exists():
+            return str(cargo_bin)
     raise RuntimeError(f"required tool not found: {tool}")
 
 
@@ -198,7 +216,7 @@ def build_sidecar(
         str(source),
     ]
     run_command(command, step=f"PyInstaller build for {name}")
-    executable = DIST_ROOT / f"{name}.exe"
+    executable = DIST_ROOT / built_sidecar_name(name)
     if not executable.exists():
         raise RuntimeError(f"missing built executable: {executable}")
     return executable
@@ -233,7 +251,12 @@ def backend_hidden_import_args() -> list[str]:
 
 def install_sidecar(built_executable: Path, *, name: str, target_triple: str) -> Path:
     BINARIES_ROOT.mkdir(parents=True, exist_ok=True)
-    target_path = BINARIES_ROOT / f"{name}-{target_triple}.exe"
+    target_path = BINARIES_ROOT / installed_sidecar_name(name, target_triple)
+    legacy_windows_path = BINARIES_ROOT / f"{name}-{target_triple}.exe"
+    legacy_plain_path = BINARIES_ROOT / name
+    for stale_path in {legacy_windows_path, legacy_plain_path} - {target_path}:
+        if stale_path.exists():
+            stale_path.unlink()
     if target_path.exists():
         target_path.unlink()
     shutil.copy2(built_executable, target_path)
