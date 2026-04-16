@@ -67,12 +67,12 @@
 
 如果你在仓库深层文档或旧代码里看到下面这些内容，请默认当成“待迁移的旧实现信息”，不要把它们理解为当前分支的目标事实：
 
-- Windows
-- `.exe`
-- `%LOCALAPPDATA%`
-- `taskkill`
-- `uiautomation`
-- `windows_system`
+- `Windows` 旧平台路径与命令
+- `.exe` 旧 sidecar / shell 产物命名
+- `%LOCALAPPDATA%` 旧 runtime root 位置
+- `taskkill` 旧进程清理命令
+- `uiautomation` 旧窗口读取依赖
+- `windows_system` 旧 TTS provider 兼容别名
 
 ## 文档分流
 
