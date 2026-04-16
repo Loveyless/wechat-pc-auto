@@ -1,7 +1,7 @@
 ## 1. Mac 窗口与会话读取适配
 
 - [x] 1.1 将 `wechat_auto/window.py` 改为 mac-only 的微信进程、主窗口、权限与 popup 检测实现
-- [ ] 1.2 将 `wechat_auto/controls.py` 改为 mac 会话列表与预览快照读取实现，并保留当前预览解析辅助函数
+- [x] 1.2 将 `wechat_auto/controls.py` 改为 mac 会话列表与预览快照读取实现，并保留当前预览解析辅助函数
 - [ ] 1.3 为 window/control 适配层补单元测试或 fake 覆盖，锁定 preview 解析、窗口筛选与异常降级行为
 
 ## 2. Worker 与 runtime 接通
