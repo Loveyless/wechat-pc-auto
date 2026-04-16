@@ -1,6 +1,6 @@
 # 开发者文档
 
-这份文档只服务开发、调试、回归和打包。普通用户别看这个，噪音太多；产品说明回 `README.md`。
+这份文档只服务开发、调试、回归和打包。普通用户看 `README.md` 即可；这里默认读者已经接受当前分支只面向 `Apple Silicon macOS`。
 
 ## 适用范围
 
@@ -11,19 +11,19 @@
 ## 先装环境
 
 ```bash
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 cd desktop-shell
 npm install
 ```
 
-如果你要跑 Tauri 壳，还要保证本机能用 `cargo` / `rustc`。缺 Rust toolchain 时，只能验证源码态后端和 Vite 页面，别把它硬说成桌面壳已通过。
+如果你要跑 Tauri 壳，还要保证本机能用 `cargo` / `rustc`。缺 Rust toolchain 时，只能验证源码态 backend 和 Vite 页面，别把它硬说成桌面壳已通过。
 
 ## 启动方式
 
-### 源码态后端 + 前端开发页
+### 源码态 backend + 前端开发页
 
 ```bash
-python listener_app/backend_main.py --config ".\config\listener.json"
+python3 listener_app/backend_main.py --config "./config/listener.json"
 cd desktop-shell
 npm run dev
 ```
@@ -40,7 +40,13 @@ cd desktop-shell
 npm run tauri dev
 ```
 
-这条命令会先跑 `python ..\scripts\build_desktop_shell_sidecars.py`，再由 Tauri 壳托管 backend sidecar。不要手工再起一份 `backend_main.py` 去制造双实例噪音。
+这条命令会先跑：
+
+```bash
+python3 ../scripts/build_desktop_shell_sidecars.py --python python3
+```
+
+然后由 Tauri 壳托管 backend sidecar。不要手工再起一份 `backend_main.py` 去制造双实例和配置混淆。
 
 ## 测试与构建
 
@@ -53,37 +59,50 @@ npm run build
 npm run test:rust
 ```
 
-`npm run build` 不能省。`tauri::generate_context!()` 依赖 `desktop-shell/dist`，你不先构建，Rust 测试就会炸。
+`npm run build` 不能省。`tauri::generate_context!()` 依赖 `desktop-shell/dist`，不先构建，Rust 测试就会失败。
 
-### Release 壳交付闸口
+### 默认 release app 交付闸口
 
 ```bash
-python scripts/build_desktop_shell_sidecars.py --python python
+python3 scripts/build_desktop_shell_sidecars.py --python python3
 cd desktop-shell
 npm test
 npm run build
 npm run test:rust
-python scripts/smoke_desktop_shell_release.py
+npm run tauri -- build --bundles app
+cd ..
+python3 scripts/smoke_desktop_shell_release.py --skip-build --shell-exe "desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell"
 ```
 
-上面这套没跑完，就别把 release 壳当成可交付产物。
+上面这套没跑完，就别把当前 mac release app 当成可交付产物。
 
-### 产物
+### 可选：DMG 专项验收
 
-`npm run tauri build` 当前会产出：
+```bash
+cd desktop-shell
+npm run tauri build
+```
 
-- `desktop-shell/src-tauri/target/release/wechat-auto-shell.exe`
-- `desktop-shell/src-tauri/target/release/wechat-auto-backend.exe`
-- `desktop-shell/src-tauri/target/release/group_listener_worker.exe`
-- `desktop-shell/src-tauri/target/release/bundle/msi/*.msi`
-- `desktop-shell/src-tauri/target/release/bundle/nsis/*-setup.exe`
+这一步会继续尝试产出 `DMG`，但最后的窗口美化依赖 Finder AppleScript。  
+只有在可交互 Finder 会话里，它才应该被当成正式验收；如果 `.app build + smoke` 已过，而 `DMG` 卡在 `bundle_dmg.sh` / `osascript`，应把问题归为 GUI 专项验收风险，不要误判成桌面壳主链路回归。
+
+## 产物
+
+当前 mac 构建链的关键产物是：
+
+- `desktop-shell/src-tauri/binaries/wechat-auto-backend-aarch64-apple-darwin`
+- `desktop-shell/src-tauri/binaries/group_listener_worker-aarch64-apple-darwin`
+- `desktop-shell/src-tauri/target/release/wechat-auto-shell`
+- `desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app`
+
+`DMG` 只作为额外的 GUI 专项验收输出，不再是默认自动化发布闸口的一部分。
 
 ## 运行时边界
 
-- 源码态 `python listener_app/backend_main.py --config ".\config\listener.json"` 读取仓库里的 `config/listener.json`
-- `npm run tauri dev`、安装包和 `wechat-auto-shell.exe` 读取 `%LOCALAPPDATA%\com.wechatauto.shell\config\listener.json`
+- 源码态 `python3 listener_app/backend_main.py --config "./config/listener.json"` 读取仓库里的 `config/listener.json`
+- `npm run tauri dev`、release app 和 smoke 读取 `~/Library/Application Support/com.wechatauto.shell/config/listener.json`
 - 这两套配置目录不会自动同步；桌面壳设置页只会改当前 backend 正在使用的那一套
-- `.env.local` 在源码态默认读仓库根目录；Tauri 壳优先读 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`
+- `.env.local` 在源码态默认读仓库根目录；Tauri 壳优先读 `~/Library/Application Support/com.wechatauto.shell/.env.local`
 
 ## 关键文档入口
 
@@ -98,6 +117,6 @@ config/          运行配置与字段说明
 listener_app/    Python backend、runtime、worker、TTS、translate
 desktop-shell/   React + Vite + Tauri 桌面壳
 scripts/         sidecar 构建与 release smoke
-wechat_auto/     微信窗口与 UIA 读取基础能力
+wechat_auto/     微信窗口与可访问性读取基础能力
 docs/            深水区文档
 ```
