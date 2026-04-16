@@ -13,4 +13,4 @@
 ## 3. Docs and verification
 
 - [x] 3.1 Update `config/listener.json`, `config/listener.md`, and `docs/wechat-listening-pitfalls.md` so shipped defaults, provider guidance, and migration notes match the mac-only TTS runtime
-- [ ] 3.2 Run the targeted Python and frontend checks from the plan, record any environment-limited manual verification, and keep the resulting notes aligned with the CSV issue state
+- [x] 3.2 Run the targeted Python and frontend checks from the plan, record any environment-limited manual verification, and keep the resulting notes aligned with the CSV issue state
