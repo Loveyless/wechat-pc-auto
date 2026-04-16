@@ -857,6 +857,14 @@ mod tests {
     }
 
     #[test]
+    fn backend_bootstrap_lock_name_uses_mac_compatible_namespace() {
+        let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
+        let lock_name = build_backend_bootstrap_lock_name(runtime_root);
+        assert!(lock_name.starts_with("com.wechatauto.shell.backend-bootstrap."));
+        assert!(!lock_name.contains('\\'));
+    }
+
+    #[test]
     fn backend_marker_path_stays_under_runtime_log_state_dir() {
         let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
         let marker_path = backend_marker_path(runtime_root);

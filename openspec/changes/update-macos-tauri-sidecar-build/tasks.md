@@ -1,7 +1,7 @@
 ## 1. Rust bootstrap mac 适配
 
 - [x] 1.1 用 mac-compatible helper 替换 `desktop-shell/src-tauri/src/backend/win32.rs` 的锁、进程身份和 owned-backend 清理实现，并更新 `bootstrap.rs` / `Cargo.toml` 接线
-- [ ] 1.2 补或更新 Rust 回归，覆盖 runtime root、marker 路径、target-triple 命名辅助逻辑和不再依赖 Win32 事实的 bootstrap 行为
+- [x] 1.2 补或更新 Rust 回归，覆盖 runtime root、marker 路径、target-triple 命名辅助逻辑和不再依赖 Win32 事实的 bootstrap 行为
 
 ## 2. Sidecar 构建与 Tauri 接线
 

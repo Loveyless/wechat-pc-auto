@@ -274,3 +274,24 @@ fn run_status(command: &str, args: &[&str]) -> bool {
 fn resolve_ps_path() -> &'static str {
     "/bin/ps"
 }
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_lock_name;
+
+    #[test]
+    fn sanitize_lock_name_replaces_windows_only_separators() {
+        assert_eq!(
+            sanitize_lock_name(r"Local\com.wechatauto.shell/backend-bootstrap"),
+            "Local_com.wechatauto.shell_backend-bootstrap"
+        );
+    }
+
+    #[test]
+    fn sanitize_lock_name_preserves_safe_characters() {
+        assert_eq!(
+            sanitize_lock_name("com.wechatauto.shell.backend-bootstrap.1234"),
+            "com.wechatauto.shell.backend-bootstrap.1234"
+        );
+    }
+}
