@@ -204,6 +204,24 @@ describe("desktop settings state", () => {
     expect(payload.secret_updates.tts).toEqual({})
   })
 
+  it("keeps macos_system as the built-in provider without adding a system private payload branch", () => {
+    const draft = createDesktopSettingsDraft(createRuntimeConfig())
+
+    expect(draft.tts.provider).toBe("macos_system")
+    expect(draft.tts.available_providers).toEqual([
+      "macos_system",
+      "doubao",
+      "less_tts",
+      "tencent_cloud",
+    ])
+
+    const payload = buildDesktopSettingsSavePayload(draft)
+
+    expect(payload.tts.provider).toBe("macos_system")
+    expect(Object.keys(payload.tts.providers)).toEqual(["doubao", "less_tts", "tencent_cloud"])
+    expect(payload.secret_updates.tts).toEqual({})
+  })
+
   it("allows explicitly clearing a legacy env-backed secret even when the echoed value is empty", () => {
     const draft = createDesktopSettingsDraft(createRuntimeConfig())
 

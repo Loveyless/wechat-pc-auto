@@ -338,6 +338,22 @@ describe("settings workspace", () => {
     expect(tencentMarkup).toContain("Tencent Secret Key")
   })
 
+  it("renders the TTS selector with macos_system and no legacy windows_system option", () => {
+    const markup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "macos_system",
+          managedApply: false,
+        })}
+      />,
+    )
+
+    expect(markup).toContain("option value=\"macos_system\"")
+    expect(markup).toContain("macOS 系统朗读")
+    expect(markup).not.toContain("option value=\"windows_system\"")
+  })
+
   it("switches CTA copy between save-only and save-and-apply modes", () => {
     const saveOnlyMarkup = renderToStaticMarkup(
       <SettingsWorkspace

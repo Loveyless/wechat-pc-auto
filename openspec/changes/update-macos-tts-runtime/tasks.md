@@ -8,7 +8,7 @@
 
 - [x] 2.1 Update `desktop-shell/src/lib/settings-types.ts` and related settings data plumbing so the editable TTS provider enum and draft model use `macos_system` plus the existing cloud providers
 - [x] 2.2 Update `desktop-shell/src/components/shell/settings-workspace.tsx` so the TTS provider selector and provider-specific branches reflect the mac-only provider set, including the built-in macOS system guidance branch and unchanged cloud-provider forms
-- [ ] 2.3 Add frontend regression coverage for the updated TTS provider selector, macOS system-provider branch, and preserved cloud-provider branches
+- [x] 2.3 Add frontend regression coverage for the updated TTS provider selector, macOS system-provider branch, and preserved cloud-provider branches
 
 ## 3. Docs and verification
 
