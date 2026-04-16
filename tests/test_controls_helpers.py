@@ -68,6 +68,17 @@ class FakeWindow:
         return FakeControl(exists=False)
 
 
+class FakeMacWindow:
+    def __init__(self, pid: int, payload: dict):
+        self.pid = pid
+        self._payload = payload
+        self.calls = []
+
+    def run_jxa(self, script: str, timeout: float = 0.0):
+        self.calls.append((script, timeout))
+        return self._payload
+
+
 class ControlsHelpersTest(unittest.TestCase):
     def setUp(self):
         controls.clear_control_cache()
@@ -125,6 +136,45 @@ class ControlsHelpersTest(unittest.TestCase):
 
         self.assertEqual(calls_after_first, 3)
         self.assertEqual(window.list_call_count, 6)
+
+    def test_find_session_list_builds_mac_session_items_from_ax_payload(self):
+        window = FakeMacWindow(
+            pid=2001,
+            payload={
+                "found": True,
+                "items": [
+                    {
+                        "chat_name": "群1",
+                        "raw_value": "张三: 你好",
+                    },
+                    {
+                        "chat_name": "好友A",
+                        "raw_value": "好友A\n李四: ok",
+                    },
+                ],
+            },
+        )
+
+        session_list = controls.find_session_list(window)
+
+        self.assertTrue(session_list.Exists(0.3))
+        self.assertEqual([item.Name for item in session_list.GetChildren()], ["群1\n张三: 你好", "好友A\n李四: ok"])
+        self.assertEqual(len(window.calls), 1)
+
+    def test_find_session_list_reuses_cached_mac_session_list(self):
+        window = FakeMacWindow(
+            pid=2002,
+            payload={
+                "found": True,
+                "items": [{"chat_name": "群1", "raw_value": "张三: hi"}],
+            },
+        )
+
+        first = controls.find_session_list(window)
+        second = controls.find_session_list(window)
+
+        self.assertIs(first, second)
+        self.assertEqual(len(window.calls), 1)
 
 
 if __name__ == "__main__":
