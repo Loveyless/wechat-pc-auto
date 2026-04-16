@@ -16,7 +16,7 @@ This change is cross-cutting because it touches startup loading, save-time valid
 - Support `openai_compatible` as a first-class translate provider with `base_url`, `model`, `api_key`, and `timeout_seconds`.
 - Persist TTS provider path selection as `tts.providers.<provider>.config_path` without losing inactive provider paths.
 - Keep compatibility reads for legacy `translate.deeplx_url(_env)`, legacy `translate.timeout_seconds`, and legacy `tts.config_path`, but write only the new structure after save.
-- Keep secrets write-only in the config API and keep file-boundary persistence plus atomic LF writes.
+- Keep direct-value secret editing in the config API while preserving file-boundary persistence plus atomic LF writes.
 - Keep the settings first screen focused on core translate/TTS controls while moving secondary TTS tuning into advanced sections.
 
 **Non-Goals:**
@@ -66,17 +66,17 @@ That keeps startup validation and `create_translator()` simple and avoids pushin
 - **Pass an untyped provider blob into `create_translator()`**: rejected because it would duplicate validation between loader and runtime creation and make test failures noisier.
 - **Model every provider through a new class hierarchy in `runtime_config.py`**: rejected because the repo currently uses compact dataclasses and this change does not need a larger object model.
 
-### Decision: Keep config API secrets write-only, and forbid `api_key_env` for `openai_compatible`
+### Decision: Return editable secret values in the config API, and keep `api_key_env` unsupported for `openai_compatible`
 
-`GET /api/config` will return provider-aware translate secret metadata only. `PUT /api/config` will accept:
-- `secret_updates.translate.deeplx.deeplx_url` with `keep/direct/env/clear`
-- `secret_updates.translate.openai_compatible.api_key` with `keep/direct/clear`
+`GET /api/config` will return provider-aware translate secret values plus compatibility metadata. `PUT /api/config` will accept:
+- `secret_updates.translate.deeplx.deeplx_url` as `{ "value": "..." }`
+- `secret_updates.translate.openai_compatible.api_key` as `{ "value": "..." }`
 
-`openai_compatible` will not support env indirection through the GUI contract. If operators want env-based behavior later, that should be a separate change with explicit UX and compatibility rules.
+`openai_compatible` will not support env indirection through the GUI contract. Legacy env-backed values may still be read for compatibility, but once the user saves from the GUI they will be converted to direct values and the old `*_env` field will be cleared.
 
 **Alternatives considered**
 - **Allow `api_key_env` immediately for symmetry**: rejected because the requirement explicitly disallows it, and pretending symmetry exists would silently expand the secret contract.
-- **Return masked raw secret strings to simplify the form**: rejected because it weakens the current write-only secret boundary.
+- **Keep secrets write-only forever**: rejected because the product direction for this settings flow is now explicit direct input, save, and later editing with value echo.
 
 ### Decision: Persist TTS path selection as a per-provider map and resolve legacy single-path reads as fallback
 
@@ -103,7 +103,7 @@ The settings workspace will keep translate provider selection, credentials, and 
 - **[Legacy runtime roots load but save into a shape older code no longer writes]** -> keep compatibility reads in `runtime_config.py`, document one-way migration, and cover old-file-startup plus new-file-save tests.
 - **[Translate provider validation diverges between startup and save]** -> route both through shared provider validators and add focused invalid-payload tests for `deeplx` and `openai_compatible`.
 - **[Settings UI grows more state branches and becomes brittle]** -> keep provider typing explicit in `settings-types.ts` and add regression tests for branch rendering and save payload generation.
-- **[Operators expect `openai_compatible` env mode because DeepLX has one]** -> document that `api_key` is direct/clear only in this change and surface it explicitly in the settings UI copy.
+- **[Operators expect `openai_compatible` env mode because DeepLX has one]** -> document that `api_key` is GUI direct-value only in this change and surface it explicitly in the settings UI copy.
 
 ## Migration Plan
 

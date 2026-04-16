@@ -166,6 +166,7 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
 
     def test_normalize_tts_provider_rejects_invalid_value(self):
         self.assertEqual(sidebar.normalize_tts_provider("DOUBAO"), "doubao")
+        self.assertEqual(sidebar.normalize_tts_provider("LESS_TTS"), "less_tts")
         self.assertEqual(sidebar.normalize_tts_provider("TENCENT_CLOUD"), "tencent_cloud")
         self.assertEqual(sidebar.normalize_tts_provider(""), "tencent_cloud")
         with self.assertRaises(RuntimeError):
@@ -221,7 +222,7 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertEqual(settings.loudness_rate, 0)
         self.assertTrue(settings.use_cache)
 
-    def test_load_doubao_tts_settings_rejects_non_wav_format(self):
+    def test_load_doubao_tts_settings_accepts_mp3_format(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = pathlib.Path(tmpdir) / "doubao_tts.json"
             config_path.write_text(
@@ -238,7 +239,28 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaises(RuntimeError):
+            settings = sidebar.load_doubao_tts_settings(str(config_path))
+
+        self.assertEqual(settings.audio_format, "mp3")
+
+    def test_load_doubao_tts_settings_rejects_unsupported_audio_format(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = pathlib.Path(tmpdir) / "doubao_tts.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "provider": "doubao",
+                        "appid": "appid-1",
+                        "access_token": "token-1",
+                        "resource_id": "seed-tts-2.0",
+                        "speaker": "zh_female_yingyujiaoxue_uranus_bigtts",
+                        "audio_format": "flac",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "doubao.audio_format"):
                 sidebar.load_doubao_tts_settings(str(config_path))
 
     def test_load_doubao_tts_settings_rejects_unsupported_sample_rate(self):
@@ -324,7 +346,7 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertEqual(settings.primary_language, 2)
         self.assertEqual(settings.segment_rate, 1)
 
-    def test_load_tencent_cloud_tts_settings_rejects_non_wav_codec(self):
+    def test_load_tencent_cloud_tts_settings_accepts_mp3_codec(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = pathlib.Path(tmpdir) / "tencent_tts.json"
             config_path.write_text(
@@ -340,7 +362,27 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with self.assertRaises(RuntimeError):
+            settings = sidebar.load_tencent_cloud_tts_settings(str(config_path))
+
+        self.assertEqual(settings.codec, "mp3")
+
+    def test_load_tencent_cloud_tts_settings_rejects_unsupported_codec(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = pathlib.Path(tmpdir) / "tencent_tts.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "provider": "tencent_cloud",
+                        "secret_id": "secret-id-1",
+                        "secret_key": "secret-key-1",
+                        "voice_type": 101001,
+                        "codec": "flac",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "tencent_cloud.codec"):
                 sidebar.load_tencent_cloud_tts_settings(str(config_path))
 
     def test_load_tencent_cloud_tts_settings_rejects_invalid_sample_rate(self):
@@ -381,6 +423,55 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 sidebar.load_tencent_cloud_tts_settings(str(config_path))
 
+    def test_load_less_tts_settings_reads_env_backed_api_key(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = pathlib.Path(tmpdir) / "less_tts.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "provider": "less_tts",
+                        "endpoint": "https://less-tts.example/v1/audio/speech",
+                        "api_key_env": "LESS_TTS_TOKEN",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "LESS_TTS_TOKEN": "less-token-1",
+                },
+                clear=False,
+            ):
+                settings = sidebar.load_less_tts_settings(str(config_path))
+
+        self.assertEqual(settings.endpoint, "https://less-tts.example/v1/audio/speech")
+        self.assertEqual(settings.api_key, "less-token-1")
+        self.assertEqual(settings.voice, "zh-CN-XiaoxiaoNeural")
+        self.assertEqual(settings.style, "general")
+
+    def test_load_less_tts_settings_requires_endpoint_and_api_key(self):
+        settings = sidebar.load_less_tts_settings_from_payload(
+            {
+                "provider": "less_tts",
+                "endpoint": "",
+                "api_key": "less-token-1",
+            }
+        )
+
+        self.assertEqual(settings.endpoint, sidebar.LESS_TTS_DEFAULT_ENDPOINT)
+
+        with self.assertRaisesRegex(RuntimeError, "less_tts api_key is required"):
+            sidebar.load_less_tts_settings_from_payload(
+                {
+                    "provider": "less_tts",
+                    "endpoint": "https://less-tts.example/v1/audio/speech",
+                    "api_key": "",
+                    "api_key_env": "",
+                }
+            )
+
     def test_build_doubao_ws_headers_and_payload(self):
         settings = sidebar.DoubaoTTSSettings(
             endpoint="wss://example.invalid/tts",
@@ -408,6 +499,25 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertEqual(payload["req_params"]["audio_params"]["loudness_rate"], 0)
         self.assertTrue(payload["req_params"]["additions"]["cache_config"]["use_cache"])
         self.assertEqual(payload["req_params"]["additions"]["cache_config"]["text_type"], 1)
+
+    def test_build_less_tts_request_payload_uses_fixed_defaults(self):
+        settings = sidebar.LessTTSSettings(
+            endpoint="https://less-tts.example/v1/audio/speech",
+            api_key="less-token-1",
+        )
+
+        payload = json.loads(sidebar.build_less_tts_request_payload(settings, "你好").decode("utf-8"))
+
+        self.assertEqual(
+            payload,
+            {
+                "input": "你好",
+                "voice": "zh-CN-XiaoxiaoNeural",
+                "speed": 1.0,
+                "pitch": "0",
+                "style": "general",
+            },
+        )
 
     def test_build_tencent_cloud_tts_request_payload(self):
         settings = sidebar.TencentCloudTTSSettings(
@@ -463,6 +573,30 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         data_offset = sidebar.find_wav_data_chunk_offset(normalized)
         self.assertEqual(data_offset, 36)
         self.assertEqual(int.from_bytes(normalized[data_offset + 4 : data_offset + 8], "little"), 4)
+
+    def test_play_audio_bytes_on_windows_dispatches_wav(self):
+        with mock.patch.object(sidebar, "play_wav_bytes_on_windows", return_value=True) as play_wav:
+            with mock.patch.object(
+                sidebar,
+                "play_mp3_bytes_on_windows",
+                return_value=True,
+            ) as play_mp3:
+                self.assertTrue(sidebar.play_audio_bytes_on_windows(b"wav-bytes", audio_format="wav"))
+
+        play_wav.assert_called_once_with(b"wav-bytes")
+        play_mp3.assert_not_called()
+
+    def test_play_audio_bytes_on_windows_dispatches_mp3(self):
+        with mock.patch.object(sidebar, "play_wav_bytes_on_windows", return_value=True) as play_wav:
+            with mock.patch.object(
+                sidebar,
+                "play_mp3_bytes_on_windows",
+                return_value=True,
+            ) as play_mp3:
+                self.assertTrue(sidebar.play_audio_bytes_on_windows(b"mp3-bytes", audio_format="mp3"))
+
+        play_wav.assert_not_called()
+        play_mp3.assert_called_once_with(b"mp3-bytes")
 
     def test_create_tts_player_doubao_uses_external_config(self):
         settings = sidebar.DoubaoTTSSettings(
@@ -596,6 +730,29 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertIn("tts unavailable backend=tencent_cloud", runtime_text)
         self.assertIn("No module named 'tencentcloud'", runtime_text)
 
+    def test_create_tts_player_less_tts_uses_external_config(self):
+        settings = sidebar.LessTTSSettings(
+            endpoint="https://less-tts.example/v1/audio/speech",
+            api_key="less-token-1",
+        )
+        with mock.patch.object(sidebar, "load_less_tts_settings", return_value=settings), mock.patch.object(
+            sidebar,
+            "resolve_config_file_path",
+            return_value="D:\\mock\\config\\less_tts.json",
+        ):
+            player, runtime_text = sidebar.create_tts_player(
+                {
+                    "provider": "less_tts",
+                    "config_path": "config/less_tts.json",
+                },
+                config_dir="D:\\mock",
+            )
+
+        self.assertIsInstance(player, sidebar.LessTTSHttpPlayer)
+        self.assertIn("backend=less_tts", runtime_text)
+        self.assertIn("format=mp3", runtime_text)
+        self.assertIn("voice=zh-CN-XiaoxiaoNeural", runtime_text)
+
     def test_check_tts_dependency_packaging_reports_missing_websockets(self):
         with mock.patch.object(
             sidebar,
@@ -619,6 +776,12 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("tts dependency check failed backend=tencent_cloud", detail)
         self.assertIn("No module named 'tencentcloud'", detail)
+
+    def test_check_tts_dependency_packaging_accepts_less_tts_stdlib_path(self):
+        ok, detail = sidebar.check_tts_dependency_packaging({"provider": "less_tts"})
+
+        self.assertTrue(ok)
+        self.assertIn("tts dependency check passed backend=less_tts", detail)
 
     def test_doubao_run_blocking_emits_failure_log(self):
         settings = sidebar.DoubaoTTSSettings(
@@ -648,19 +811,22 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             access_token="token-1",
             resource_id="seed-tts-2.0",
             speaker="zh_female_yingyujiaoxue_uranus_bigtts",
+            audio_format="mp3",
         )
         player = sidebar.DoubaoWebsocketTTS(settings)
         logs = []
         player.set_logger(logs.append)
+        played = []
 
         async def fake_synthesize(_payload):
-            return b"RIFF....WAVEfmt "
+            return b"ID3\x04\x00\x00\x00"
 
         player._synthesize_audio = fake_synthesize
-        player._play_wav_bytes = lambda _audio: True
+        player._play_audio_bytes = lambda _audio, _format: played.append((_audio, _format)) or True
 
         self.assertTrue(player._run_speak_blocking("Hello world"))
         self.assertEqual(player._last_error, "")
+        self.assertEqual(played, [(b"ID3\x04\x00\x00\x00", "mp3")])
         self.assertTrue(any("tts played backend=doubao" in line for line in logs))
 
     def test_tencent_cloud_run_blocking_emits_failure_log(self):
@@ -687,20 +853,62 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             secret_id="secret-id-1",
             secret_key="secret-key-1",
             voice_type=101001,
+            codec="mp3",
         )
         player = sidebar.TencentCloudSDKTTS(settings)
         logs = []
         player.set_logger(logs.append)
+        played = []
 
         def fake_synthesize(_payload):
-            return (b"RIFF....WAVEfmt ", "req-1", "session-1")
+            return (b"ID3\x04\x00\x00\x00", "req-1", "session-1")
 
         player._synthesize_audio = fake_synthesize
-        player._play_wav_bytes = lambda _audio: True
+        player._play_audio_bytes = lambda _audio, _format: played.append((_audio, _format)) or True
 
         self.assertTrue(player._run_speak_blocking("Hello world"))
         self.assertEqual(player._last_error, "")
+        self.assertEqual(played, [(b"ID3\x04\x00\x00\x00", "mp3")])
         self.assertTrue(any("tts played backend=tencent_cloud" in line for line in logs))
+
+    def test_less_tts_run_blocking_emits_failure_log(self):
+        settings = sidebar.LessTTSSettings(
+            endpoint="https://less-tts.example/v1/audio/speech",
+            api_key="less-token-1",
+        )
+        player = sidebar.LessTTSHttpPlayer(settings)
+        logs = []
+        player.set_logger(logs.append)
+
+        def fake_synthesize(_payload):
+            raise RuntimeError("boom")
+
+        player._synthesize_audio = fake_synthesize
+
+        self.assertFalse(player._run_speak_blocking("Hello world"))
+        self.assertIn("boom", player._last_error)
+        self.assertTrue(any("tts failed backend=less_tts" in line for line in logs))
+
+    def test_less_tts_run_blocking_emits_success_log(self):
+        settings = sidebar.LessTTSSettings(
+            endpoint="https://less-tts.example/v1/audio/speech",
+            api_key="less-token-1",
+        )
+        player = sidebar.LessTTSHttpPlayer(settings)
+        logs = []
+        player.set_logger(logs.append)
+        played = []
+
+        def fake_synthesize(_payload):
+            return b"ID3\x04\x00\x00\x00"
+
+        player._synthesize_audio = fake_synthesize
+        player._play_audio_bytes = lambda _audio, _format: played.append((_audio, _format)) or True
+
+        self.assertTrue(player._run_speak_blocking("Hello world"))
+        self.assertEqual(player._last_error, "")
+        self.assertEqual(played, [(b"ID3\x04\x00\x00\x00", "mp3")])
+        self.assertTrue(any("tts played backend=less_tts" in line for line in logs))
 
     def test_is_filtered_placeholder_matches_media_placeholders(self):
         self.assertTrue(sidebar.is_filtered_placeholder("[图片]"))

@@ -4,15 +4,13 @@ export type DesktopSecretStatus = {
   configured: boolean
   source: DesktopSecretStatusSource
   env_key?: string
+  value: string
 }
-
-export type DesktopSecretInputMode = "keep" | "direct" | "env" | "clear"
 
 export type DesktopSecretInputDraft = {
   status: DesktopSecretStatus
-  mode: DesktopSecretInputMode
   value: string
-  env_key: string
+  forceClear: boolean
 }
 
 export type DesktopTranslateProvider = "deeplx" | "openai_compatible" | "passthrough"
@@ -50,7 +48,7 @@ export type DesktopDisplayConfig = {
   on_translate_fail: "show_cn_with_reason" | "show_cn" | "show_reason"
 }
 
-export type DesktopTtsProvider = "windows_system" | "doubao" | "tencent_cloud"
+export type DesktopTtsProvider = "windows_system" | "doubao" | "less_tts" | "tencent_cloud"
 
 export type DesktopDoubaoProviderConfig = {
   config_path: string
@@ -89,9 +87,16 @@ export type DesktopTencentCloudProviderConfig = {
   secret_key: DesktopSecretStatus
 }
 
+export type DesktopLessTtsProviderConfig = {
+  config_path: string
+  endpoint: string
+  api_key: DesktopSecretStatus
+}
+
 export type DesktopTtsProvidersConfig = {
   windows_system: Record<string, never>
   doubao: DesktopDoubaoProviderConfig
+  less_tts: DesktopLessTtsProviderConfig
   tencent_cloud: DesktopTencentCloudProviderConfig
 }
 
@@ -179,6 +184,12 @@ export type DesktopTencentCloudProviderDraft = {
   secret_key: DesktopSecretInputDraft
 }
 
+export type DesktopLessTtsProviderDraft = {
+  config_path: string
+  endpoint: string
+  api_key: DesktopSecretInputDraft
+}
+
 export type DesktopSettingsDraft = {
   translate: DesktopTranslateDraft
   display: DesktopDisplayDraft
@@ -188,6 +199,7 @@ export type DesktopSettingsDraft = {
     providers: {
       windows_system: Record<string, never>
       doubao: DesktopDoubaoProviderDraft
+      less_tts: DesktopLessTtsProviderDraft
       tencent_cloud: DesktopTencentCloudProviderDraft
     }
   }
@@ -208,6 +220,9 @@ export type DesktopSecretDrafts = {
       appid: DesktopSecretInputDraft
       access_token: DesktopSecretInputDraft
     }
+    less_tts: {
+      api_key: DesktopSecretInputDraft
+    }
     tencent_cloud: {
       secret_id: DesktopSecretInputDraft
       secret_key: DesktopSecretInputDraft
@@ -215,11 +230,9 @@ export type DesktopSecretDrafts = {
   }
 }
 
-export type DesktopSecretUpdate =
-  | { mode: "keep" }
-  | { mode: "clear" }
-  | { mode: "direct"; value: string }
-  | { mode: "env"; env_key: string }
+export type DesktopSecretUpdate = {
+  value: string
+}
 
 export type DesktopSettingsSavePayload = {
   translate: {
@@ -244,26 +257,30 @@ export type DesktopSettingsSavePayload = {
     provider: DesktopTtsProvider
     providers: {
       doubao: Omit<DesktopDoubaoProviderDraft, "appid" | "access_token">
+      less_tts: Omit<DesktopLessTtsProviderDraft, "api_key">
       tencent_cloud: Omit<DesktopTencentCloudProviderDraft, "secret_id" | "secret_key">
     }
   }
   secret_updates: {
     translate: {
-      deeplx: {
-        deeplx_url: DesktopSecretUpdate
+      deeplx?: {
+        deeplx_url?: DesktopSecretUpdate
       }
-      openai_compatible: {
-        api_key: DesktopSecretUpdate
+      openai_compatible?: {
+        api_key?: DesktopSecretUpdate
       }
     }
     tts: {
-      doubao: {
-        appid: DesktopSecretUpdate
-        access_token: DesktopSecretUpdate
+      doubao?: {
+        appid?: DesktopSecretUpdate
+        access_token?: DesktopSecretUpdate
       }
-      tencent_cloud: {
-        secret_id: DesktopSecretUpdate
-        secret_key: DesktopSecretUpdate
+      less_tts?: {
+        api_key?: DesktopSecretUpdate
+      }
+      tencent_cloud?: {
+        secret_id?: DesktopSecretUpdate
+        secret_key?: DesktopSecretUpdate
       }
     }
   }

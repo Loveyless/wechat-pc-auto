@@ -34,8 +34,6 @@ type SecretEditorProps = {
   description: string
   draft: DesktopSecretInputDraft
   error?: string
-  fixedEnvKey?: string
-  allowEnv?: boolean
   onChange: (next: DesktopSecretInputDraft) => void
 }
 
@@ -135,11 +133,14 @@ function BooleanSwitch({
 }
 
 function statusLabel(draft: DesktopSecretInputDraft) {
-  if (!draft.status.configured) {
-    return "未配置"
+  if (draft.forceClear) {
+    return "待清空"
   }
   if (draft.status.source === "env") {
-    return draft.status.env_key ? `环境变量 ${draft.status.env_key}` : "环境变量"
+    return draft.status.env_key ? `旧环境变量 ${draft.status.env_key}` : "旧环境变量"
+  }
+  if (!draft.status.configured) {
+    return "未配置"
   }
   if (draft.status.source === "direct") {
     return "直接值"
@@ -153,6 +154,8 @@ function providerLabel(provider: string) {
       return "系统朗读"
     case "doubao":
       return "豆包 TTS"
+    case "less_tts":
+      return "Less TTS"
     case "tencent_cloud":
       return "腾讯云 TTS"
     case "deeplx":
@@ -178,6 +181,7 @@ export function resolveDesktopSettingsProviderSections(provider: DesktopTtsProvi
   return {
     showWindowsSystemNotice: provider === "windows_system",
     showDoubaoFields: provider === "doubao",
+    showLessTtsFields: provider === "less_tts",
     showTencentFields: provider === "tencent_cloud",
   }
 }
@@ -195,11 +199,9 @@ function SecretEditor({
   description,
   draft,
   error,
-  fixedEnvKey,
-  allowEnv = true,
   onChange,
 }: SecretEditorProps) {
-  const modeValue = !allowEnv && draft.mode === "env" ? "keep" : draft.mode
+  const hasLegacyEnv = draft.status.source === "env"
 
   return (
     <div className="min-w-0 rounded-[0.95rem] border border-border-subtle bg-workspace-canvas-strong/70 px-3 py-3">
@@ -208,49 +210,50 @@ function SecretEditor({
           <p className="text-[12px] font-semibold text-text-primary">{label}</p>
           <p className="settings-text-wrap text-[11px] leading-5 text-text-secondary">{description}</p>
         </div>
-        <span className="settings-text-wrap max-w-full rounded-full bg-surface-panel px-2.5 py-1 text-[11px] text-text-secondary">
-          {statusLabel(draft)}
-        </span>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {hasLegacyEnv ? (
+            <Button
+              onClick={() =>
+                onChange(
+                  draft.forceClear
+                    ? { ...draft, forceClear: false, value: draft.status.value }
+                    : { ...draft, forceClear: true, value: "" },
+                )
+              }
+              size="sm"
+              type="button"
+              variant={draft.forceClear ? "warning" : "outline"}
+            >
+              {draft.forceClear ? "取消清空" : "清空配置"}
+            </Button>
+          ) : null}
+          <span className="settings-text-wrap max-w-full rounded-full bg-surface-panel px-2.5 py-1 text-[11px] text-text-secondary">
+            {statusLabel(draft)}
+          </span>
+        </div>
       </div>
       <div className="mt-3 grid min-w-0 gap-2">
-        <select
+        <input
           className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
-          value={modeValue}
-          onChange={(event) => {
-            const nextMode = event.target.value as DesktopSecretInputDraft["mode"]
+          placeholder="直接输入并保存；需要彻底移除旧配置时点“清空配置”"
+          type="text"
+          value={draft.value}
+          onChange={(event) =>
             onChange({
               ...draft,
-              mode: nextMode,
-              env_key: nextMode === "env" && fixedEnvKey ? fixedEnvKey : draft.env_key,
+              value: event.target.value,
+              forceClear: false,
             })
-          }}
-        >
-          <option value="keep">保持现状</option>
-          <option value="direct">改成直接值</option>
-          {allowEnv ? <option value="env">改成环境变量</option> : null}
-          <option value="clear">清空配置</option>
-        </select>
-        {draft.mode === "direct" ? (
-          <input
-            className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
-            placeholder="输入新的 secret，后端不会回显"
-            type="password"
-            value={draft.value}
-            onChange={(event) => onChange({ ...draft, value: event.target.value })}
-          />
-        ) : null}
-        {allowEnv && draft.mode === "env" && fixedEnvKey ? (
-          <div className="settings-text-wrap rounded-lg border border-dashed border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-secondary">
-            固定环境变量：{fixedEnvKey}
+          }
+        />
+        {draft.forceClear ? (
+          <div className="settings-text-wrap rounded-lg border border-state-danger/25 bg-state-danger-soft px-3 py-2 text-sm leading-6 text-state-danger">
+            已标记为清空；这次保存会删除直接值，并移除旧环境变量引用。
           </div>
-        ) : null}
-        {allowEnv && draft.mode === "env" && !fixedEnvKey ? (
-          <input
-            className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
-            placeholder="输入环境变量名"
-            value={draft.env_key}
-            onChange={(event) => onChange({ ...draft, env_key: event.target.value })}
-          />
+        ) : hasLegacyEnv ? (
+          <div className="settings-text-wrap rounded-lg border border-state-danger/25 bg-state-danger-soft px-3 py-2 text-sm leading-6 text-state-danger">
+            当前值来自旧环境变量配置；输入新值会改成直接值，点击“清空配置”会移除旧环境变量引用。
+          </div>
         ) : null}
       </div>
       {error ? <p className="mt-2 text-[11px] text-state-danger">{error}</p> : null}
@@ -337,7 +340,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
         <div className="flex flex-col gap-3">
           <Section
             title="Translate"
-            detail="翻译是持久化默认值。只渲染当前 provider 的字段，secret 仍然是 write-only。"
+            detail="翻译是持久化默认值。只渲染当前 provider 的字段；secret 会直接回显当前值，旧 `*_env` 配置只有在你输入新值或点“清空配置”时才会改写。"
           >
             <div className="settings-field-grid grid gap-3">
               <Field label="翻译开关" description="控制启动默认值" error={fieldError("translate.enabled")}>
@@ -442,10 +445,9 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 </Field>
                 <SecretEditor
                   label="DeepLX URL"
-                  description="仅 `deeplx` 生效；env 模式固定使用 `DEEPLX_URL`，GUI 不会写 `.env.local`。"
+                  description="仅 `deeplx` 生效；直接输入 URL，保存后直接写入配置。"
                   draft={draft.translate.providers.deeplx.deeplx_url}
                   error={fieldError("translate.providers.deeplx.deeplx_url")}
-                  fixedEnvKey="DEEPLX_URL"
                   onChange={(next) =>
                     updateSecretDrafts((current) => ({
                       ...current,
@@ -547,10 +549,9 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 </Field>
                 <SecretEditor
                   label="API Key"
-                  description="只允许直接值或清空；后端不会回显，也不支持 env 模式。"
+                  description="直接输入并保存；删除内容后保存会清空当前值。"
                   draft={draft.translate.providers.openai_compatible.api_key}
                   error={fieldError("translate.providers.openai_compatible.api_key")}
-                  allowEnv={false}
                   onChange={(next) =>
                     updateSecretDrafts((current) => ({
                       ...current,
@@ -766,7 +767,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 </div>
                 <SecretEditor
                   label="豆包 App ID"
-                  description="支持直接值或 env_key。"
+                  description="直接输入并保存；下次会回显当前值。"
                   draft={draft.tts.providers.doubao.appid}
                   error={fieldError("tts.providers.doubao.appid")}
                   onChange={(next) =>
@@ -784,7 +785,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 />
                 <SecretEditor
                   label="豆包 Access Token"
-                  description="支持直接值或 env_key。"
+                  description="直接输入并保存；下次会回显当前值。"
                   draft={draft.tts.providers.doubao.access_token}
                   error={fieldError("tts.providers.doubao.access_token")}
                   onChange={(next) =>
@@ -807,7 +808,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                   <div className="settings-field-grid grid gap-3">
                     <Field
                       label="Audio Format"
-                      description="当前只支持 wav"
+                      description="当前支持 wav / mp3"
                       error={fieldError("tts.providers.doubao.audio_format")}
                     >
                       <select
@@ -830,6 +831,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                         }
                       >
                         <option value="wav">wav</option>
+                        <option value="mp3">mp3</option>
                       </select>
                     </Field>
                     <Field
@@ -1007,6 +1009,85 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
               </>
             ) : null}
 
+            {providerSections.showLessTtsFields ? (
+              <>
+                <div className="settings-field-grid grid gap-3">
+                  <Field
+                    label="Config Path"
+                    description="tts.providers.less_tts.config_path"
+                    error={fieldError("tts.providers.less_tts.config_path")}
+                  >
+                    <input
+                      className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
+                      value={draft.tts.providers.less_tts.config_path}
+                      onChange={(event) =>
+                        updateDraft((current) => ({
+                          ...current,
+                          tts: {
+                            ...current.tts,
+                            providers: {
+                              ...current.tts.providers,
+                              less_tts: {
+                                ...current.tts.providers.less_tts,
+                                config_path: event.target.value,
+                              },
+                            },
+                          },
+                        }))
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label="Endpoint"
+                    description="Less TTS HTTP endpoint"
+                    error={fieldError("tts.providers.less_tts.endpoint")}
+                  >
+                    <input
+                      className="rounded-lg border border-border-strong bg-surface-panel px-3 py-2 text-sm text-text-primary outline-none focus:border-state-progress"
+                      value={draft.tts.providers.less_tts.endpoint}
+                      onChange={(event) =>
+                        updateDraft((current) => ({
+                          ...current,
+                          tts: {
+                            ...current.tts,
+                            providers: {
+                              ...current.tts.providers,
+                              less_tts: {
+                                ...current.tts.providers.less_tts,
+                                endpoint: event.target.value,
+                              },
+                            },
+                          },
+                        }))
+                      }
+                    />
+                  </Field>
+                </div>
+                <SecretEditor
+                  label="API Key"
+                  description="直接输入 API Key；下次会回显当前值。其余 voice/speed/pitch/style 先固定走仓库默认值。"
+                  draft={draft.tts.providers.less_tts.api_key}
+                  error={fieldError("tts.providers.less_tts.api_key")}
+                  onChange={(next) =>
+                    updateSecretDrafts((current) => ({
+                      ...current,
+                      tts: {
+                        ...current.tts,
+                        less_tts: {
+                          ...current.tts.less_tts,
+                          api_key: next,
+                        },
+                      },
+                    }))
+                  }
+                />
+                <div className="rounded-[0.95rem] border border-dashed border-border-strong bg-workspace-canvas-strong/75 px-3 py-3 text-[12px] leading-6 text-text-secondary">
+                  `less_tts` 当前固定走 HTTP `audio/mpeg` / MP3 播放链。设置页只开放
+                  `endpoint` 和 `api_key`，其余参数保持仓库默认值。
+                </div>
+              </>
+            ) : null}
+
             {providerSections.showTencentFields ? (
               <>
                 <div className="settings-field-grid grid gap-3">
@@ -1117,7 +1198,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 </div>
                 <SecretEditor
                   label="Tencent Secret ID"
-                  description="支持直接值或 env_key。"
+                  description="直接输入并保存；下次会回显当前值。"
                   draft={draft.tts.providers.tencent_cloud.secret_id}
                   error={fieldError("tts.providers.tencent_cloud.secret_id")}
                   onChange={(next) =>
@@ -1135,7 +1216,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 />
                 <SecretEditor
                   label="Tencent Secret Key"
-                  description="支持直接值或 env_key。"
+                  description="直接输入并保存；下次会回显当前值。"
                   draft={draft.tts.providers.tencent_cloud.secret_key}
                   error={fieldError("tts.providers.tencent_cloud.secret_key")}
                   onChange={(next) =>
@@ -1158,7 +1239,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                   <div className="settings-field-grid grid gap-3">
                     <Field
                       label="Codec"
-                      description="当前只支持 wav"
+                      description="当前支持 wav / mp3"
                       error={fieldError("tts.providers.tencent_cloud.codec")}
                     >
                       <select
@@ -1181,6 +1262,7 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                         }
                       >
                         <option value="wav">wav</option>
+                        <option value="mp3">mp3</option>
                       </select>
                     </Field>
                     <Field

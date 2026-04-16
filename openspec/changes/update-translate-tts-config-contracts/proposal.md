@@ -5,9 +5,9 @@ The desktop settings flow already owns persisted config editing, but the transla
 ## What Changes
 
 - Modify the runtime config schema to read provider-aware translate branches and per-provider TTS `config_path` maps while keeping backward-compatible reads for legacy `translate.deeplx_url(_env)` and legacy `tts.config_path`.
-- Modify the config API contract so `GET /api/config` returns provider-aware translate/TTS DTOs and `PUT /api/config` accepts `secret_updates.translate.<provider>` plus new TTS path-map writes without leaking secrets.
+- Modify the config API contract so `GET /api/config` returns provider-aware translate/TTS DTOs with current editable secret values and `PUT /api/config` accepts `secret_updates.translate.<provider>` plus new TTS path-map writes.
 - Modify the desktop settings workspace so translate provider branches cover `deeplx`, `openai_compatible`, and `passthrough`, while the first screen keeps only core TTS fields and pushes secondary tuning into advanced sections.
-- Add regression coverage and docs updates for the new config shape, write-only secret handling, compatibility reads, and provider-specific validation rules.
+- Add regression coverage and docs updates for the new config shape, direct-input secret handling, compatibility reads, and provider-specific validation rules.
 
 ## Capabilities
 
@@ -16,7 +16,7 @@ The desktop settings flow already owns persisted config editing, but the transla
 
 ### Modified Capabilities
 - `desktop-runtime-config`: the main runtime schema now reads provider-aware translate config and per-provider TTS path maps while preserving legacy read compatibility.
-- `desktop-runtime-config-api`: the config DTO and save payload now expose provider-aware translate branches, write-only translate provider secret updates, and per-provider TTS `config_path` persistence.
+- `desktop-runtime-config-api`: the config DTO and save payload now expose provider-aware translate branches, direct-value translate provider secret updates, and per-provider TTS `config_path` persistence.
 - `desktop-shell-settings`: the settings workspace now renders translate provider branches and hides secondary TTS tuning behind advanced sections instead of treating all settings as first-screen peers.
 
 ## Impact

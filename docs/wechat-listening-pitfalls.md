@@ -227,8 +227,7 @@
   - `listen.interval_seconds >= 0.2`
   - `listen.load_retry_seconds > 0`
   - `translate.providers.deeplx.timeout_seconds > 0` / `translate.providers.openai_compatible.timeout_seconds > 0`
-  - `translate.enabled=true and provider=deeplx` 时必须存在 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env`
-  - `translate.providers.deeplx.deeplx_url_env` 只允许 `DEEPLX_URL`
+  - `translate.enabled=true and provider=deeplx` 时必须存在 `translate.providers.deeplx.deeplx_url`
   - `translate.enabled=true and provider=openai_compatible` 时必须存在 `translate.providers.openai_compatible.base_url`、`model`、`api_key`
 
 ### 18) 监听体感慢，不一定是 UIA 本身
@@ -308,12 +307,15 @@
 - 当前手动朗读入口只在“原文关闭 + 正文可判定为英文 + 非 Loading/失败文本”时启用。
 - 当前正文支持“轻点朗读”：按下后小位移松开会播放；若形成拖拽选区，或触发双击/三击选词，则不会播放。
 - 正文点击范围只覆盖正文字符，不包括时间、发送人和空白区。
-- TTS provider 现在走独立配置：`listener.json` 只负责选择 `tts.provider`，provider 私有参数拆到独立 JSON（例如 `config/doubao_tts.json`、`config/tencent_tts.json`）。
+- TTS provider 现在走独立配置：`listener.json` 只负责选择 `tts.provider`，provider 私有参数拆到独立 JSON（例如 `config/doubao_tts.json`、`config/less_tts.json`、`config/tencent_tts.json`）。
 - 仓库跟踪的默认 provider 现在回到 `windows_system`；目标不是“偏爱系统语音”，而是保证 fresh install 无密钥也能先进入桌面壳和设置页。
-- 仓库跟踪的 provider JSON 只应保留安全默认值；豆包 `appid/access_token`、腾讯云 `secret_id/secret_key` 这类真实凭证应留在 `.env.local` 或 Tauri 运行时目录，不应写回仓库文件。
+- 仓库跟踪的 provider JSON 只应保留安全默认值；真实凭证通过设置页或当前 runtime root 里的 provider 配置直接写入，不应把仓库样例改成带真值的提交。
 - `tts.provider=windows_system` 时，仍走 Windows 系统 `System.Speech`，默认优先选 `Microsoft Zira Desktop`，不存在时再回退到其他英文 voice。
-- `tts.provider=doubao` 时，走豆包单向流式 WebSocket；当前播放链路要求 provider 配置里的 `audio_format=wav`，否则启动阶段直接报错。
-- `tts.provider=tencent_cloud` 时，走腾讯云基础语音合成 `TextToVoice`（官方 Python SDK）；当前播放链路同样只允许 `codec=wav`，不会顺手放开 `mp3/pcm`。
+- `tts.provider=doubao` 时，走豆包单向流式 WebSocket；当前播放链路支持 `audio_format=wav/mp3`，其中 `wav` 仍走头部修正 + `winsound`，`mp3` 走 Windows MCI 播放。
+- `tts.provider=less_tts` 时，走 HTTP `audio/mpeg` 合成接口；当前固定按 MP3 播放，不额外引入第三方 Python 依赖。
+- `tts.provider=tencent_cloud` 时，走腾讯云基础语音合成 `TextToVoice`（官方 Python SDK）；当前播放链路支持 `codec=wav/mp3`，其中 `pcm` 仍未放开。
+- `less_tts` 配置当前只暴露 `endpoint` / `api_key`；`voice/speed/pitch/style` 固定走仓库默认值，不在设置页展开。
+- 设置页里的 secret 现在统一是“直接输入、直接保存、下次回显”；如果读到的是旧 `*_env` 配置，不会因为保存别的字段被顺手改写，只有在你输入新值或点击“清空配置”时才会落盘。
 - 腾讯云默认音色当前固定成 `WeJames`，也就是 `VoiceType=501008`；`501008` 不是 `sample_rate`，采样率仍只接受 `8000 / 16000 / 24000`。
 - 豆包配置当前额外支持 `sample_rate` / `speech_rate` / `loudness_rate` / `use_cache`。
 - 腾讯云配置当前额外支持 `voice_type` / `sample_rate` / `speed` / `volume` / `primary_language` / `segment_rate` / `emotion_*` / `request_timeout_seconds`。
@@ -346,7 +348,7 @@
 - 旧逻辑只在启动时记录 `tts configured ...`。
 - 运行期失败原因只写进 TTS 对象内部 `_last_error`，UI 和日志文件都看不到。
 - 正文点击与自动朗读的触发点原先也没有补充运行期日志。
-- 豆包单向流式返回的 WAV 可能把 `RIFF` / `data` chunk size 写成 `0xFFFFFFFF` 占位值；这种音频有时能被宽松播放器容忍，但 `winsound` 这类 Windows 播放路径兼容性更差，表现成“合成成功但不出声”。
+- 豆包单向流式返回的 WAV 可能把 `RIFF` / `data` chunk size 写成 `0xFFFFFFFF` 占位值；这种音频有时能被宽松播放器容忍，但 `winsound` 这类 Windows WAV 播放路径兼容性更差，表现成“合成成功但不出声”。
 
 处理：
 - TTS runtime 日志统一回流到主进程事件队列，再写入状态栏与 `logging.file`。
@@ -357,7 +359,8 @@
   - `tts played`
   - `tts failed`
 - 日志只记录 provider、endpoint host、字节数、文本预览等排障必需信息，不记录豆包密钥。
-- 豆包音频进入 Windows 播放器前，必须先按实际字节数重写 `RIFF` / `data` chunk size，再交给 `winsound`；不能把流式占位头直接落盘播放。
+- 豆包 `wav` 音频进入 Windows 播放器前，必须先按实际字节数重写 `RIFF` / `data` chunk size，再交给 `winsound`；不能把流式占位头直接落盘播放。
+- `mp3` 播放链不走 `winsound`，而是落临时文件后交给 Windows MCI；这条链路不需要 WAV 头修正，但仍要保证合成结果是完整 MP3。
 - 这类问题的判断标准不是“豆包有没有回包”，而是“回包是不是标准 WAV”；曾复现过未修正头部时被标准库解析成异常超长时长，修正后才恢复正常播放。
 
 ### 25) 打包后自动朗读被触发了，但完全没声音
@@ -470,9 +473,9 @@
   - `translate.enabled=false`
   - `tts.provider=windows_system`
 - 需要 DeepLX 或云 TTS 时，再通过设置页或运行时配置补下面这些条件：
-  - `translate.enabled=true and provider=deeplx` 时，显式提供 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env`
+  - `translate.enabled=true and provider=deeplx` 时，显式提供 `translate.providers.deeplx.deeplx_url`
   - `translate.enabled=true and provider=openai_compatible` 时，补 `translate.providers.openai_compatible.base_url/model/api_key`
-  - `tts.provider=doubao` 或 `tts.provider=tencent_cloud` 时，补对应 `tts.providers.<provider>.config_path`、provider 私有配置和密钥
+  - `tts.provider=doubao` / `less_tts` / `tencent_cloud` 时，补对应 `tts.providers.<provider>.config_path`、provider 私有配置和密钥
 - 验 fresh install 时，必须隔离一个干净 runtime root；已有 `%LOCALAPPDATA%\com.wechatauto.shell\config\listener.json` 不会被 installer 覆盖
 - 真正的最小验证不是“exe 打开了”，而是：
   - `http://127.0.0.1:8765/healthz` 返回 `{"status":"ok"}`
@@ -627,19 +630,18 @@
   - 误以为点了“保存”就该立刻影响当前 backend 运行态
 
 根因：
-- 当前设置页走的是 `GET /api/config` + `PUT /api/config` 安全 DTO 契约，不是原始文件直出。
+- 当前设置页走的是 `GET /api/config` + `PUT /api/config` 可编辑 DTO 契约，不是原始文件直出。
 - backend 当前仍在启动时加载配置；保存负责落盘，不负责热更新现有 Python runtime。
 
 处理：
-- `/api/config` 返回 secret 只允许暴露 `configured/source/env_key` 元数据；`deeplx_url`、`openai_compatible.api_key`、豆包 `appid/access_token`、腾讯云 `secret_id/secret_key` 都不允许回显原值。
+- `/api/config` 现在会直接回显设置页需要继续编辑的当前值；如果值来自旧 `*_env` 配置，DTO 仍会标出 `source=env` / `env_key`，但这只是兼容读。
 - `PUT /api/config` 必须继续遵守文件边界：
   - shared 字段和 `translate.providers` / `tts.providers.<provider>.config_path` 写回 `listener.json`
   - provider 私有字段写回 `tts.providers.<provider>.config_path` 指向的独立 JSON
   - 未知字段必须保留，不能因为 GUI 保存被顺手抹掉
-- secret 更新只能走 write-only 模式：`keep/direct/env/clear`；不要把“读取旧 secret 再原样发回去”这种伪方案塞回主路径。
-- GUI 的 `env` 模式只会写配置里的 `*_env` 字段，不会回写 `.env.local` 真值。
-- DeepLX 不再兼容隐式 env fallback；现有配置必须显式写 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env=DEEPLX_URL`，自定义 env key 不再受支持。
-- `translate.providers.openai_compatible.api_key` 不支持 `env` 模式，也没有 `api_key_env` 兼容字段。
+- secret 更新现在统一走单一直接值语义：只对真正改过的输入框发送更新；非空就写入，空串就清空，并顺手清掉旧 `*_env` 字段。
+- GUI 不再支持 `keep/direct/env/clear` 这套模式，也不会再依赖 `.env.local` 去完成设置页编辑。
+- DeepLX / OpenAI Compatible / 豆包 / Less TTS / 腾讯云 这些字段在设置页里都是同一套“直接输入、保存、回显”的行为。
 - `display.tts_auto_read_active_chat` 是持久化默认值；桌面壳顶部“朗读开/关”仍然只改当前 runtime，不会反写配置文件。
 
 ### 31) “保存并应用”只能重启当前壳自己拥有的 backend
@@ -696,7 +698,7 @@ npm run tauri build
 更具体的产物路径和验收边界看 `docs/desktop-shell-build.md`。
 
 ### 接入 DeepLX
-在 `config/listener.json` 设置 `translate.enabled=true`、`translate.provider=deeplx`，并显式配置 `translate.providers.deeplx.deeplx_url` 或 `translate.providers.deeplx.deeplx_url_env`。
+在 `config/listener.json` 设置 `translate.enabled=true`、`translate.provider=deeplx`，并显式配置 `translate.providers.deeplx.deeplx_url`。
 
 ### 仅在必要时开启强刷新（会抢焦点）
 在 `config/listener.json` 设置 `listen.focus_refresh=true`。

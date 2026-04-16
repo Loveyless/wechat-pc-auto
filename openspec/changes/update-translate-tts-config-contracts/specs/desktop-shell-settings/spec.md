@@ -9,18 +9,18 @@ The system SHALL provide a settings entry in the desktop shell that loads the ru
 
 #### Scenario: User selects the DeepLX provider
 - **WHEN** `translate.provider` is `deeplx`
-- **THEN** the settings workspace renders the DeepLX URL secret editor and provider timeout field without exposing raw secret values
+- **THEN** the settings workspace renders the DeepLX URL direct-input editor and provider timeout field, prefilled with the current editable value
 
 #### Scenario: User selects the OpenAI-compatible provider
 - **WHEN** `translate.provider` is `openai_compatible`
-- **THEN** the settings workspace renders `base_url`, `model`, `api_key`, and timeout controls for that provider and treats `api_key` as direct-value-only write-only input
+- **THEN** the settings workspace renders `base_url`, `model`, `api_key`, and timeout controls for that provider and treats `api_key` as a direct-input field that echoes the current editable value
 
 #### Scenario: Save succeeds on a save-only connection
 - **WHEN** the frontend saves a valid configuration while apply is unavailable
 - **THEN** the shell shows that the config is saved and that backend restart is still required before the new settings take effect
 
 ### Requirement: Desktop shell settings SHALL cover all supported TTS providers
-The system SHALL render provider-specific form branches for every TTS provider currently supported by the backend runtime: `windows_system`, `doubao`, and `tencent_cloud`. The UI SHALL NOT allow selecting a provider that lacks a corresponding editable form branch.
+The system SHALL render provider-specific form branches for every TTS provider currently supported by the backend runtime: `windows_system`, `doubao`, `less_tts`, and `tencent_cloud`. The UI SHALL NOT allow selecting a provider that lacks a corresponding editable form branch.
 
 #### Scenario: User selects the Windows system provider
 - **WHEN** `tts.provider` is `windows_system`
@@ -28,11 +28,15 @@ The system SHALL render provider-specific form branches for every TTS provider c
 
 #### Scenario: User selects the Doubao provider
 - **WHEN** `tts.provider` is `doubao`
-- **THEN** the settings workspace renders the Doubao-specific fields, including write-only secret inputs and visible non-secret provider settings
+- **THEN** the settings workspace renders the Doubao-specific fields, including direct-input secret editors that echo the current value and visible non-secret provider settings
+
+#### Scenario: User selects the Less TTS provider
+- **WHEN** `tts.provider` is `less_tts`
+- **THEN** the settings workspace renders the Less-TTS-specific fields, including a direct-input API key editor that echoes the current value and visible non-secret endpoint settings
 
 #### Scenario: User selects the Tencent Cloud provider
 - **WHEN** `tts.provider` is `tencent_cloud`
-- **THEN** the settings workspace renders the Tencent-Cloud-specific fields, including write-only secret inputs and visible non-secret provider settings
+- **THEN** the settings workspace renders the Tencent-Cloud-specific fields, including direct-input secret editors that echo the current value and visible non-secret provider settings
 
 ## ADDED Requirements
 

@@ -1,14 +1,14 @@
 ## Context
 
 The supported desktop runtime still loads configuration once at backend startup through `load_runtime_config()` and `load_backend_settings()`, while the current local API exposes only a partial `/api/config` snapshot. The desktop shell does not consume that snapshot, has no settings entry, and only mutates the runtime-only `tts-auto-read` toggle.  
-At the same time, runtime configuration is intentionally split across `listener.json` and provider-private JSON files, secrets may come from direct values or `*_env` indirection, and the Tauri shell already owns managed backend bootstrap plus health waiting. Any GUI configuration flow that ignores those boundaries will either leak secrets, overwrite unknown fields, or kill the wrong backend process.
+At the same time, runtime configuration is intentionally split across `listener.json` and provider-private JSON files, older runtime roots may still hold secrets through `*_env` indirection, and the Tauri shell already owns managed backend bootstrap plus health waiting. Any GUI configuration flow that ignores those boundaries will either overwrite unknown fields, hide the real editable value, or kill the wrong backend process.
 
 ## Goals / Non-Goals
 
 **Goals:**
 - Expose a complete, safe configuration DTO for the supported editable fields in the desktop runtime path.
 - Keep `listener.json` and provider-private config files as separate persistence boundaries while preserving unknown fields and writing JSON atomically with LF.
-- Support write-only secret updates and safe read masking so the frontend can show configuration state without receiving raw secrets back.
+- Support direct-input secret editing with current-value echo so the frontend can show and resave the actual editable value.
 - Add a desktop-shell settings experience that covers supported translate, display, and TTS provider configuration and clearly distinguishes runtime-only toggles from persisted defaults.
 - Allow “save and apply” only when the shell owns the backend sidecar and can restart it without touching external or reused backends.
 
@@ -28,7 +28,7 @@ Configuration read/write logic will move behind a dedicated runtime-config domai
 - request parsing and validation for config save requests
 - listener/provider file resolution
 - unknown-field preservation and atomic JSON writes
-- write-only secret handling metadata
+- secret status metadata plus current editable values
 
 `load_runtime_config()` remains the startup schema owner for runtime behaviour, but the new domain layer will reuse the same validation rules and provider helpers so save-time validation stays fail-fast and consistent with startup behaviour.
 
@@ -36,9 +36,9 @@ Configuration read/write logic will move behind a dedicated runtime-config domai
 - **Keep save logic inside `backend_runtime.py`**: rejected because it would turn an already cross-cutting orchestration file into a config serializer, validator, and persistence bucket.
 - **Let the frontend write JSON files directly through Tauri FS APIs**: rejected because it would duplicate schema logic, bypass Python-side validation, and make non-Tauri/dev flows inconsistent.
 
-### Decision: Model config exchange as a safe DTO plus write-only secret patch semantics
+### Decision: Model config exchange as a safe DTO plus direct-value secret patch semantics
 
-`GET /api/config` will return a complete editable DTO for supported fields, but secret-like values will be represented only as metadata such as `configured`, `source`, and optional `envKey`. `PUT /api/config` will accept full non-secret settings plus write-only secret updates for direct values or env indirection.  
+`GET /api/config` will return a complete editable DTO for supported fields. Secret-like values will include the current editable value, plus metadata such as `configured`, `source`, and optional `envKey` when the value still comes from legacy env-backed config. `PUT /api/config` will accept full non-secret settings plus direct-value secret payloads in the form `{ "value": "..." }`.
 Persistence will keep two boundaries:
 - `listener.json` for shared runtime fields and provider selection
 - provider-private JSON for provider-specific TTS fields
@@ -46,7 +46,7 @@ Persistence will keep two boundaries:
 Unknown fields from both files will be preserved by loading current payloads, overlaying supported edited fields, and writing the merged result atomically.
 
 **Alternatives considered**
-- **Return raw secrets back to the frontend after save**: rejected because it creates unnecessary exposure and breaks the plan’s write-only secret constraint.
+- **Keep secrets write-only and force users to re-enter them every time**: rejected because the settings page is now explicitly optimized for direct input, save, and later editing in the same UI flow.
 - **Store all settings in one normalized API-only schema and regenerate files**: rejected because it would destroy current compatibility and make rollback harder.
 
 ### Decision: Keep apply as a two-phase save-then-restart flow owned by the shell, not the backend
@@ -74,7 +74,7 @@ The header auto-read toggle will stay a runtime action backed by the existing `/
 
 ## Risks / Trade-offs
 
-- **[Secret metadata or masking is inconsistent across providers]** -> Reuse provider-specific helpers and add backend tests for direct secret, env-backed secret, and write-only update paths.
+- **[Secret echo or legacy-env conversion is inconsistent across providers]** -> Reuse provider-specific helpers and add backend tests for direct secret, env-backed secret, and save-time conversion paths.
 - **[Unknown fields or config path semantics regress]** -> Always merge against current file payloads resolved from the runtime root and cover listener/provider file writes with focused tests.
 - **[Managed apply restarts the wrong backend]** -> Gate restart behind Tauri-owned marker validation and expose unmanaged connections as save-only.
 - **[Frontend state becomes muddled between persisted config and runtime state]** -> Keep settings DTO state isolated from `useDesktopShell()` runtime toggles and add tests for dirty-state and CTA branching.

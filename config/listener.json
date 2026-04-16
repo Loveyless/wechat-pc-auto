@@ -13,7 +13,7 @@
     "target_lang": "EN",
     "providers": {
       "deeplx": {
-        "deeplx_url_env": "DEEPLX_URL",
+        "deeplx_url": "",
         "timeout_seconds": 8.0
       },
       "openai_compatible": {
@@ -35,6 +35,9 @@
     "providers": {
       "doubao": {
         "config_path": "config/doubao_tts.json"
+      },
+      "less_tts": {
+        "config_path": "config/less_tts.json"
       },
       "tencent_cloud": {
         "config_path": "config/tencent_tts.json"

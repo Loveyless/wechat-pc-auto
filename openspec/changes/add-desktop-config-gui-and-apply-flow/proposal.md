@@ -6,15 +6,15 @@ That gap is already causing a correctness problem: a settings page without a bac
 ## What Changes
 
 - Add a local runtime-config API that exposes a complete, safe, editable DTO for the supported desktop-shell settings, validates writes, preserves unknown fields, and writes runtime config files atomically.
-- Add a desktop-shell settings entry and settings screen for supported translation, display, and TTS configuration, including all currently supported TTS providers: `windows_system`, `doubao`, and `tencent_cloud`.
+- Add a desktop-shell settings entry and settings screen for supported translation, display, and TTS configuration, including all currently supported TTS providers: `windows_system`, `doubao`, `less_tts`, and `tencent_cloud`.
 - Add explicit save/apply semantics: unmanaged or development connections stay on `save only + manual restart required`, while Tauri-managed connections may restart only the backend sidecar owned by the current shell instance after saving.
 - Keep runtime-only toggles separate from persisted defaults so the header auto-read toggle does not silently rewrite the configured startup default.
-- Add regression coverage and documentation updates for config DTO masking, write-only secret handling, provider-specific forms, managed apply gating, and the new operator workflow.
+- Add regression coverage and documentation updates for config DTO direct-value echo, direct-input secret handling, provider-specific forms, managed apply gating, and the new operator workflow.
 
 ## Capabilities
 
 ### New Capabilities
-- `desktop-runtime-config-api`: safe read, validate, and save contracts for editable backend runtime configuration, including masked secret metadata and atomic persistence boundaries.
+- `desktop-runtime-config-api`: safe read, validate, and save contracts for editable backend runtime configuration, including direct-value secret echo for continued editing and atomic persistence boundaries.
 - `desktop-shell-settings`: desktop-shell settings entry, editable forms, save feedback, and apply-state messaging for supported translate/display/TTS configuration.
 - `desktop-managed-backend-apply`: managed backend restart flow that only applies to a shell-owned sidecar and reconnects the desktop shell after a successful save.
 

@@ -23,6 +23,9 @@ if __package__:
         DOUBAO_TTS_DEFAULT_LOUDNESS_RATE,
         DOUBAO_TTS_DEFAULT_SAMPLE_RATE,
         DOUBAO_TTS_DEFAULT_SPEECH_RATE,
+        LESS_TTS_DEFAULT_API_KEY_ENV_KEY,
+        LESS_TTS_DEFAULT_CONFIG_PATH,
+        LESS_TTS_DEFAULT_ENDPOINT,
         SUPPORTED_TTS_PROVIDERS,
         TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH,
         TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT,
@@ -36,6 +39,7 @@ if __package__:
         TENCENT_CLOUD_TTS_DEFAULT_SPEED,
         TENCENT_CLOUD_TTS_DEFAULT_VOLUME,
         load_doubao_tts_settings_from_payload,
+        load_less_tts_settings_from_payload,
         load_tencent_cloud_tts_settings_from_payload,
         normalize_tts_provider,
         resolve_config_file_path,
@@ -59,6 +63,9 @@ else:
         DOUBAO_TTS_DEFAULT_LOUDNESS_RATE,
         DOUBAO_TTS_DEFAULT_SAMPLE_RATE,
         DOUBAO_TTS_DEFAULT_SPEECH_RATE,
+        LESS_TTS_DEFAULT_API_KEY_ENV_KEY,
+        LESS_TTS_DEFAULT_CONFIG_PATH,
+        LESS_TTS_DEFAULT_ENDPOINT,
         SUPPORTED_TTS_PROVIDERS,
         TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH,
         TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT,
@@ -72,6 +79,7 @@ else:
         TENCENT_CLOUD_TTS_DEFAULT_SPEED,
         TENCENT_CLOUD_TTS_DEFAULT_VOLUME,
         load_doubao_tts_settings_from_payload,
+        load_less_tts_settings_from_payload,
         load_tencent_cloud_tts_settings_from_payload,
         normalize_tts_provider,
         resolve_config_file_path,
@@ -104,13 +112,26 @@ def build_config_snapshot(config_path: str) -> dict[str, Any]:
         OPENAI_COMPATIBLE_PROVIDER,
     )
 
-    doubao_path, doubao_resolved_path = _provider_config_paths("doubao", tts_cfg, runtime_config.config_dir)
+    doubao_path, doubao_resolved_path = _provider_config_paths(
+        "doubao",
+        tts_cfg,
+        runtime_config.config_dir,
+    )
+    less_tts_path, less_tts_resolved_path = _provider_config_paths(
+        "less_tts",
+        tts_cfg,
+        runtime_config.config_dir,
+    )
     tencent_path, tencent_resolved_path = _provider_config_paths(
         "tencent_cloud",
         tts_cfg,
         runtime_config.config_dir,
     )
     doubao_raw = _load_optional_json(doubao_resolved_path, _default_doubao_provider_payload())
+    less_tts_raw = _load_optional_json(
+        less_tts_resolved_path,
+        _default_less_tts_provider_payload(),
+    )
     tencent_raw = _load_optional_json(tencent_resolved_path, _default_tencent_provider_payload())
 
     return {
@@ -139,6 +160,7 @@ def build_config_snapshot(config_path: str) -> dict[str, Any]:
             "providers": {
                 "windows_system": {},
                 "doubao": _build_doubao_provider_snapshot(doubao_raw, doubao_path),
+                "less_tts": _build_less_tts_provider_snapshot(less_tts_raw, less_tts_path),
                 "tencent_cloud": _build_tencent_provider_snapshot(tencent_raw, tencent_path),
             },
         },
@@ -263,6 +285,7 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
     previous_provider_raw: dict[str, Any] | None = None
     provider_payloads = _read_section(tts_payload, "providers")
     next_doubao_cfg = _read_section(next_tts_providers, "doubao")
+    next_less_tts_cfg = _read_section(next_tts_providers, "less_tts")
     next_tencent_cfg = _read_section(next_tts_providers, "tencent_cloud")
 
     if selected_provider == "doubao":
@@ -293,6 +316,34 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
         except RuntimeError as exc:
             raise _wrap_provider_validation_error("doubao", exc) from exc
         next_doubao_cfg["config_path"] = provider_path
+    elif selected_provider == "less_tts":
+        current_less_tts_path, _ = _provider_config_paths(
+            "less_tts",
+            _read_section(listener_raw, "tts"),
+            config_dir,
+        )
+        provider_path = _read_string(
+            _read_section(provider_payloads, "less_tts"),
+            "config_path",
+            current_less_tts_path,
+            field_path="tts.providers.less_tts.config_path",
+        )
+        provider_path = provider_path.strip() or LESS_TTS_DEFAULT_CONFIG_PATH
+        provider_resolved_path = resolve_config_file_path(provider_path, base_dir=config_dir)
+        previous_provider_raw = _load_optional_json(
+            provider_resolved_path,
+            _default_less_tts_provider_payload(),
+        )
+        next_provider_raw = _build_next_less_tts_provider_payload(
+            base_payload=previous_provider_raw,
+            payload=_read_section(provider_payloads, "less_tts"),
+            secret_updates=_read_section(tts_secret_updates, "less_tts"),
+        )
+        try:
+            load_less_tts_settings_from_payload(next_provider_raw)
+        except RuntimeError as exc:
+            raise _wrap_provider_validation_error("less_tts", exc) from exc
+        next_less_tts_cfg["config_path"] = provider_path
     elif selected_provider == "tencent_cloud":
         current_tencent_path, _ = _provider_config_paths(
             "tencent_cloud",
@@ -323,6 +374,7 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
         next_tencent_cfg["config_path"] = provider_path
 
     next_tts_providers["doubao"] = next_doubao_cfg
+    next_tts_providers["less_tts"] = next_less_tts_cfg
     next_tts_providers["tencent_cloud"] = next_tencent_cfg
     next_tts["providers"] = next_tts_providers
     next_tts.pop("config_path", None)
@@ -387,7 +439,7 @@ def _build_doubao_provider_snapshot(raw: dict[str, Any], config_path: str) -> di
         "endpoint": str(payload.get("endpoint") or DOUBAO_TTS_DEFAULT_ENDPOINT),
         "resource_id": str(payload.get("resource_id") or ""),
         "speaker": str(payload.get("speaker") or ""),
-        "audio_format": str(payload.get("audio_format") or "wav"),
+        "audio_format": str(payload.get("audio_format") or "wav").strip().lower() or "wav",
         "sample_rate": int(payload.get("sample_rate") or DOUBAO_TTS_DEFAULT_SAMPLE_RATE),
         "speech_rate": int(payload.get("speech_rate") or DOUBAO_TTS_DEFAULT_SPEECH_RATE),
         "loudness_rate": int(payload.get("loudness_rate") or DOUBAO_TTS_DEFAULT_LOUDNESS_RATE),
@@ -409,6 +461,21 @@ def _build_doubao_provider_snapshot(raw: dict[str, Any], config_path: str) -> di
     }
 
 
+def _build_less_tts_provider_snapshot(raw: dict[str, Any], config_path: str) -> dict[str, Any]:
+    payload = _default_less_tts_provider_payload()
+    payload.update(raw)
+    return {
+        "config_path": config_path,
+        "endpoint": str(payload.get("endpoint") or LESS_TTS_DEFAULT_ENDPOINT),
+        "api_key": _build_secret_status(
+            payload,
+            "api_key",
+            "api_key_env",
+            default_env_key=LESS_TTS_DEFAULT_API_KEY_ENV_KEY,
+        ),
+    }
+
+
 def _build_tencent_provider_snapshot(raw: dict[str, Any], config_path: str) -> dict[str, Any]:
     payload = _default_tencent_provider_payload()
     payload.update(raw)
@@ -417,7 +484,7 @@ def _build_tencent_provider_snapshot(raw: dict[str, Any], config_path: str) -> d
         "endpoint": str(payload.get("endpoint") or TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT),
         "region": str(payload.get("region") or ""),
         "voice_type": int(payload.get("voice_type") or 0),
-        "codec": str(payload.get("codec") or "wav"),
+        "codec": str(payload.get("codec") or "wav").strip().lower() or "wav",
         "sample_rate": int(payload.get("sample_rate") or TENCENT_CLOUD_TTS_DEFAULT_SAMPLE_RATE),
         "speed": float(payload.get("speed") or TENCENT_CLOUD_TTS_DEFAULT_SPEED),
         "volume": float(payload.get("volume") or TENCENT_CLOUD_TTS_DEFAULT_VOLUME),
@@ -469,8 +536,6 @@ def _build_next_deeplx_translate_payload(
         env_key_field=DEEPLX_ENV_FIELD,
         update=secret_updates.get("deeplx_url"),
         field_path="translate.providers.deeplx.deeplx_url",
-        default_env_key=DEEPLX_ENV_KEY,
-        allow_custom_env_key=False,
     )
     return next_payload
 
@@ -510,7 +575,6 @@ def _build_next_openai_translate_payload(
         env_key_field="",
         update=secret_updates.get("api_key"),
         field_path="translate.providers.openai_compatible.api_key",
-        allow_env_mode=False,
     )
     return next_payload
 
@@ -547,6 +611,7 @@ def _build_next_doubao_provider_payload(
         str(next_payload.get("audio_format") or "wav"),
         field_path="tts.providers.doubao.audio_format",
     )
+    next_payload["audio_format"] = str(next_payload.get("audio_format") or "wav").strip().lower() or "wav"
     next_payload["sample_rate"] = _read_int(
         payload,
         "sample_rate",
@@ -589,7 +654,6 @@ def _build_next_doubao_provider_payload(
         env_key_field="appid_env",
         update=secret_updates.get("appid"),
         field_path="tts.providers.doubao.appid",
-        default_env_key=DOUBAO_TTS_DEFAULT_APPID_ENV_KEY,
     )
     _apply_secret_update(
         next_payload,
@@ -597,7 +661,30 @@ def _build_next_doubao_provider_payload(
         env_key_field="access_token_env",
         update=secret_updates.get("access_token"),
         field_path="tts.providers.doubao.access_token",
-        default_env_key=DOUBAO_TTS_DEFAULT_ACCESS_TOKEN_ENV_KEY,
+    )
+    return next_payload
+
+
+def _build_next_less_tts_provider_payload(
+    *,
+    base_payload: dict[str, Any],
+    payload: dict[str, Any],
+    secret_updates: dict[str, Any],
+) -> dict[str, Any]:
+    next_payload = copy.deepcopy(base_payload)
+    next_payload["provider"] = "less_tts"
+    next_payload["endpoint"] = _read_string(
+        payload,
+        "endpoint",
+        str(next_payload.get("endpoint") or LESS_TTS_DEFAULT_ENDPOINT),
+        field_path="tts.providers.less_tts.endpoint",
+    ).strip()
+    _apply_secret_update(
+        next_payload,
+        key="api_key",
+        env_key_field="api_key_env",
+        update=secret_updates.get("api_key"),
+        field_path="tts.providers.less_tts.api_key",
     )
     return next_payload
 
@@ -634,6 +721,7 @@ def _build_next_tencent_provider_payload(
         str(next_payload.get("codec") or "wav"),
         field_path="tts.providers.tencent_cloud.codec",
     )
+    next_payload["codec"] = str(next_payload.get("codec") or "wav").strip().lower() or "wav"
     next_payload["sample_rate"] = _read_int(
         payload,
         "sample_rate",
@@ -706,7 +794,6 @@ def _build_next_tencent_provider_payload(
         env_key_field="secret_id_env",
         update=secret_updates.get("secret_id"),
         field_path="tts.providers.tencent_cloud.secret_id",
-        default_env_key=TENCENT_CLOUD_TTS_DEFAULT_SECRET_ID_ENV_KEY,
     )
     _apply_secret_update(
         next_payload,
@@ -714,7 +801,6 @@ def _build_next_tencent_provider_payload(
         env_key_field="secret_key_env",
         update=secret_updates.get("secret_key"),
         field_path="tts.providers.tencent_cloud.secret_key",
-        default_env_key=TENCENT_CLOUD_TTS_DEFAULT_SECRET_KEY_ENV_KEY,
     )
     return next_payload
 
@@ -751,11 +837,23 @@ def _build_secret_status(
     env_name = _resolve_secret_env_name(raw, env_key_field, default_env_key=default_env_key)
     env_value = str(os.getenv(env_name, "")).strip() if env_name else ""
     if direct_value:
-        payload: dict[str, Any] = {"configured": True, "source": "direct"}
+        payload: dict[str, Any] = {
+            "configured": True,
+            "source": "direct",
+            "value": direct_value,
+        }
     elif env_name:
-        payload = {"configured": bool(env_value), "source": "env"}
+        payload = {
+            "configured": bool(env_value),
+            "source": "env",
+            "value": env_value,
+        }
     else:
-        payload = {"configured": False, "source": "unset"}
+        payload = {
+            "configured": False,
+            "source": "unset",
+            "value": "",
+        }
     if env_name:
         payload["env_key"] = env_name
     return payload
@@ -768,43 +866,17 @@ def _apply_secret_update(
     env_key_field: str,
     update: Any,
     field_path: str,
-    default_env_key: str = "",
-    allow_custom_env_key: bool = True,
-    allow_env_mode: bool = True,
 ) -> None:
     if update is None:
         return
     if not isinstance(update, dict):
         raise _field_error(field_path, "must be object")
-    mode = str(update.get("mode") or "").strip().lower()
-    if mode not in {"keep", "direct", "env", "clear"}:
-        raise _field_error(field_path, "mode must be keep, direct, env, or clear")
-    if mode == "keep":
-        return
-    if mode == "clear":
-        raw[key] = ""
-        if env_key_field:
-            raw[env_key_field] = ""
-        return
-    if mode == "direct":
-        value = str(update.get("value") or "").strip()
-        if not value:
-            raise _field_error(field_path, "direct value is required")
-        raw[key] = value
-        if env_key_field:
-            raw[env_key_field] = ""
-        return
-
-    if not allow_env_mode:
-        raise _field_error(field_path, "env mode is not supported")
-    env_key = str(update.get("env_key") or default_env_key).strip()
-    if not env_key:
-        raise _field_error(field_path, "env_key is required")
-    if not allow_custom_env_key and env_key != default_env_key:
-        raise _field_error(field_path, f"env_key must be {default_env_key}")
-    raw[key] = ""
+    if "value" not in update:
+        raise _field_error(field_path, "value is required")
+    value = str(update.get("value") or "").strip()
+    raw[key] = value
     if env_key_field:
-        raw[env_key_field] = env_key
+        raw[env_key_field] = ""
 
 
 def _resolve_effective_secret_value(
@@ -844,6 +916,8 @@ def _provider_config_paths(
     current_provider = str(tts_cfg.get("provider") or DEFAULT_TTS_PROVIDER).strip().lower()
     if provider == "doubao":
         default_path = DOUBAO_TTS_DEFAULT_CONFIG_PATH
+    elif provider == "less_tts":
+        default_path = LESS_TTS_DEFAULT_CONFIG_PATH
     elif provider == "tencent_cloud":
         default_path = TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH
     else:
@@ -872,9 +946,7 @@ def _default_doubao_provider_payload() -> dict[str, Any]:
         "provider": "doubao",
         "endpoint": DOUBAO_TTS_DEFAULT_ENDPOINT,
         "appid": "",
-        "appid_env": DOUBAO_TTS_DEFAULT_APPID_ENV_KEY,
         "access_token": "",
-        "access_token_env": DOUBAO_TTS_DEFAULT_ACCESS_TOKEN_ENV_KEY,
         "resource_id": "",
         "speaker": "",
         "audio_format": "wav",
@@ -887,13 +959,19 @@ def _default_doubao_provider_payload() -> dict[str, Any]:
     }
 
 
+def _default_less_tts_provider_payload() -> dict[str, Any]:
+    return {
+        "provider": "less_tts",
+        "endpoint": LESS_TTS_DEFAULT_ENDPOINT,
+        "api_key": "",
+    }
+
+
 def _default_tencent_provider_payload() -> dict[str, Any]:
     return {
         "provider": "tencent_cloud",
         "secret_id": "",
-        "secret_id_env": TENCENT_CLOUD_TTS_DEFAULT_SECRET_ID_ENV_KEY,
         "secret_key": "",
-        "secret_key_env": TENCENT_CLOUD_TTS_DEFAULT_SECRET_KEY_ENV_KEY,
         "endpoint": TENCENT_CLOUD_TTS_DEFAULT_ENDPOINT,
         "region": "",
         "voice_type": 0,
@@ -1010,16 +1088,16 @@ def _wrap_provider_validation_error(provider: str, exc: RuntimeError) -> ConfigV
         field_name = message.split(" must", 1)[0].split(".", 1)[1]
         return _field_error(f"tts.providers.{provider}.{field_name}", message)
     mapping = {
-        "doubao appid/appid_env is required": "tts.providers.doubao.appid",
-        "doubao access_token/access_token_env is required": "tts.providers.doubao.access_token",
+        "doubao appid is required": "tts.providers.doubao.appid",
+        "doubao access_token is required": "tts.providers.doubao.access_token",
         "doubao resource_id is required": "tts.providers.doubao.resource_id",
         "doubao speaker is required": "tts.providers.doubao.speaker",
         "doubao endpoint is required": "tts.providers.doubao.endpoint",
-        "doubao audio_format must be 'wav' for current Windows playback path, got": "tts.providers.doubao.audio_format",
-        "tencent_cloud secret_id/secret_id_env is required": "tts.providers.tencent_cloud.secret_id",
-        "tencent_cloud secret_key/secret_key_env is required": "tts.providers.tencent_cloud.secret_key",
+        "less_tts api_key is required": "tts.providers.less_tts.api_key",
+        "less_tts endpoint is required": "tts.providers.less_tts.endpoint",
+        "tencent_cloud secret_id is required": "tts.providers.tencent_cloud.secret_id",
+        "tencent_cloud secret_key is required": "tts.providers.tencent_cloud.secret_key",
         "tencent_cloud endpoint is required": "tts.providers.tencent_cloud.endpoint",
-        "tencent_cloud codec must be 'wav' for current Windows playback path, got": "tts.providers.tencent_cloud.codec",
     }
     for prefix, field_path in mapping.items():
         if message.startswith(prefix):

@@ -20,16 +20,13 @@ import type {
   DesktopSecretDrafts,
 } from "@/lib/settings-types"
 
-const DEEPLX_ENV_KEY = "DEEPLX_URL"
-
 function createSecretInputDraft(status: DesktopSecretStatus): DesktopSecretInputDraft {
   return {
     status: {
       ...status,
     },
-    mode: "keep",
-    value: "",
-    env_key: status.env_key ?? "",
+    value: status.value,
+    forceClear: false,
   }
 }
 
@@ -84,6 +81,11 @@ export function createDesktopSettingsDraft(config: DesktopRuntimeConfig): Deskto
           appid: createSecretInputDraft(config.tts.providers.doubao.appid),
           access_token: createSecretInputDraft(config.tts.providers.doubao.access_token),
         },
+        less_tts: {
+          config_path: config.tts.providers.less_tts.config_path,
+          endpoint: config.tts.providers.less_tts.endpoint,
+          api_key: createSecretInputDraft(config.tts.providers.less_tts.api_key),
+        },
         tencent_cloud: {
           config_path: config.tts.providers.tencent_cloud.config_path,
           endpoint: config.tts.providers.tencent_cloud.endpoint,
@@ -132,6 +134,9 @@ export function extractDesktopSecretDrafts(
         appid: cloneDraft(draft.tts.providers.doubao.appid),
         access_token: cloneDraft(draft.tts.providers.doubao.access_token),
       },
+      less_tts: {
+        api_key: cloneDraft(draft.tts.providers.less_tts.api_key),
+      },
       tencent_cloud: {
         secret_id: cloneDraft(draft.tts.providers.tencent_cloud.secret_id),
         secret_key: cloneDraft(draft.tts.providers.tencent_cloud.secret_key),
@@ -170,6 +175,11 @@ function mergeDesktopSecretDrafts(
           appid: cloneDraft(secretDrafts.tts.doubao.appid),
           access_token: cloneDraft(secretDrafts.tts.doubao.access_token),
         },
+        less_tts: {
+          ...draft.tts.providers.less_tts,
+          config_path: draft.tts.providers.less_tts.config_path,
+          api_key: cloneDraft(secretDrafts.tts.less_tts.api_key),
+        },
         tencent_cloud: {
           ...draft.tts.providers.tencent_cloud,
           config_path: draft.tts.providers.tencent_cloud.config_path,
@@ -181,29 +191,62 @@ function mergeDesktopSecretDrafts(
   }
 }
 
-function buildSecretUpdate(input: DesktopSecretInputDraft): DesktopSecretUpdate {
-  switch (input.mode) {
-    case "clear":
-      return { mode: "clear" }
-    case "direct":
-      return { mode: "direct", value: input.value }
-    case "env":
-      return { mode: "env", env_key: input.env_key }
-    default:
-      return { mode: "keep" }
+function buildSecretUpdate(input: DesktopSecretInputDraft): DesktopSecretUpdate | undefined {
+  if (input.forceClear) {
+    return {
+      value: "",
+    }
   }
-}
-
-function buildDeeplxSecretUpdate(input: DesktopSecretInputDraft): DesktopSecretUpdate {
-  if (input.mode === "env") {
-    return { mode: "env", env_key: DEEPLX_ENV_KEY }
+  if (input.value === input.status.value) {
+    return undefined
   }
-  return buildSecretUpdate(input)
+  return {
+    value: input.value,
+  }
 }
 
 export function buildDesktopSettingsSavePayload(
   draft: DesktopSettingsDraft,
 ): DesktopSettingsSavePayload {
+  const deeplxUrlUpdate = buildSecretUpdate(draft.translate.providers.deeplx.deeplx_url)
+  const openaiApiKeyUpdate = buildSecretUpdate(draft.translate.providers.openai_compatible.api_key)
+  const doubaoAppidUpdate = buildSecretUpdate(draft.tts.providers.doubao.appid)
+  const doubaoAccessTokenUpdate = buildSecretUpdate(draft.tts.providers.doubao.access_token)
+  const lessTtsApiKeyUpdate = buildSecretUpdate(draft.tts.providers.less_tts.api_key)
+  const tencentSecretIdUpdate = buildSecretUpdate(draft.tts.providers.tencent_cloud.secret_id)
+  const tencentSecretKeyUpdate = buildSecretUpdate(draft.tts.providers.tencent_cloud.secret_key)
+
+  const translateSecretUpdates: DesktopSettingsSavePayload["secret_updates"]["translate"] = {}
+  const ttsSecretUpdates: DesktopSettingsSavePayload["secret_updates"]["tts"] = {}
+
+  if (deeplxUrlUpdate) {
+    translateSecretUpdates.deeplx = {
+      deeplx_url: deeplxUrlUpdate,
+    }
+  }
+  if (openaiApiKeyUpdate) {
+    translateSecretUpdates.openai_compatible = {
+      api_key: openaiApiKeyUpdate,
+    }
+  }
+  if (doubaoAppidUpdate || doubaoAccessTokenUpdate) {
+    ttsSecretUpdates.doubao = {
+      ...(doubaoAppidUpdate ? { appid: doubaoAppidUpdate } : {}),
+      ...(doubaoAccessTokenUpdate ? { access_token: doubaoAccessTokenUpdate } : {}),
+    }
+  }
+  if (lessTtsApiKeyUpdate) {
+    ttsSecretUpdates.less_tts = {
+      api_key: lessTtsApiKeyUpdate,
+    }
+  }
+  if (tencentSecretIdUpdate || tencentSecretKeyUpdate) {
+    ttsSecretUpdates.tencent_cloud = {
+      ...(tencentSecretIdUpdate ? { secret_id: tencentSecretIdUpdate } : {}),
+      ...(tencentSecretKeyUpdate ? { secret_key: tencentSecretKeyUpdate } : {}),
+    }
+  }
+
   return {
     translate: {
       enabled: draft.translate.enabled,
@@ -243,6 +286,10 @@ export function buildDesktopSettingsSavePayload(
           uid: draft.tts.providers.doubao.uid,
           connect_timeout_seconds: draft.tts.providers.doubao.connect_timeout_seconds,
         },
+        less_tts: {
+          config_path: draft.tts.providers.less_tts.config_path,
+          endpoint: draft.tts.providers.less_tts.endpoint,
+        },
         tencent_cloud: {
           config_path: draft.tts.providers.tencent_cloud.config_path,
           endpoint: draft.tts.providers.tencent_cloud.endpoint,
@@ -264,24 +311,8 @@ export function buildDesktopSettingsSavePayload(
       },
     },
     secret_updates: {
-      translate: {
-        deeplx: {
-          deeplx_url: buildDeeplxSecretUpdate(draft.translate.providers.deeplx.deeplx_url),
-        },
-        openai_compatible: {
-          api_key: buildSecretUpdate(draft.translate.providers.openai_compatible.api_key),
-        },
-      },
-      tts: {
-        doubao: {
-          appid: buildSecretUpdate(draft.tts.providers.doubao.appid),
-          access_token: buildSecretUpdate(draft.tts.providers.doubao.access_token),
-        },
-        tencent_cloud: {
-          secret_id: buildSecretUpdate(draft.tts.providers.tencent_cloud.secret_id),
-          secret_key: buildSecretUpdate(draft.tts.providers.tencent_cloud.secret_key),
-        },
-      },
+      translate: translateSecretUpdates,
+      tts: ttsSecretUpdates,
     },
   }
 }
@@ -334,6 +365,22 @@ function resolveErrorMessage(error: unknown, fallback: string): string {
     return error.message
   }
   return fallback
+}
+
+export function resolveConfigSaveErrorMessage(error: ConfigSaveError): string {
+  const fieldMessages = Object.values(error.fieldErrors)
+    .map((value) => value.trim())
+    .filter(Boolean)
+  if (!fieldMessages.length) {
+    return error.message
+  }
+  if (!error.message.trim() || error.message === "config validation failed") {
+    return `保存失败：${fieldMessages[0]}`
+  }
+  if (fieldMessages.includes(error.message.trim())) {
+    return error.message
+  }
+  return `${error.message}：${fieldMessages[0]}`
 }
 
 function resolveDesktopSettingsSavedNotice(
@@ -584,7 +631,7 @@ export function useDesktopSettings(
       } catch (error) {
         if (error instanceof ConfigSaveError) {
           setFieldErrors(error.fieldErrors)
-          setSaveError(error.message)
+          setSaveError(resolveConfigSaveErrorMessage(error))
         } else {
           setSaveError(resolveErrorMessage(error, "保存配置失败"))
         }

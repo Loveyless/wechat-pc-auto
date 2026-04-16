@@ -14,6 +14,8 @@ import threading
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 if __package__:
@@ -50,7 +52,8 @@ else:
     )
 
 PREFERRED_ENGLISH_TTS_VOICES = ("Microsoft Zira Desktop", "Microsoft David Desktop")
-SUPPORTED_TTS_PROVIDERS = ("windows_system", "doubao", "tencent_cloud")
+SUPPORTED_TTS_PROVIDERS = ("windows_system", "doubao", "less_tts", "tencent_cloud")
+SUPPORTED_TTS_AUDIO_FORMATS = ("wav", "mp3")
 DEFAULT_TTS_PROVIDER = "tencent_cloud"
 DOUBAO_TTS_DEFAULT_CONFIG_PATH = os.path.join("config", "doubao_tts.json")
 DOUBAO_TTS_DEFAULT_APPID_ENV_KEY = "VOLCENGINE_TTS_APPID"
@@ -60,6 +63,14 @@ DOUBAO_TTS_SUPPORTED_SAMPLE_RATES = (8000, 16000, 22050, 24000, 32000, 44100, 48
 DOUBAO_TTS_DEFAULT_SAMPLE_RATE = 32000
 DOUBAO_TTS_DEFAULT_SPEECH_RATE = -15
 DOUBAO_TTS_DEFAULT_LOUDNESS_RATE = 0
+LESS_TTS_DEFAULT_CONFIG_PATH = os.path.join("config", "less_tts.json")
+LESS_TTS_DEFAULT_API_KEY_ENV_KEY = "LESS_TTS_API_KEY"
+LESS_TTS_DEFAULT_ENDPOINT = "https://less-tts.less-842.workers.dev/v1/audio/speech"
+LESS_TTS_DEFAULT_REQUEST_TIMEOUT_SECONDS = 15.0
+LESS_TTS_DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
+LESS_TTS_DEFAULT_SPEED = 1.0
+LESS_TTS_DEFAULT_PITCH = "0"
+LESS_TTS_DEFAULT_STYLE = "general"
 TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH = os.path.join("config", "tencent_tts.json")
 TENCENT_CLOUD_TTS_DEFAULT_SECRET_ID_ENV_KEY = "TENCENTCLOUD_SECRET_ID"
 TENCENT_CLOUD_TTS_DEFAULT_SECRET_KEY_ENV_KEY = "TENCENTCLOUD_SECRET_KEY"
@@ -125,6 +136,17 @@ def normalize_tts_provider(value: Any) -> str:
     return provider
 
 
+def normalize_tts_audio_format(value: Any, *, field_name: str) -> str:
+    audio_format = str(value or "wav").strip().lower()
+    audio_format = audio_format or "wav"
+    if audio_format not in SUPPORTED_TTS_AUDIO_FORMATS:
+        raise RuntimeError(
+            f"{field_name} must be one of {', '.join(SUPPORTED_TTS_AUDIO_FORMATS)} "
+            f"for current Windows playback path, got {value!r}"
+        )
+    return audio_format
+
+
 def load_doubao_tts_settings_from_payload(raw: dict[str, Any]) -> DoubaoTTSSettings:
     provider = str(raw.get("provider") or "doubao").strip().lower()
     if provider and provider != "doubao":
@@ -146,17 +168,14 @@ def load_doubao_tts_settings_from_payload(raw: dict[str, Any]) -> DoubaoTTSSetti
     if not endpoint:
         raise RuntimeError("doubao endpoint is required")
     if not appid:
-        raise RuntimeError("doubao appid/appid_env is required")
+        raise RuntimeError("doubao appid is required")
     if not access_token:
-        raise RuntimeError("doubao access_token/access_token_env is required")
+        raise RuntimeError("doubao access_token is required")
     if not resource_id:
         raise RuntimeError("doubao resource_id is required")
     if not speaker:
         raise RuntimeError("doubao speaker is required")
-    if audio_format != "wav":
-        raise RuntimeError(
-            f"doubao audio_format must be 'wav' for current Windows playback path, got {audio_format!r}"
-        )
+    audio_format = normalize_tts_audio_format(audio_format, field_name="doubao.audio_format")
     sample_rate = validate_int_choices(
         "doubao.sample_rate", sample_rate, DOUBAO_TTS_SUPPORTED_SAMPLE_RATES
     )
@@ -216,14 +235,11 @@ def load_tencent_cloud_tts_settings_from_payload(
     if not endpoint:
         raise RuntimeError("tencent_cloud endpoint is required")
     if not secret_id:
-        raise RuntimeError("tencent_cloud secret_id/secret_id_env is required")
+        raise RuntimeError("tencent_cloud secret_id is required")
     if not secret_key:
-        raise RuntimeError("tencent_cloud secret_key/secret_key_env is required")
+        raise RuntimeError("tencent_cloud secret_key is required")
     voice_type = validate_int_min("tencent_cloud.voice_type", voice_type, 1)
-    if codec != "wav":
-        raise RuntimeError(
-            f"tencent_cloud codec must be 'wav' for current Windows playback path, got {codec!r}"
-        )
+    codec = normalize_tts_audio_format(codec, field_name="tencent_cloud.codec")
     sample_rate = validate_int_choices(
         "tencent_cloud.sample_rate",
         sample_rate,
@@ -272,6 +288,25 @@ def load_tencent_cloud_tts_settings_from_payload(
         emotion_category=emotion_category,
         emotion_intensity=emotion_intensity,
         request_timeout_seconds=request_timeout_seconds,
+    )
+
+
+def load_less_tts_settings_from_payload(raw: dict[str, Any]) -> LessTTSSettings:
+    provider = str(raw.get("provider") or "less_tts").strip().lower()
+    if provider and provider != "less_tts":
+        raise RuntimeError(f"less_tts config provider must be 'less_tts', got {provider!r}")
+
+    endpoint = str(raw.get("endpoint") or LESS_TTS_DEFAULT_ENDPOINT).strip()
+    api_key = read_secret_config_value(raw, "api_key", "api_key_env")
+
+    if not endpoint:
+        raise RuntimeError("less_tts endpoint is required")
+    if not api_key:
+        raise RuntimeError("less_tts api_key is required")
+
+    return LessTTSSettings(
+        endpoint=endpoint,
+        api_key=api_key,
     )
 
 
@@ -405,6 +440,61 @@ def play_wav_bytes_on_windows(audio_data: bytes) -> bool:
             except OSError:
                 pass
     return True
+
+
+def _read_mci_error_text(error_code: int) -> str:
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(512)
+    result = ctypes.windll.winmm.mciGetErrorStringW(error_code, buffer, len(buffer))
+    if result:
+        return buffer.value.strip()
+    return f"code={error_code}"
+
+
+def _send_mci_command(command: str) -> None:
+    import ctypes
+
+    error_code = ctypes.windll.winmm.mciSendStringW(command, None, 0, None)
+    if error_code:
+        detail = _read_mci_error_text(error_code)
+        verb = command.split(" ", 1)[0].strip().lower() or "mci"
+        raise RuntimeError(f"windows mci {verb} failed {detail}")
+
+
+def play_mp3_bytes_on_windows(audio_data: bytes) -> bool:
+    temp_path = ""
+    alias = ""
+    opened = False
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+            temp_path = f.name
+            f.write(audio_data)
+        alias = f"ttsmp3_{uuid.uuid4().hex}"
+        _send_mci_command(f'open "{temp_path}" type MPEGVideo alias {alias}')
+        opened = True
+        _send_mci_command(f"play {alias} wait")
+    finally:
+        if opened and alias:
+            try:
+                _send_mci_command(f"close {alias}")
+            except RuntimeError:
+                pass
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+    return True
+
+
+def play_audio_bytes_on_windows(audio_data: bytes, *, audio_format: str) -> bool:
+    normalized_format = normalize_tts_audio_format(audio_format, field_name="playback.audio_format")
+    if normalized_format == "wav":
+        return play_wav_bytes_on_windows(audio_data)
+    if normalized_format == "mp3":
+        return play_mp3_bytes_on_windows(audio_data)
+    raise RuntimeError(f"unsupported audio format for Windows playback: {normalized_format!r}")
 
 
 class WindowsSystemTTS:
@@ -583,6 +673,17 @@ class TencentCloudTTSSettings:
     request_timeout_seconds: float = 15.0
 
 
+@dataclass(frozen=True)
+class LessTTSSettings:
+    endpoint: str = LESS_TTS_DEFAULT_ENDPOINT
+    api_key: str = ""
+    request_timeout_seconds: float = LESS_TTS_DEFAULT_REQUEST_TIMEOUT_SECONDS
+    voice: str = LESS_TTS_DEFAULT_VOICE
+    speed: float = LESS_TTS_DEFAULT_SPEED
+    pitch: str = LESS_TTS_DEFAULT_PITCH
+    style: str = LESS_TTS_DEFAULT_STYLE
+
+
 def load_doubao_tts_settings(config_path: str, *, base_dir: str = ROOT_DIR) -> DoubaoTTSSettings:
     resolved_path = resolve_config_file_path(config_path, base_dir=base_dir)
     if not resolved_path or not os.path.isfile(resolved_path):
@@ -601,6 +702,14 @@ def load_tencent_cloud_tts_settings(
         raise RuntimeError(f"tts config not found: {config_path!r}")
     raw = load_json_config(resolved_path)
     return load_tencent_cloud_tts_settings_from_payload(raw)
+
+
+def load_less_tts_settings(config_path: str, *, base_dir: str = ROOT_DIR) -> LessTTSSettings:
+    resolved_path = resolve_config_file_path(config_path, base_dir=base_dir)
+    if not resolved_path or not os.path.isfile(resolved_path):
+        raise RuntimeError(f"tts config not found: {config_path!r}")
+    raw = load_json_config(resolved_path)
+    return load_less_tts_settings_from_payload(raw)
 
 
 def build_doubao_ws_headers(settings: DoubaoTTSSettings, connect_id: str) -> dict[str, str]:
@@ -644,6 +753,27 @@ def build_doubao_tts_runtime_fields(settings: DoubaoTTSSettings, config_path: st
         f"resource_id={settings.resource_id} speaker={settings.speaker} format={settings.audio_format} "
         f"sample_rate={settings.sample_rate} speech_rate={settings.speech_rate} "
         f"loudness_rate={settings.loudness_rate} use_cache={settings.use_cache}"
+    )
+
+
+def build_less_tts_request_payload(settings: LessTTSSettings, text: str) -> bytes:
+    return json.dumps(
+        {
+            "input": text,
+            "voice": settings.voice,
+            "speed": settings.speed,
+            "pitch": settings.pitch,
+            "style": settings.style,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def build_less_tts_runtime_fields(settings: LessTTSSettings, config_path: str) -> str:
+    return (
+        f"backend=less_tts config={config_path} endpoint={settings.endpoint} "
+        f"format=mp3 voice={settings.voice} speed={settings.speed} "
+        f"pitch={settings.pitch} style={settings.style}"
     )
 
 
@@ -704,6 +834,47 @@ def format_tencent_cloud_sdk_exception(exc: Exception) -> str:
     if request_id:
         parts.append(f"request_id={request_id}")
     return " ".join(parts) if parts else str(exc)
+
+
+def _truncate_less_tts_error_text(text: str, *, max_length: int = 240) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 3] + "..."
+
+
+def parse_less_tts_error_payload(body: bytes, content_type: str) -> str:
+    text = body.decode("utf-8", "ignore").strip()
+    if not text:
+        return "-"
+    normalized_content_type = str(content_type or "").strip().lower()
+    if "json" in normalized_content_type or text.startswith("{") or text.startswith("["):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return _truncate_less_tts_error_text(text)
+        if isinstance(payload, dict):
+            parts = []
+            error_value = payload.get("error")
+            if isinstance(error_value, dict):
+                code = str(error_value.get("code") or "").strip()
+                message = str(error_value.get("message") or "").strip()
+                if code:
+                    parts.append(f"error={code}")
+                if message:
+                    parts.append(f"message={message}")
+            else:
+                error_text = str(error_value or "").strip()
+                if error_text:
+                    parts.append(f"error={error_text}")
+            message = str(payload.get("message") or "").strip()
+            if message:
+                parts.append(f"message={message}")
+            detail = " ".join(parts).strip()
+            if detail:
+                return _truncate_less_tts_error_text(detail)
+        return _truncate_less_tts_error_text(text)
+    return _truncate_less_tts_error_text(text)
 
 
 def build_doubao_full_client_request_frame(payload: bytes) -> bytes:
@@ -879,7 +1050,9 @@ class DoubaoWebsocketTTS:
                     raise RuntimeError(f"doubao error code={message.error_code}: {detail}")
             if not audio_data:
                 raise RuntimeError("doubao returned empty audio")
-            normalized_audio = normalize_wav_size_fields(bytes(audio_data))
+            normalized_audio = bytes(audio_data)
+            if self.settings.audio_format == "wav":
+                normalized_audio = normalize_wav_size_fields(normalized_audio)
             self._emit_log(
                 f"tts synthesize success backend=doubao bytes={len(normalized_audio)} chars={len(payload)} preview={preview}"
             )
@@ -887,14 +1060,14 @@ class DoubaoWebsocketTTS:
         finally:
             await websocket.close()
 
-    def _play_wav_bytes(self, audio_data: bytes) -> bool:
-        return play_wav_bytes_on_windows(audio_data)
+    def _play_audio_bytes(self, audio_data: bytes, audio_format: str) -> bool:
+        return play_audio_bytes_on_windows(audio_data, audio_format=audio_format)
 
     def _run_speak_blocking(self, payload: str) -> bool:
         preview = summarize_tts_text(payload)
         try:
             audio_data = asyncio.run(self._synthesize_audio(payload))
-            self._play_wav_bytes(audio_data)
+            self._play_audio_bytes(audio_data, self.settings.audio_format)
         except Exception as e:
             self._last_error = str(e)
             self._emit_log(
@@ -1048,8 +1221,8 @@ class TencentCloudSDKTTS:
         )
         return audio_data, request_id, response_session_id
 
-    def _play_wav_bytes(self, audio_data: bytes) -> bool:
-        return play_wav_bytes_on_windows(audio_data)
+    def _play_audio_bytes(self, audio_data: bytes, audio_format: str) -> bool:
+        return play_audio_bytes_on_windows(audio_data, audio_format=audio_format)
 
     def _run_speak_blocking(self, payload: str) -> bool:
         preview = summarize_tts_text(payload)
@@ -1057,7 +1230,7 @@ class TencentCloudSDKTTS:
         response_session_id = ""
         try:
             audio_data, request_id, response_session_id = self._synthesize_audio(payload)
-            self._play_wav_bytes(audio_data)
+            self._play_audio_bytes(audio_data, self.settings.codec)
         except Exception as e:
             self._last_error = format_tencent_cloud_sdk_exception(e)
             self._emit_log(
@@ -1085,6 +1258,138 @@ class TencentCloudSDKTTS:
         self._queue.put(payload)
         self._emit_log(
             f"tts queued backend=tencent_cloud chars={len(payload)} preview={summarize_tts_text(payload)}"
+        )
+        return True
+
+
+class LessTTSHttpPlayer:
+    def __init__(self, settings: LessTTSSettings):
+        self.settings = settings
+        self._lock = threading.Lock()
+        self._queue: "queue.SimpleQueue[str | None]" = queue.SimpleQueue()
+        self._worker_started = False
+        self._last_error = ""
+        self._logger: Callable[[str], None] | None = None
+
+    @classmethod
+    def create_from_config(
+        cls,
+        config_path: str,
+        *,
+        base_dir: str = ROOT_DIR,
+    ) -> "LessTTSHttpPlayer":
+        if os.name != "nt":
+            raise RuntimeError("less_tts playback currently only supports Windows")
+        settings = load_less_tts_settings(config_path, base_dir=base_dir)
+        return cls(settings)
+
+    def _ensure_worker_started(self):
+        with self._lock:
+            if self._worker_started:
+                return
+            self._worker_started = True
+        threading.Thread(target=self._worker_loop, daemon=True).start()
+
+    def set_logger(self, logger: Callable[[str], None] | None):
+        with self._lock:
+            self._logger = logger
+
+    def _emit_log(self, line: str):
+        logger = self._logger
+        if not logger:
+            return
+        try:
+            logger(str(line or ""))
+        except Exception:
+            pass
+
+    def _worker_loop(self):
+        while True:
+            payload = self._queue.get()
+            if payload is None:
+                return
+            self._run_speak_blocking(payload)
+
+    def _synthesize_audio(self, payload: str) -> bytes:
+        preview = summarize_tts_text(payload)
+        endpoint_host = urlparse(self.settings.endpoint).netloc or self.settings.endpoint
+        self._emit_log(
+            f"tts synthesize start backend=less_tts endpoint={endpoint_host} chars={len(payload)} preview={preview}"
+        )
+        request_payload = build_less_tts_request_payload(self.settings, payload)
+        request = urllib_request.Request(
+            self.settings.endpoint,
+            data=request_payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self.settings.api_key,
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(
+                request,
+                timeout=self.settings.request_timeout_seconds,
+            ) as response:
+                content_type = str(response.headers.get("Content-Type") or "").strip().lower()
+                audio_data = response.read()
+        except urllib_error.HTTPError as exc:
+            content_type = str(exc.headers.get("Content-Type") or "").strip().lower()
+            detail = parse_less_tts_error_payload(exc.read(), content_type)
+            raise RuntimeError(
+                f"less_tts request failed status={exc.code} detail={detail}"
+            ) from exc
+        except urllib_error.URLError as exc:
+            reason = getattr(exc, "reason", exc)
+            raise RuntimeError(f"less_tts request failed reason={reason}") from exc
+
+        if "audio/mpeg" not in content_type:
+            detail = parse_less_tts_error_payload(audio_data, content_type)
+            raise RuntimeError(
+                f"less_tts returned unexpected content_type={content_type or '-'} detail={detail}"
+            )
+        if not audio_data:
+            raise RuntimeError("less_tts returned empty audio")
+
+        self._emit_log(
+            f"tts synthesize success backend=less_tts bytes={len(audio_data)} chars={len(payload)} preview={preview}"
+        )
+        return audio_data
+
+    def _play_audio_bytes(self, audio_data: bytes, audio_format: str) -> bool:
+        return play_audio_bytes_on_windows(audio_data, audio_format=audio_format)
+
+    def _run_speak_blocking(self, payload: str) -> bool:
+        preview = summarize_tts_text(payload)
+        try:
+            audio_data = self._synthesize_audio(payload)
+            self._play_audio_bytes(audio_data, "mp3")
+        except Exception as e:
+            self._last_error = str(e)
+            self._emit_log(
+                f"tts failed backend=less_tts error={self._last_error} preview={preview}"
+            )
+            return False
+        self._last_error = ""
+        self._emit_log(
+            f"tts played backend=less_tts bytes={len(audio_data)} chars={len(payload)} preview={preview}"
+        )
+        return True
+
+    def speak_async(self, text: str) -> bool:
+        if os.name != "nt":
+            self._emit_log("tts rejected backend=less_tts reason=non_windows")
+            return False
+        payload = normalize_tts_text(text)
+        if not is_speakable_english_text(payload):
+            self._emit_log(
+                f"tts rejected backend=less_tts reason=non_speakable preview={summarize_tts_text(payload)}"
+            )
+            return False
+        self._ensure_worker_started()
+        self._queue.put(payload)
+        self._emit_log(
+            f"tts queued backend=less_tts chars={len(payload)} preview={summarize_tts_text(payload)}"
         )
         return True
 
@@ -1118,6 +1423,17 @@ def create_tts_player(
             f"tts configured {runtime_fields}",
         )
 
+    if provider == "less_tts":
+        config_path = str(tts_cfg.get("config_path") or LESS_TTS_DEFAULT_CONFIG_PATH).strip()
+        resolved_config_path = resolve_config_file_path(config_path, base_dir=config_dir)
+        settings = load_less_tts_settings(config_path, base_dir=config_dir)
+        runtime_fields = build_less_tts_runtime_fields(settings, resolved_config_path)
+        player = LessTTSHttpPlayer(settings)
+        return (
+            player,
+            f"tts configured {runtime_fields}",
+        )
+
     config_path = str(tts_cfg.get("config_path") or TENCENT_CLOUD_TTS_DEFAULT_CONFIG_PATH).strip()
     resolved_config_path = resolve_config_file_path(config_path, base_dir=config_dir)
     settings = load_tencent_cloud_tts_settings(config_path, base_dir=config_dir)
@@ -1143,6 +1459,8 @@ def check_tts_dependency_packaging(
         if dependency_error:
             return False, f"tts dependency check failed backend=doubao reason={dependency_error}"
         return True, "tts dependency check passed backend=doubao module=websockets"
+    if provider == "less_tts":
+        return True, "tts dependency check passed backend=less_tts module=stdlib"
     dependency_error = probe_tencent_cloud_tts_runtime()
     if dependency_error:
         return False, f"tts dependency check failed backend=tencent_cloud reason={dependency_error}"

@@ -12,7 +12,7 @@ The system SHALL provide a settings entry in the desktop shell that loads the ru
 - **THEN** the shell shows that the config is saved and that backend restart is still required before the new settings take effect
 
 ### Requirement: Desktop shell settings SHALL cover all supported TTS providers
-The system SHALL render provider-specific form branches for every TTS provider currently supported by the backend runtime: `windows_system`, `doubao`, and `tencent_cloud`. The UI SHALL NOT allow selecting a provider that lacks a corresponding editable form branch.
+The system SHALL render provider-specific form branches for every TTS provider currently supported by the backend runtime: `windows_system`, `doubao`, `less_tts`, and `tencent_cloud`. The UI SHALL NOT allow selecting a provider that lacks a corresponding editable form branch.
 
 #### Scenario: User selects the Windows system provider
 - **WHEN** `tts.provider` is `windows_system`
@@ -20,11 +20,15 @@ The system SHALL render provider-specific form branches for every TTS provider c
 
 #### Scenario: User selects the Doubao provider
 - **WHEN** `tts.provider` is `doubao`
-- **THEN** the settings workspace renders the Doubao-specific fields, including write-only secret inputs and visible non-secret provider settings
+- **THEN** the settings workspace renders the Doubao-specific fields, including direct-input secret editors that echo the current value and visible non-secret provider settings
+
+#### Scenario: User selects the Less TTS provider
+- **WHEN** `tts.provider` is `less_tts`
+- **THEN** the settings workspace renders the Less-TTS-specific fields, including a direct-input API key editor that echoes the current value and visible non-secret endpoint settings
 
 #### Scenario: User selects the Tencent Cloud provider
 - **WHEN** `tts.provider` is `tencent_cloud`
-- **THEN** the settings workspace renders the Tencent-Cloud-specific fields, including write-only secret inputs and visible non-secret provider settings
+- **THEN** the settings workspace renders the Tencent-Cloud-specific fields, including direct-input secret editors that echo the current value and visible non-secret provider settings
 
 ### Requirement: Desktop shell SHALL separate persisted defaults from runtime-only toggles
 The system SHALL keep the header runtime `tts-auto-read` toggle independent from the persisted `display.tts_auto_read_active_chat` setting shown in the settings workspace.

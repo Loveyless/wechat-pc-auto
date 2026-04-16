@@ -40,6 +40,62 @@
 - 只有当你主动启用额外翻译服务或云端朗读服务时，才需要额外补 URL 或凭据
 - 运行时配置、日志和锁文件会落到 `%LOCALAPPDATA%\com.wechatauto.shell`
 
+## 开发启动方式
+
+如果你是直接跑仓库源码，先区分你要测的是网页端开发页，还是 Tauri 桌面壳。
+
+前提：
+
+- 安装 Python 依赖：`pip install -r requirements.txt`
+- 安装前端依赖：`cd desktop-shell && npm install`
+- 如果要跑 Tauri，再额外装好 `cargo` / `rustc`
+
+### 1. 网页端开发页
+
+网页端只负责前端界面，本身不会自动拉起 Python backend。
+所以要开两个终端：
+
+终端 1：
+
+```bash
+python listener_app/backend_main.py --config ".\config\listener.json"
+```
+
+终端 2：
+
+```bash
+cd desktop-shell
+npm run dev
+```
+
+默认地址：
+
+- HTTP：`http://127.0.0.1:8765`
+- WebSocket：`ws://127.0.0.1:8766/events`
+
+### 2. 直接测 Tauri 桌面壳
+
+```bash
+cd desktop-shell
+npm run tauri dev
+```
+
+这条命令会先自动构建 sidecar，然后由 Tauri 壳自己托管 backend。
+这种模式下不要再手工先跑一份 `python listener_app/backend_main.py`，否则容易制造双实例和配置混淆。
+
+### 3. 安装包 / 打包后的桌面壳
+
+- 安装包、`wechat-auto-shell.exe` 和 `npm run tauri dev` 都属于 Tauri 壳路径
+- 运行时配置默认落在 `%LOCALAPPDATA%\com.wechatauto.shell`
+
+### 4. 源码态和 Tauri 壳别混
+
+- 源码态 `python listener_app/backend_main.py` 默认读取仓库里的 `config/listener.json`
+- Tauri 壳优先读取 `%LOCALAPPDATA%\com.wechatauto.shell\config\listener.json`
+
+这两套配置目录不会自动同步。
+如果你改了仓库里的配置，却用的是 Tauri 壳，那实际生效的可能不是同一份文件。
+
 ## 文档分流
 
 - 普通用户：看这份 `README.md` 就够了

@@ -7,8 +7,10 @@ import {
   createDesktopSettingsDraft,
   isDesktopSettingsDirty,
   persistDesktopSettings,
+  resolveConfigSaveErrorMessage,
   resolveDesktopSettingsActionState,
 } from "@/hooks/use-desktop-settings"
+import { ConfigSaveError } from "@/lib/api"
 
 function createRuntimeConfig(): DesktopRuntimeConfig {
   return {
@@ -25,6 +27,7 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
             configured: true,
             source: "env",
             env_key: "DEEPLX_URL",
+            value: "https://deeplx.local",
           },
         },
         openai_compatible: {
@@ -34,6 +37,7 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
           api_key: {
             configured: true,
             source: "direct",
+            value: "openai-token",
           },
         },
         passthrough: {},
@@ -46,7 +50,7 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
     },
     tts: {
       provider: "windows_system",
-      available_providers: ["windows_system", "doubao", "tencent_cloud"],
+      available_providers: ["windows_system", "doubao", "less_tts", "tencent_cloud"],
       providers: {
         windows_system: {},
         doubao: {
@@ -65,11 +69,23 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
             configured: false,
             source: "env",
             env_key: "VOLCENGINE_TTS_APPID",
+            value: "",
           },
           access_token: {
             configured: false,
             source: "env",
             env_key: "VOLCENGINE_TTS_ACCESS_TOKEN",
+            value: "",
+          },
+        },
+        less_tts: {
+          config_path: "config/less_tts.json",
+          endpoint: "https://less-tts.example/v1/audio/speech",
+          api_key: {
+            configured: false,
+            source: "env",
+            env_key: "LESS_TTS_API_KEY",
+            value: "",
           },
         },
         tencent_cloud: {
@@ -93,11 +109,13 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
             configured: false,
             source: "env",
             env_key: "TENCENTCLOUD_SECRET_ID",
+            value: "",
           },
           secret_key: {
             configured: false,
             source: "env",
             env_key: "TENCENTCLOUD_SECRET_KEY",
+            value: "",
           },
         },
       },
@@ -138,39 +156,66 @@ describe("desktop settings state", () => {
     expect(isDesktopSettingsDirty(config, draft)).toBe(true)
   })
 
-  it("builds write-only secret updates without leaking raw secret status back into payload", () => {
+  it("echoes current secret values into the draft and only saves changed secrets as direct values", () => {
     const draft = createDesktopSettingsDraft(createRuntimeConfig())
 
+    expect(draft.translate.providers.deeplx.deeplx_url.value).toBe("https://deeplx.local")
+    expect(draft.translate.providers.openai_compatible.api_key.value).toBe("openai-token")
+
     draft.tts.provider = "doubao"
-    draft.translate.providers.deeplx.deeplx_url.mode = "env"
-    draft.translate.providers.deeplx.deeplx_url.env_key = "DEEPLX_URL_OVERRIDE"
-    draft.translate.providers.openai_compatible.api_key.mode = "direct"
+    draft.translate.providers.deeplx.deeplx_url.value = "https://deeplx.override"
     draft.translate.providers.openai_compatible.api_key.value = "next-openai-token"
-    draft.tts.providers.doubao.appid.mode = "direct"
     draft.tts.providers.doubao.appid.value = "new-app-id"
-    draft.tts.providers.doubao.access_token.mode = "clear"
+    draft.tts.providers.doubao.access_token.value = ""
 
     const payload = buildDesktopSettingsSavePayload(draft)
+    const deeplxUpdates = payload.secret_updates.translate.deeplx
+    const openAiUpdates = payload.secret_updates.translate.openai_compatible
+    const doubaoUpdates = payload.secret_updates.tts.doubao
 
     expect(payload.translate.provider).toBe("deeplx")
     expect(payload.translate.providers.deeplx.timeout_seconds).toBe(8)
-    expect(payload.secret_updates.translate.deeplx.deeplx_url).toEqual({
-      mode: "env",
-      env_key: "DEEPLX_URL",
+    expect(deeplxUpdates).toBeDefined()
+    expect(openAiUpdates).toBeDefined()
+    expect(doubaoUpdates).toBeDefined()
+    expect(deeplxUpdates!.deeplx_url).toEqual({
+      value: "https://deeplx.override",
     })
-    expect(payload.secret_updates.translate.openai_compatible.api_key).toEqual({
-      mode: "direct",
+    expect(openAiUpdates!.api_key).toEqual({
       value: "next-openai-token",
     })
-    expect(payload.secret_updates.tts.doubao.appid).toEqual({
-      mode: "direct",
+    expect(doubaoUpdates!.appid).toEqual({
       value: "new-app-id",
     })
-    expect(payload.secret_updates.tts.doubao.access_token).toEqual({
-      mode: "clear",
-    })
-    expect(payload.secret_updates.tts.tencent_cloud.secret_key).toEqual({
-      mode: "keep",
+    expect(doubaoUpdates!.access_token).toBeUndefined()
+    expect(payload.secret_updates.tts.tencent_cloud).toBeUndefined()
+    expect(payload.secret_updates.tts.less_tts).toBeUndefined()
+  })
+
+  it("omits unchanged secret updates when saving unrelated fields", () => {
+    const draft = createDesktopSettingsDraft(createRuntimeConfig())
+
+    draft.display.english_only = false
+
+    const payload = buildDesktopSettingsSavePayload(draft)
+
+    expect(payload.display.english_only).toBe(false)
+    expect(payload.secret_updates.translate).toEqual({})
+    expect(payload.secret_updates.tts).toEqual({})
+  })
+
+  it("allows explicitly clearing a legacy env-backed secret even when the echoed value is empty", () => {
+    const draft = createDesktopSettingsDraft(createRuntimeConfig())
+
+    draft.tts.provider = "less_tts"
+    draft.tts.providers.less_tts.api_key.forceClear = true
+
+    const payload = buildDesktopSettingsSavePayload(draft)
+
+    expect(payload.secret_updates.tts.less_tts).toEqual({
+      api_key: {
+        value: "",
+      },
     })
   })
 
@@ -181,9 +226,10 @@ describe("desktop settings state", () => {
     draft.translate.providers.openai_compatible.base_url = "https://gateway.local/v1"
     draft.translate.providers.openai_compatible.model = "gpt-4.1-mini"
     draft.translate.providers.openai_compatible.timeout_seconds = 18
-    draft.translate.providers.openai_compatible.api_key.mode = "clear"
+    draft.translate.providers.openai_compatible.api_key.value = ""
 
     const payload = buildDesktopSettingsSavePayload(draft)
+    const openAiUpdates = payload.secret_updates.translate.openai_compatible
 
     expect(payload.translate.provider).toBe("openai_compatible")
     expect(payload.translate.providers.openai_compatible).toEqual({
@@ -192,9 +238,41 @@ describe("desktop settings state", () => {
       timeout_seconds: 18,
     })
     expect(payload.translate.providers.passthrough).toEqual({})
-    expect(payload.secret_updates.translate.openai_compatible.api_key).toEqual({
-      mode: "clear",
+    expect(openAiUpdates).toBeDefined()
+    expect(openAiUpdates!.api_key).toEqual({
+      value: "",
     })
+  })
+
+  it("builds less_tts payload and direct api_key updates", () => {
+    const draft = createDesktopSettingsDraft(createRuntimeConfig())
+
+    draft.tts.provider = "less_tts"
+    draft.tts.providers.less_tts.endpoint = "https://less-tts.changed/v1/audio/speech"
+    draft.tts.providers.less_tts.api_key.value = "less-token"
+
+    const payload = buildDesktopSettingsSavePayload(draft)
+    const lessTtsUpdates = payload.secret_updates.tts.less_tts
+
+    expect(payload.tts.provider).toBe("less_tts")
+    expect(payload.tts.providers.less_tts).toEqual({
+      config_path: "config/less_tts.json",
+      endpoint: "https://less-tts.changed/v1/audio/speech",
+    })
+    expect(lessTtsUpdates).toBeDefined()
+    expect(lessTtsUpdates!.api_key).toEqual({
+      value: "less-token",
+    })
+  })
+
+  it("surfaces field-level validation detail when backend only returns a generic save error", () => {
+    const error = new ConfigSaveError("config validation failed", {
+      "tts.providers.less_tts.api_key": "less_tts api_key is required",
+    })
+
+    expect(resolveConfigSaveErrorMessage(error)).toBe(
+      "保存失败：less_tts api_key is required",
+    )
   })
 
   it("enables save_and_apply only for owned managed connections with restart support", () => {

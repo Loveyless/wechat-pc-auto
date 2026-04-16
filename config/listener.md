@@ -63,24 +63,22 @@ python scripts/smoke_desktop_shell_release.py
 ## 桌面壳设置页与 `/api/config` 契约
 
 - 桌面壳设置页只通过 `GET /api/config` 和 `PUT /api/config` 读写持久化配置；前端不允许直接改 `listener.json` 或 provider 私有 JSON。
-- `GET /api/config` 返回的是安全 DTO，不是原始文件直出：
+- `GET /api/config` 返回的是可编辑 DTO，不是原始文件直出：
   - `translate` / `display` / `tts` 返回当前可编辑字段
   - `runtime` 返回 `config_path`、`apply_strategy`、`restart_required`、`hot_reload_supported`
-  - `deeplx_url`、`api_key`、`appid`、`access_token`、`secret_id`、`secret_key` 这类 secret 只返回 `configured/source/env_key` 元数据，绝不回显原值
+  - `deeplx_url`、`api_key`、`appid`、`access_token`、`secret_id`、`secret_key` 这类字段会直接回显当前可用值，方便设置页“直接输入、保存、下次继续编辑”
+  - 若当前值来自旧 `*_env` 配置，DTO 仍会带 `source=env` 和可选 `env_key`，但这是兼容读，不是新契约
 - `PUT /api/config` 会按现有文件边界原子写入：
   - `listener.json` 继续承载 shared 字段和 `translate.providers` / `tts.providers.<provider>.config_path`
-  - `tts.providers.<provider>.config_path` 指向的 provider 私有 JSON 继续承载豆包 / 腾讯云私有字段
-  - 启动加载仍兼容旧 `translate.deeplx_url(_env)`、旧顶层 `translate.timeout_seconds` 和旧 `tts.config_path`，但 GUI 新保存只写新结构
+  - `tts.providers.<provider>.config_path` 指向的 provider 私有 JSON 继续承载各家云 TTS 私有字段
+  - 启动加载仍兼容旧 `translate.deeplx_url(_env)`、旧顶层 `translate.timeout_seconds` 和旧 `tts.config_path`，但 GUI 新保存只写新结构；只有真正改过的 secret 字段才会落成直接值
   - 未知字段必须保留，不能因为 GUI 保存被顺手删掉
-- secret 更新是 write-only 语义，当前支持四种模式：
-  - `keep`：保持现状
-  - `direct`：写入新的直接值
-  - `env`：改成环境变量名
-  - `clear`：清空现有配置
-- GUI 不会写 `.env.local` 真值。
-  - `env` 模式只会更新配置文件中的 `*_env` 字段。
-  - DeepLX 在 GUI 中固定使用 `DEEPLX_URL`，不开放自定义 env key。
-  - `translate.providers.openai_compatible.api_key` 不支持 `env` 模式，也没有 `api_key_env` 兼容字段。
+- secret 更新现在是单一直接值语义：
+  - 只有真正改过的 secret 字段才会出现在请求体里
+  - 请求体里的 secret 字段统一传 `{ "value": "..." }`
+  - 非空字符串表示写入新的直接值
+  - 空字符串表示清空现有值，并顺手清掉遗留的 `*_env` 字段
+- GUI 不再支持 `keep/env/clear` 这些模式，也不会再把值写进 `.env.local`。
 - 当前主路径没有 config hot reload。
   - 源码态或外部 backend 连接：只能 `save-only`，保存后必须手动重启 backend
   - Tauri 托管且当前壳拥有 backend sidecar ownership：才允许 `保存并应用`
@@ -121,7 +119,7 @@ python scripts/smoke_desktop_shell_release.py
     "target_lang": "EN",
     "providers": {
       "deeplx": {
-        "deeplx_url_env": "DEEPLX_URL",
+        "deeplx_url": "",
         "timeout_seconds": 8.0
       },
       "openai_compatible": {
@@ -143,6 +141,9 @@ python scripts/smoke_desktop_shell_release.py
     "providers": {
       "doubao": {
         "config_path": "config/doubao_tts.json"
+      },
+      "less_tts": {
+        "config_path": "config/less_tts.json"
       },
       "tencent_cloud": {
         "config_path": "config/tencent_tts.json"
@@ -183,18 +184,12 @@ python scripts/smoke_desktop_shell_release.py
 - `target_lang`：目标语言，例如 `EN`
 - `providers.deeplx`
   - `deeplx_url`：DeepLX 接口地址的直接值
-  - `deeplx_url_env`：DeepLX URL 对应的环境变量名
-    - 只允许写成 `DEEPLX_URL`
-    - 仓库默认值固定为 `DEEPLX_URL`
-    - 清空这个字段就等于显式关闭 env 模式，不会再偷偷 fallback
   - `timeout_seconds`：DeepLX 请求超时（秒），必须 `> 0`
-  - 当 `translate.enabled=true` 且 `provider=deeplx` 时，若 `deeplx_url` 和 `deeplx_url_env` 都为空，启动阶段会 fail-fast
+  - 当 `translate.enabled=true` 且 `provider=deeplx` 时，`deeplx_url` 不能为空；否则启动阶段会 fail-fast
 - `providers.openai_compatible`
   - `base_url`：OpenAI-compatible Chat Completions 入口基地址
   - `model`：请求模型名
   - `api_key`：直接值密钥
-    - 当前配置契约不支持 `api_key_env`
-    - 桌面壳 GUI 只支持 direct/clear，不会把这个字段改成 env 模式
   - `timeout_seconds`：请求超时（秒），必须 `> 0`
   - 当 `translate.enabled=true` 且 `provider=openai_compatible` 时，`base_url`、`model`、`api_key` 三个字段都必须存在
 - `providers.passthrough`
@@ -203,16 +198,7 @@ python scripts/smoke_desktop_shell_release.py
   - 旧 `translate.deeplx_url`
   - 旧 `translate.deeplx_url_env`
   - 旧顶层 `translate.timeout_seconds`
-  - 兼容只用于读；新保存结果只写 `translate.providers.*`
-
-`.env.local` 读取顺序：
-
-- 源码态默认读仓库根目录 `.env.local`
-- Tauri 壳优先读 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`
-- 若运行时目录没有，再回退到 `wechat-auto-shell.exe` 同目录 `.env.local`
-
-当前默认打包配置不要求首启必须带 `.env.local`。
-但只要你把 `translate.enabled=true` 且 `provider=deeplx`，DeepLX URL 仍然必须通过 `translate.providers.deeplx.deeplx_url` 或 `DEEPLX_URL` 提供。
+  - 兼容只用于读；新保存结果只写 `translate.providers.*`，旧 env 配置只有在你输入新值或显式清空时才会改写
 
 ### `display`
 
@@ -233,9 +219,10 @@ python scripts/smoke_desktop_shell_release.py
 - `provider`：TTS 后端
   - `windows_system`
   - `doubao`
+  - `less_tts`
   - `tencent_cloud`
   - 仓库默认值是 `windows_system`，目的是让 fresh install 不依赖云凭据也能首启进入设置页
-- `providers.doubao.config_path` / `providers.tencent_cloud.config_path`：provider 私有配置文件路径
+- `providers.doubao.config_path` / `providers.less_tts.config_path` / `providers.tencent_cloud.config_path`：provider 私有配置文件路径
   - 相对路径优先按 `listener.json` 所在目录解析
   - 找不到时再按项目根目录解析
   - 推荐把 provider 私有参数拆到独立 JSON，不要把不同供应商字段继续堆回 `listener.json`
@@ -258,8 +245,8 @@ python scripts/smoke_desktop_shell_release.py
 {
   "provider": "doubao",
   "endpoint": "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream",
-  "appid_env": "VOLCENGINE_TTS_APPID",
-  "access_token_env": "VOLCENGINE_TTS_ACCESS_TOKEN",
+  "appid": "",
+  "access_token": "",
   "resource_id": "seed-tts-2.0",
   "speaker": "en_female_dacey_uranus_bigtts",
   "audio_format": "wav",
@@ -275,20 +262,39 @@ python scripts/smoke_desktop_shell_release.py
 ### `doubao_tts.json` 字段说明
 
 - 仓库跟踪的 `config/doubao_tts.json` 默认只保留安全默认值。
-- `appid` / `access_token` 在仓库默认值里应保持空串；真实凭证优先放 `.env.local` 或 Tauri 运行时目录对应的 `.env.local`。
+- `appid` / `access_token` 在仓库默认值里应保持空串；真实凭证通过设置页或当前 runtime root 的 provider 配置直接写入。
 - `provider`：固定为 `doubao`
 - `endpoint`：单向流式 WebSocket 地址
-- `appid_env` / `access_token_env`：凭证环境变量名
-- `appid` / `access_token`：也支持直接写死，但不推荐
+- `appid` / `access_token`：豆包凭证本体
 - `resource_id`：豆包语音资源 ID，例如 `seed-tts-2.0`
 - `speaker`：音色 ID，必须和 `resource_id` 匹配
-- `audio_format`：当前必须是 `wav`
+- `audio_format`：当前支持 `wav / mp3`，默认 `wav`
 - `sample_rate`：当前只接受 `8000 / 16000 / 22050 / 24000 / 32000 / 44100 / 48000`
 - `speech_rate`：允许范围 `-50 ~ 100`
 - `loudness_rate`：允许范围 `-50 ~ 100`
 - `use_cache`：是否启用豆包缓存，默认 `false`
 - `uid`：业务侧用户标识
 - `connect_timeout_seconds`：建连超时，必须 `> 0`
+
+## `config/less_tts.json` 示例
+
+```json
+{
+  "provider": "less_tts",
+  "endpoint": "https://less-tts.less-842.workers.dev/v1/audio/speech",
+  "api_key": ""
+}
+```
+
+### `less_tts.json` 字段说明
+
+- 仓库跟踪的 `config/less_tts.json` 默认只保留安全默认值。
+- `api_key` 在仓库默认值里应保持空串；真实凭证通过设置页或当前 runtime root 的 provider 配置直接写入。
+- `provider`：固定为 `less_tts`
+- `endpoint`：HTTP 语音合成入口，当前默认 `https://less-tts.less-842.workers.dev/v1/audio/speech`
+- `api_key`：直接值密钥
+- 当前播放链路按 `audio/mpeg` / MP3 处理。
+- GUI 当前只开放 `endpoint` 和 `api_key`；`voice/speed/pitch/style` 固定走仓库默认值，不在设置页暴露。
 
 ## `config/tencent_tts.json` 示例
 
@@ -297,8 +303,6 @@ python scripts/smoke_desktop_shell_release.py
   "provider": "tencent_cloud",
   "secret_id": "",
   "secret_key": "",
-  "secret_id_env": "TENCENTCLOUD_SECRET_ID",
-  "secret_key_env": "TENCENTCLOUD_SECRET_KEY",
   "endpoint": "tts.tencentcloudapi.com",
   "region": "",
   "voice_type": 501008,
@@ -318,14 +322,13 @@ python scripts/smoke_desktop_shell_release.py
 ### `tencent_tts.json` 字段说明
 
 - 仓库跟踪的 `config/tencent_tts.json` 默认只保留安全默认值。
-- `secret_id` / `secret_key` 在仓库默认值里应保持空串；真实凭证优先放 `.env.local` 或 Tauri 运行时目录对应的 `.env.local`。
+- `secret_id` / `secret_key` 在仓库默认值里应保持空串；真实凭证通过设置页或当前 runtime root 的 provider 配置直接写入。
 - `provider`：固定为 `tencent_cloud`
-- `secret_id` / `secret_key`：腾讯云密钥本体；推荐留空并通过环境变量注入
-- `secret_id_env` / `secret_key_env`：凭证环境变量名
+- `secret_id` / `secret_key`：腾讯云密钥本体
 - `endpoint`：默认 `tts.tencentcloudapi.com`
 - `region`：可选地域；留空时不额外带 `X-TC-Region`
 - `voice_type`：音色 ID，必须是正整数
-- `codec`：当前必须是 `wav`
+- `codec`：当前支持 `wav / mp3`，默认 `wav`
 - `sample_rate`：当前只接受 `8000 / 16000 / 24000`
 - `speed`：允许范围 `-2.0 ~ 6.0`
 - `volume`：允许范围 `-10.0 ~ 10.0`

@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Desktop runtime configuration API SHALL expose a complete safe editable DTO
-The system SHALL provide a `GET /api/config` contract for the supported desktop runtime path that returns the editable translate, display, and TTS configuration needed by the desktop shell. Secret-like fields SHALL be returned only as metadata such as whether a value is configured, whether the current source is direct or environment-backed, and the configured environment variable name when applicable. Raw secret values SHALL NOT be returned.
+The system SHALL provide a `GET /api/config` contract for the supported desktop runtime path that returns the editable translate, display, and TTS configuration needed by the desktop shell. Secret-like fields SHALL return the current editable value so the desktop shell can prefill direct-input forms. When a value is still coming from legacy `*_env` config, the DTO SHALL continue to expose `source=env` and the configured environment variable name as compatibility metadata.
 
 #### Scenario: Desktop shell opens the settings screen
 - **WHEN** the frontend requests `GET /api/config`
@@ -9,7 +9,7 @@ The system SHALL provide a `GET /api/config` contract for the supported desktop 
 
 #### Scenario: Secret-backed configuration is already present
 - **WHEN** the current config stores a secret directly or through `*_env`
-- **THEN** `GET /api/config` reports only the secret metadata and never echoes the raw secret value
+- **THEN** `GET /api/config` returns the current effective value for editing and, when applicable, marks that the source is still legacy env-backed
 
 ### Requirement: Desktop runtime configuration save SHALL validate and persist by file boundary
 The system SHALL accept a configuration save request that validates edited fields using the same fail-fast rules as startup, keeps `listener.json` and provider-private TTS JSON as separate persistence boundaries, preserves unknown fields in both files, and writes all affected JSON files atomically with LF line endings.
@@ -29,6 +29,6 @@ The system SHALL reject invalid configuration writes with field-level validation
 - **WHEN** the save request contains an unsupported provider, missing required field, or invalid numeric range
 - **THEN** the API responds with field-level validation errors and the existing config files remain unchanged
 
-#### Scenario: User updates a secret field through write-only input
-- **WHEN** the save request provides a new secret value or env indirection
-- **THEN** the backend persists the new secret source without returning that raw value in the response
+#### Scenario: User updates a secret field through direct input
+- **WHEN** the save request provides a secret payload as `{ "value": "..." }`
+- **THEN** the backend persists that direct value, clears any legacy `*_env` field for the same secret, and returns the updated snapshot for continued editing

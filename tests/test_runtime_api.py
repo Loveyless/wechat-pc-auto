@@ -28,13 +28,14 @@ class FakeService:
                             "configured": False,
                             "source": "env",
                             "env_key": "DEEPLX_URL",
+                            "value": "",
                         },
                     },
                     "openai_compatible": {
                         "base_url": "",
                         "model": "",
                         "timeout_seconds": 8.0,
-                        "api_key": {"configured": False, "source": "unset"},
+                        "api_key": {"configured": False, "source": "unset", "value": ""},
                     },
                     "passthrough": {},
                 },
@@ -42,10 +43,11 @@ class FakeService:
             "display": {"english_only": True, "tts_auto_read_active_chat": True},
             "tts": {
                 "provider": "windows_system",
-                "available_providers": ["windows_system", "doubao", "tencent_cloud"],
+                "available_providers": ["windows_system", "doubao", "less_tts", "tencent_cloud"],
                 "providers": {
                     "windows_system": {},
                     "doubao": {"config_path": "config/doubao_tts.json"},
+                    "less_tts": {"config_path": "config/less_tts.json"},
                     "tencent_cloud": {"config_path": "config/tencent_tts.json"},
                 },
             },
@@ -219,7 +221,6 @@ class RuntimeApiServerTest(unittest.TestCase):
                     "translate": {
                         "openai_compatible": {
                             "api_key": {
-                                "mode": "direct",
                                 "value": "token",
                             }
                         }

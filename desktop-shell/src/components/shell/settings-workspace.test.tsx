@@ -32,6 +32,7 @@ function createRuntimeConfig(params: {
             configured: true,
             source: "env",
             env_key: "DEEPLX_URL",
+            value: "https://deeplx.local",
           },
         },
         openai_compatible: {
@@ -41,6 +42,7 @@ function createRuntimeConfig(params: {
           api_key: {
             configured: true,
             source: "direct",
+            value: "openai-token",
           },
         },
         passthrough: {},
@@ -53,7 +55,7 @@ function createRuntimeConfig(params: {
     },
     tts: {
       provider: params.ttsProvider,
-      available_providers: ["windows_system", "doubao", "tencent_cloud"],
+      available_providers: ["windows_system", "doubao", "less_tts", "tencent_cloud"],
       providers: {
         windows_system: {},
         doubao: {
@@ -72,11 +74,23 @@ function createRuntimeConfig(params: {
             configured: false,
             source: "env",
             env_key: "VOLCENGINE_TTS_APPID",
+            value: "",
           },
           access_token: {
             configured: false,
             source: "env",
             env_key: "VOLCENGINE_TTS_ACCESS_TOKEN",
+            value: "",
+          },
+        },
+        less_tts: {
+          config_path: "config/less_tts.json",
+          endpoint: "https://less-tts.example/v1/audio/speech",
+          api_key: {
+            configured: false,
+            source: "env",
+            env_key: "LESS_TTS_API_KEY",
+            value: "",
           },
         },
         tencent_cloud: {
@@ -100,11 +114,13 @@ function createRuntimeConfig(params: {
             configured: false,
             source: "env",
             env_key: "TENCENTCLOUD_SECRET_ID",
+            value: "",
           },
           secret_key: {
             configured: false,
             source: "env",
             env_key: "TENCENTCLOUD_SECRET_KEY",
+            value: "",
           },
         },
       },
@@ -204,9 +220,11 @@ describe("settings workspace", () => {
 
     expect(deeplxMarkup).toContain("DeepLX Timeout")
     expect(deeplxMarkup).toContain("DeepLX URL")
+    expect(deeplxMarkup).toContain("value=\"https://deeplx.local\"")
     expect(openAiMarkup).toContain("Base URL")
     expect(openAiMarkup).toContain("Model")
     expect(openAiMarkup).toContain("API Key")
+    expect(openAiMarkup).toContain("value=\"openai-token\"")
     expect(openAiMarkup).not.toContain("改成环境变量")
     expect(passthroughMarkup).toContain("不请求外部翻译 provider")
   })
@@ -217,6 +235,15 @@ describe("settings workspace", () => {
         settings={createSettingsResult({
           translateProvider: "deeplx",
           ttsProvider: "doubao",
+          managedApply: false,
+        })}
+      />,
+    )
+    const lessTtsMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "less_tts",
           managedApply: false,
         })}
       />,
@@ -235,13 +262,34 @@ describe("settings workspace", () => {
     expect(doubaoMarkup).toContain("豆包 App ID")
     expect(doubaoMarkup).toContain("高级参数")
     expect(doubaoMarkup).toContain("Speech Rate")
+    expect(lessTtsMarkup).toContain("Config Path")
+    expect(lessTtsMarkup).toContain("API Key")
+    expect(lessTtsMarkup).toContain("MP3 播放链")
+    expect(lessTtsMarkup).toContain("旧环境变量 LESS_TTS_API_KEY")
+    expect(lessTtsMarkup).toContain("清空配置")
+    expect(lessTtsMarkup).toContain("输入新值会改成直接值")
     expect(tencentMarkup).toContain("Config Path")
     expect(tencentMarkup).toContain("Tencent Secret ID")
     expect(tencentMarkup).toContain("高级参数")
     expect(tencentMarkup).toContain("Emotion Intensity")
   })
 
-  it("renders provider-specific branches for windows_system, doubao, and tencent_cloud", () => {
+  it("renders pending clear state for legacy env-backed secrets", () => {
+    const settings = createSettingsResult({
+      translateProvider: "deeplx",
+      ttsProvider: "less_tts",
+      managedApply: false,
+    })
+    settings.draft!.tts.providers.less_tts.api_key.forceClear = true
+
+    const markup = renderToStaticMarkup(<SettingsWorkspace settings={settings} />)
+
+    expect(markup).toContain("取消清空")
+    expect(markup).toContain("待清空")
+    expect(markup).toContain("这次保存会删除直接值，并移除旧环境变量引用")
+  })
+
+  it("renders provider-specific branches for windows_system, doubao, less_tts, and tencent_cloud", () => {
     const windowsMarkup = renderToStaticMarkup(
       <SettingsWorkspace
         settings={createSettingsResult({
@@ -260,6 +308,15 @@ describe("settings workspace", () => {
         })}
       />,
     )
+    const lessTtsMarkup = renderToStaticMarkup(
+      <SettingsWorkspace
+        settings={createSettingsResult({
+          translateProvider: "deeplx",
+          ttsProvider: "less_tts",
+          managedApply: false,
+        })}
+      />,
+    )
     const tencentMarkup = renderToStaticMarkup(
       <SettingsWorkspace
         settings={createSettingsResult({
@@ -274,6 +331,8 @@ describe("settings workspace", () => {
     expect(windowsMarkup).not.toContain("豆包 App ID")
     expect(doubaoMarkup).toContain("豆包 App ID")
     expect(doubaoMarkup).toContain("豆包 Access Token")
+    expect(lessTtsMarkup).toContain("Less TTS HTTP endpoint")
+    expect(lessTtsMarkup).toContain("API Key")
     expect(tencentMarkup).toContain("Tencent Secret ID")
     expect(tencentMarkup).toContain("Tencent Secret Key")
   })

@@ -1,0 +1,5 @@
+{
+  "provider": "less_tts",
+  "endpoint": "https://less-tts.less-842.workers.dev/v1/audio/speech",
+  "api_key": ""
+}
