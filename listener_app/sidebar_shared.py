@@ -36,7 +36,7 @@ BUNDLE_ROOT = get_bundle_root()
 EXECUTABLE_ROOT = get_executable_root()
 DEFAULT_CONFIG_PATH = os.path.join(ROOT_DIR, "config", "listener.json")
 BUNDLED_CONFIG_PATH = os.path.join(BUNDLE_ROOT, "config", "listener.json")
-WORKER_EXE_NAME = "group_listener_worker.exe"
+WORKER_EXE_NAME = "group_listener_worker"
 
 # 匹配 “发送人: 正文” / “发送人：正文”
 SENDER_PREFIX_RE = re.compile(r"^\s*([^:：]{1,40})[:：]\s*(.+?)\s*$")
@@ -369,4 +369,3 @@ def is_speakable_english_text(text: str) -> bool:
     if CJK_TEXT_RE.search(value):
         return False
     return bool(ASCII_LETTER_RE.search(value))
-

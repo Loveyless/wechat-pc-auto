@@ -5,21 +5,19 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "wechat-pc-auto"                
 version = "0.1.1"
-description = "Stable WeChat PC session-preview listener with sidebar translation"
+description = "Apple Silicon macOS WeChat session-preview listener with local runtime API"
 readme = "README.md"
 authors = [{name = "YourName", email = "your@email.com"}]
 license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS :: MacOS X",
 ]
-keywords = ["wechat", "listener", "uiautomation", "windows", "translation", "sidebar"]
-requires-python = ">=3.8"
+keywords = ["wechat", "listener", "macos", "apple-silicon", "translation", "sidebar"]
+requires-python = ">=3.9"
 dependencies = [
-    # worker 直接导入 uiautomation；comtypes 作为其传递依赖由预检和 smoke 覆盖。
-    "uiautomation>=2.0.18",
-    # runtime_api 和 doubao TTS runtime 都依赖 websockets。
+    # runtime_api 依赖 websockets，源码态与 sidecar 都需要它。
     "websockets>=14.0",
     # 腾讯云 TTS runtime 通过 importlib 动态导入 tencentcloud.*。
     "tencentcloud-sdk-python-tts>=3.0.0",

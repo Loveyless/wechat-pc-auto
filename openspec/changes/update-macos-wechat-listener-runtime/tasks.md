@@ -8,7 +8,7 @@
 
 - [x] 2.1 更新 `listener_app/group_listener_worker.py` 以使用 mac 适配层，并补 `permission_required`、`ui_paused`、`window_lost`、`reconnecting` 等状态流
 - [x] 2.2 更新 `listener_app/backend_runtime.py` 与 `listener_app/backend_main.py`，保证现有 `/healthz`、`/api/runtime`、`/api/sessions` 消费面保持不变且能表达新状态
-- [ ] 2.3 更新 `listener_app/sidebar_runtime_support.py`、`pyproject.toml` 与 `requirements.txt`，让 mac worker 依赖与启动环境和当前分支目标一致
+- [x] 2.3 更新 `listener_app/sidebar_runtime_support.py`、`pyproject.toml` 与 `requirements.txt`，让 mac worker 依赖与启动环境和当前分支目标一致
 
 ## 3. 文档与验收
 

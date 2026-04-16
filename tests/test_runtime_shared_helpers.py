@@ -1012,16 +1012,19 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             load_retry_seconds=10.0,
             frozen=False,
             python_executable="python",
-            source_root=r"D:\repo\wechat-pc-auto",
-            executable_root=r"D:\runtime",
+            source_root="/repo/wechat-auto",
+            executable_root="/runtime",
         )
 
-        self.assertEqual(cmd[:5], ["python", "-X", "utf8", "-u", r"D:\repo\wechat-pc-auto\listener_app\group_listener_worker.py"])
+        self.assertEqual(
+            cmd[:5],
+            ["python", "-X", "utf8", "-u", "/repo/wechat-auto/listener_app/group_listener_worker.py"],
+        )
         self.assertIn("--targets-json", cmd)
         self.assertIn("--debug", cmd)
         self.assertIn("--focus-refresh", cmd)
 
-    def test_build_worker_command_uses_worker_exe_in_frozen_mode(self):
+    def test_build_worker_command_uses_worker_binary_in_frozen_mode(self):
         cmd = sidebar.build_worker_command(
             ["群1"],
             0.6,
@@ -1030,11 +1033,11 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             load_retry_seconds=10.0,
             frozen=True,
             python_executable="python",
-            source_root=r"D:\repo\wechat-pc-auto",
-            executable_root=r"D:\runtime",
+            source_root="/repo/wechat-auto",
+            executable_root="/runtime",
         )
 
-        self.assertEqual(cmd[0], r"D:\runtime\group_listener_worker.exe")
+        self.assertEqual(cmd[0], "/runtime/group_listener_worker")
         self.assertNotIn("-X", cmd)
         self.assertIn("--targets-json", cmd)
 
