@@ -2,7 +2,7 @@
 
 - [x] 1.1 Update `listener_app/sidebar_tts.py` so the supported built-in system provider becomes `macos_system`, legacy `windows_system` resolves through a defined compatibility path, and system/cloud playback use mac-compatible commands instead of Windows-only audio APIs
 - [x] 1.2 Update `listener_app/runtime_config.py`, `listener_app/runtime_config_store.py`, and `listener_app/runtime_api.py` so the authoritative TTS provider enum, defaults, config snapshots, and save behavior expose `macos_system` while preserving existing file-boundary persistence and legacy-read compatibility
-- [ ] 1.3 Add or update Python regression coverage for provider normalization, config snapshot/save behavior, API payloads, dependency checks, and runtime auto-read behavior under the mac-only provider set
+- [x] 1.3 Add or update Python regression coverage for provider normalization, config snapshot/save behavior, API payloads, dependency checks, and runtime auto-read behavior under the mac-only provider set
 
 ## 2. Desktop settings contract
 

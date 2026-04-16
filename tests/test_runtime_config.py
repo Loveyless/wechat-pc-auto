@@ -62,6 +62,7 @@ class RuntimeConfigTest(unittest.TestCase):
         self.assertFalse(config.display.tts_auto_read_active_chat)
         self.assertEqual(config.display.on_translate_fail, "show_cn_with_reason")
         self.assertEqual(config.tts.provider, "macos_system")
+        self.assertEqual(config.tts.raw_config["provider"], "macos_system")
         self.assertTrue(
             config.log_file.replace("\\", "/").endswith("logs/runtime.log")
         )

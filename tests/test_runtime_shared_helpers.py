@@ -74,7 +74,6 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             config_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
-                newline="\n",
             )
 
             sidebar.save_listener_targets_config(str(config_path), payload, [])
@@ -807,6 +806,14 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
 
         self.assertTrue(ok)
         self.assertIn("tts dependency check passed backend=macos_system", detail)
+
+    def test_check_tts_dependency_packaging_normalizes_legacy_windows_provider(self):
+        with mock.patch.object(sidebar, "probe_command_runtime", return_value=""):
+            ok, detail = sidebar.check_tts_dependency_packaging({"provider": "windows_system"})
+
+        self.assertTrue(ok)
+        self.assertIn("backend=macos_system", detail)
+        self.assertIn("legacy_provider=windows_system", detail)
 
     def test_doubao_run_blocking_emits_failure_log(self):
         settings = sidebar.DoubaoTTSSettings(

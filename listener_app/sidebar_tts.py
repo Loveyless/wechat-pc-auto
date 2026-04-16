@@ -53,6 +53,7 @@ else:
         validate_positive_float,
     )
 
+PREFERRED_ENGLISH_TTS_VOICES = ("Microsoft Zira Desktop", "Microsoft David Desktop")
 LEGACY_TTS_PROVIDER_ALIASES = {
     "windows_system": "macos_system",
 }

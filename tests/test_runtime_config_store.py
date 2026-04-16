@@ -151,6 +151,23 @@ class RuntimeConfigStoreTest(unittest.TestCase):
             "env-secret",
         )
 
+    def test_build_config_snapshot_normalizes_legacy_windows_system_provider(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+
+        listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
+        listener_raw["tts"] = {
+            "provider": "windows_system",
+        }
+        self._write_json(listener_path, listener_raw)
+
+        snapshot = build_config_snapshot(str(listener_path))
+
+        self.assertEqual(snapshot["tts"]["provider"], "macos_system")
+        self.assertIn("macos_system", snapshot["tts"]["available_providers"])
+        self.assertIn("macos_system", snapshot["tts"]["providers"])
+        self.assertNotIn("windows_system", snapshot["tts"]["providers"])
+
     def test_save_config_snapshot_preserves_unknown_fields_and_converts_secrets_to_direct_values(self):
         listener_path, tencent_path, temp_dir = self._create_runtime_files()
         self.addCleanup(temp_dir.cleanup)
