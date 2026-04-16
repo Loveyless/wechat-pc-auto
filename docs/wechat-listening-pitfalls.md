@@ -1,5 +1,11 @@
 # 微信监听踩坑参考（Windows / Weixin / UIAutomation）
 
+## 分支说明
+
+- 当前分支目标已经切到 `Apple Silicon macOS`。
+- 本文下面的大部分内容仍记录的是迁移前的 `Windows / Weixin / UIAutomation` 旧实现，当前主要作用是给迁移期做对照和避坑参考。
+- 在本分支里，如果本文下文与 `README.md`、`AGENTS.md` 或 `docs/apple-silicon-mac-adaptation-plan.md` 的 mac-only 定位冲突，以后者为准。
+
 ## 适用范围
 本说明覆盖以下实现：
 - `listener_app/backend_main.py`
@@ -280,17 +286,17 @@
 
 ### 19) 打包后 worker 拉不起来
 现象：
-- 源码里本地运行正常，但打包成 exe 后主程序一启动就报 worker 启动失败。
+- 源码里本地运行正常，但打包成桌面壳后主程序一启动就报 worker 启动失败。
 
 根因：
 - 开发态可以直接 `python listener_app/group_listener_worker.py`。
 - 打包态不能再假设用户机器上有一套可用的 `python + .py` 子进程模型。
 
 处理：
-- 打包产物必须包含两个 exe：
-  - 主程序 `wechat-auto-shell.exe`
-  - 同目录 worker `group_listener_worker.exe`
-- 主程序在 frozen 环境下不再拉 `.py` 文件，而是直接拉同目录的 `group_listener_worker.exe`。
+- 打包产物必须包含 shell 和 worker sidecar：
+  - shell 可执行文件
+  - `group_listener_worker` sidecar
+- 主程序在 frozen 环境下不再拉 `.py` 文件，而是直接拉同目录的 `group_listener_worker` sidecar。
 - 打包态默认配置、日志、`.env.local`、运行时锁都按主程序目录解析，不再写回源码目录。
 
 ### 20) 打包态会话名乱码，左侧多出脏会话项
@@ -299,7 +305,7 @@
 - 实际预览消息会被归到乱码会话项里，看起来像“凭空多了一条脏会话”。
 
 根因：
-- `group_listener_worker.exe` 是独立子进程。
+- `group_listener_worker` sidecar 是独立子进程。
 - 如果打包 worker 的 stdout/stderr 仍按系统本地编码写出，而主程序固定按 UTF-8 读管道，就会把事件里的 `chat_name`、debug 日志、`wx_auto` 日志全部解码坏。
 
 处理：
@@ -486,20 +492,20 @@
 
 ### 28) `npm run tauri build` 现在已经能做一体化桌面壳；密钥仍然外置，但 fresh install 不该被密钥卡死
 现象：
-- `desktop-shell` 现在已经能产出 `wechat-auto-shell.exe`、`msi`、`nsis`，而且双击壳会自动拉起 backend sidecar。
+- `desktop-shell` 当前分支的本地构建链已经按 mac-only 事实运行：`npm run tauri dev` / `npm run tauri build` 会先构建 target-triple sidecar，再由 shell 自动拉起 backend。
 - 运行时配置、日志、锁会落到 `~/Library/Application Support/com.wechatauto.shell`，不再写回源码目录。
 - fresh runtime root 使用仓库跟踪的默认 bundle 配置时，即使没有 `.env.local`，也应该能先进入桌面壳和设置页。
 - 但已有 runtime root 若残留旧配置，或者你把 DeepLX / 云 TTS 打开后又没补 URL / 凭据，壳启动阶段仍会 fail-fast。
 
 根因：
 - `desktop-shell/package.json` 的 `pretauri` 会先构建 PyInstaller sidecar。
-- `desktop-shell/src-tauri/src/main.rs` 现在会托管 `wechat-auto-backend.exe`，并给 sidecar 注入 `WECHAT_AUTO_RUNTIME_ROOT`。
+- `desktop-shell/src-tauri/src/main.rs` 现在会托管 `wechat-auto-backend` sidecar，并给它注入 `WECHAT_AUTO_RUNTIME_ROOT`。
 - `listener_app/sidebar_shared.py` 会按运行时根目录解析配置/日志，并在 Tauri 壳下按“运行时目录优先、可执行目录兜底”读取 `.env.local`。
 - `listener_app/sidebar_shared.py` 复制 bundle 配置时只补不存在的文件，不覆盖已有 runtime 配置。
 - 一体化不等于“顺手把你的密钥一起烘焙进 installer”；这条边界必须保留。
 
 处理：
-- `tauri.conf.json` 继续显式维护 Windows `.ico`，否则 bundle 还是会直接失败。
+- `tauri.conf.json` 继续显式维护 `bundle.icon`，并把 `icon.png` 作为当前 mac build/test 的显式输入。
 - 仓库跟踪的默认 `config/listener.json` 必须保持这两个首启安全值：
   - `translate.enabled=false`
   - `tts.provider=macos_system`
@@ -514,28 +520,28 @@
 
 ### 28.0) fast regression 的 Rust 单测不该依赖 sidecar 二进制
 现象：
-- 干净 CI 上直接跑 `cd desktop-shell/src-tauri && cargo test`，会在编译期报 `resource path binaries\\wechat-auto-backend-<target>.exe doesn't exist`。
+- 干净环境里直接跑 `cd desktop-shell/src-tauri && cargo test`，很容易在编译期报 sidecar 资源或图标输入缺失；这不代表主链路坏了，而是你绕开了仓库定义的测试入口。
 - 本地偶尔过，只是因为 `desktop-shell/src-tauri/binaries/` 残留了上次打包产物，不是测试链真的对。
 
 根因：
 - `desktop-shell/src-tauri/build.rs` 会执行 `tauri_build::build()`，它会读取 `desktop-shell/src-tauri/tauri.conf.json` 的 `bundle.externalBin`。
-- `desktop-shell/src-tauri/src/main.rs` 的 `tauri::generate_context!()` 仍要求真实 Tauri 配置存在，所以测试态不能粗暴跳过整份配置。
+- `desktop-shell/src-tauri/src/main.rs` 的 `tauri::generate_context!()` 仍要求真实 Tauri 配置与图标资源存在，所以测试态不能粗暴跳过整份配置。
 - `desktop-shell/package.json` 的 `pretauri` 只会在 `npm run tauri ...` 前构建 sidecar；裸 `cargo test` 根本不会走这条链。
 
 处理：
 - Rust 单测统一走 `cd desktop-shell && npm run test:rust`。
 - 这条命令会把 `desktop-shell/src-tauri/tauri.test.conf.json` 通过 `TAURI_CONFIG` 合并进测试态配置，只清空 `bundle.externalBin`，不改 `frontendDist`。
 - 所以 fast regression 仍然必须先跑 `npm run build` 产出 `desktop-shell/dist`，但不需要先打 sidecar。
-- sidecar 打包正确性继续由 `python scripts/build_desktop_shell_sidecars.py` 和 `python scripts/smoke_desktop_shell_release.py` 兜底；别把 Rust 单测误当成打包 smoke。
+- sidecar 打包正确性继续由 `python3 scripts/build_desktop_shell_sidecars.py` 和 `python3 scripts/smoke_desktop_shell_release.py` 兜底；别把 Rust 单测误当成打包 smoke。
 
 ### 28.05) packaging smoke 报 `backend stderr:` 不一定是 backend 真坏了，可能只是日志流分错了
 现象：
-- `python scripts/smoke_desktop_shell_release.py` 已经等到 `/healthz` ready，但还是因为 bootstrap log 里出现 `backend stderr:` 直接失败。
+- `python3 scripts/smoke_desktop_shell_release.py` 已经等到 `/healthz` ready，但还是因为 bootstrap log 里出现 `backend stderr:` 直接失败。
 - 常见表现是 log 里只有 `owner watchdog enabled/lost/recovered/exiting` 这类生命周期提示，没有 traceback，也没有 `startup failed`。
 
 根因：
 - `scripts/smoke_desktop_shell_release.py` 会把 `backend stderr:` 视为 release 脏信号，见 `scripts/packaging_manifest.json` 的 forbidden patterns。
-- `desktop-shell/src-tauri/src/backend/bootstrap.rs` 会把 sidecar stderr 原样写进 `%LOCALAPPDATA%\\com.wechatauto.shell\\logs\\desktop-shell-bootstrap.log`。
+- `desktop-shell/src-tauri/src/backend/bootstrap.rs` 会把 sidecar stderr 原样写进 `~/Library/Application Support/com.wechatauto.shell/logs/desktop-shell-bootstrap.log`。
 - `listener_app/backend_main.py` 里的 owner watchdog 属于正常生命周期信息，不该走 stderr；真错误才应该走 stderr。
 
 处理：
@@ -543,43 +549,41 @@
 - `startup failed`、依赖检查失败、非法 owner pid 这类异常继续走 stderr，不要为了过 smoke 把真错误静音。
 - 遇到 `backend stderr:` 时，先看具体文案；如果只是正常生命周期提示，修日志分流，不要去放宽 smoke 规则。
 
-### 28.06) tag 发布不能绕过 Windows release smoke
+### 28.06) 当前分支的 release smoke 不能被“只要 build 过了”替代
 现象：
-- 有些仓库会在打 tag 后直接上传 installer / setup.exe，看起来很省事，但一旦构建链和真实启动链脱节，就会把“能编译”误当成“能交付”。
+- 只跑 `npm run tauri -- build` 看起来很省事，但一旦构建链和真实启动链脱节，就会把“能编译”误当成“能交付”。
 - 这种错最坏的地方不是 CI 红了，而是包已经发出去了，用户才替你做 smoke。
 
 根因：
 - `npm run tauri -- build` 只能证明 Tauri/sidecar 构建成功，不能证明 release 壳真的能拉起 backend、通过 `/healthz`、守住 single-instance、也不能证明 bootstrap log 干净。
-- tag 发布如果不复用 `python scripts/smoke_desktop_shell_release.py`，就等于又发明了一条和现有发布闸口不一致的发版链。
+- 如果不复用 `python3 scripts/smoke_desktop_shell_release.py`，就等于又发明了一条和现有发布闸口不一致的发版链。
 
 处理：
-- `windows-release-on-tag` 必须先执行完整 Windows 发布闸口，再发布产物：
+- 当前分支的最小交付闸口必须先执行：
   - sidecar build
   - frontend test/build
   - `npm run test:rust`
   - `npm run tauri -- build`
-  - `python scripts/smoke_desktop_shell_release.py --skip-build`
-- 只有 smoke 通过后，才允许把 `msi`、`nsis setup.exe` 和 `SHA256SUMS.txt` 挂到 GitHub Release。
-- raw `wechat-auto-shell.exe`、`wechat-auto-backend.exe`、`group_listener_worker.exe` 继续留在本地 build 输出和 workflow artifact，别再把内部 sidecar 当最终用户下载面。
-- 分支 / PR 上继续跑 `windows-fast-regression` 和 `windows-packaging-smoke`；`v*` tag 则交给 `windows-release-on-tag`，不要让同一个 tag 触发多套重复 Windows 重活。
+  - `python3 scripts/smoke_desktop_shell_release.py --skip-build`
+- 只有 smoke 通过后，才允许把当前 mac release shell 当成可交付产物。
+- raw shell 和 sidecar 继续只是本地 build / 排障输出，不要把内部 sidecar 当最终用户下载面。
 
-### 28.07) Windows 包没图标，通常不是 Tauri 坏了，是你把图标链路只接了一半
+### 28.07) 图标链路不完整时，通常不是 Tauri 坏了，而是输入资源只接了一半
 现象：
-- `wechat-auto-shell.exe`、`msi` 或 `nsis setup.exe` 带着默认空白图标，看起来像没做完的内部包。
-- 更隐蔽的一种情况是：主程序图标换了，但 `nsis` 安装器还是默认图标。
+- Rust 单测或 release build 在 `tauri::generate_context!()` / bundle 阶段因为图标资源缺失直接失败。
+- 更隐蔽的一种情况是：`icon.svg`、`icon.ico` 在，但 `icon.png` 没生成，导致 mac build/test 的资源输入不完整。
 
 根因：
-- `desktop-shell/src-tauri/tauri.conf.json` 的 `bundle.icon` 只覆盖可执行文件和 WiX 产物，不能自动把 NSIS installer icon 补上。
-- `bundle.windows.nsis.installerIcon` 不显式配置时，Tauri 生成的 `installer.nsi` 会把 `INSTALLERICON` 留空。
-- 仓库里如果只留一个占位 `icon.ico`，那打包链当然也只会把占位符带进产物。
+- `desktop-shell/src-tauri/tauri.conf.json` 的 `bundle.icon` 只会读取你显式列出来的图标输入。
+- `scripts/generate_desktop_shell_icon.py` 现在需要同时产出 `icon.svg`、`icon.ico`、`icon.png`，缺任何一个都可能让当前分支的 build/test 漂移。
 
 处理：
 - 图标设计源统一放在 `desktop-shell/src-tauri/icons/icon.svg`。
-- Windows 打包输入统一放在 `desktop-shell/src-tauri/icons/icon.ico`，不要再塞一个 70 字节占位文件自欺欺人。
-- `desktop-shell/src-tauri/tauri.conf.json` 里同时维护：
-  - `bundle.icon`
-  - `bundle.windows.nsis.installerIcon`
-- 需要重生图标时，执行 `python scripts/generate_desktop_shell_icon.py`，然后至少重跑一次 `cd desktop-shell && npm run tauri -- build`，确认生成出来的 `installer.nsi` 不再是空 `INSTALLERICON`。
+- 当前 build 输入至少保持：
+  - `desktop-shell/src-tauri/icons/icon.svg`
+  - `desktop-shell/src-tauri/icons/icon.png`
+  - `desktop-shell/src-tauri/icons/icon.ico`
+- 需要重生图标时，执行 `python3 scripts/generate_desktop_shell_icon.py`，然后重跑一次 `cd desktop-shell && npm run test:rust` 或 `npm run tauri -- build`。
 
 ### 28.1) 把源码态配置和安装版配置混成一套
 现象：
@@ -588,37 +592,37 @@
 
 根因：
 - Tauri 壳启动 sidecar 时，会把 `runtime_root/config/listener.json` 作为真实配置路径传给 backend。
-- 当前这个 `runtime_root` 是 `%LOCALAPPDATA%\com.wechatauto.shell`，不是仓库目录。
-- `listener_app/sidebar_shared.py` 还会优先读取 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`。
+- 当前这个 `runtime_root` 是 `~/Library/Application Support/com.wechatauto.shell`，不是仓库目录。
+- `listener_app/sidebar_shared.py` 还会优先读取 `~/Library/Application Support/com.wechatauto.shell/.env.local`。
 - 安装包首次只会补齐缺失的 `config/*.json`；已有 runtime 配置不会被覆盖。
 
 处理：
 - 源码态：看仓库根目录 `config/listener.json` 和仓库根目录 `.env.local`
-- Tauri 壳 / 安装版：看 `%LOCALAPPDATA%\com.wechatauto.shell\config\listener.json` 和 `%LOCALAPPDATA%\com.wechatauto.shell\.env.local`
+- Tauri 壳 / release shell：看 `~/Library/Application Support/com.wechatauto.shell/config/listener.json` 和 `~/Library/Application Support/com.wechatauto.shell/.env.local`
 - 桌面壳设置页保存时，只会写当前 backend 的 `runtime.config_path` 指向的那套配置，不会替你同步另一套
-- 如果要验证 installer 的“真正首启默认值”，先隔离或备份 `%LOCALAPPDATA%\com.wechatauto.shell`，别拿旧 runtime 配置污染结果
+- 如果要验证 release shell 的“真正首启默认值”，先隔离或备份 `~/Library/Application Support/com.wechatauto.shell`，别拿旧 runtime 配置污染结果
 
 ### 29) PyInstaller `onefile` 的双进程表现，别误判成重复 spawn
 现象：
-- 任务管理器里可能同时看到两个 `wechat-auto-backend.exe`
-- `group_listener_worker.exe` 也可能同时出现两个同名进程
+- 在 mac 进程列表里可能同时看到 backend/worker 的 bootloader 和 payload 进程
+- 这不自动等于“重复 spawn”
 
 根因：
 - 当前 sidecar 用的是 PyInstaller `onefile`
-- Windows 下常见形态就是“同名父进程负责解包 + 同名子进程负责执行 payload”
+- 常见形态就是“同名父进程负责解包 + 同名子进程负责执行 payload”
 
 处理：
-- 先看父子关系，不要只看进程名个数。
+- 先看父子关系和 bootstrap log，不要只看进程名个数。
 - 真正要判定“是否重复 spawn”，看这两处：
-  - `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log`
-  - `%LOCALAPPDATA%\com.wechatauto.shell\logs\.runtime\backend-sidecar.json`
+  - `~/Library/Application Support/com.wechatauto.shell/logs/desktop-shell-bootstrap.log`
+  - `~/Library/Application Support/com.wechatauto.shell/logs/.runtime/backend-sidecar.json`
 - 当前 Tauri bootstrap 已经加了两层约束：
-  - Windows named mutex：串行化 backend bootstrap
+  - runtime-root 维度的 bootstrap lock：串行化 backend bootstrap
   - `pid + start_token` 标记：避免二次启动壳时把“还在启动的 sidecar”误判成没起，再补一份
 
 ### 29.1) 第二次启动桌面壳，只能聚焦已有窗口
 现象：
-- 二次双击 `wechat-auto-shell.exe` 后，如果又弹出一个新壳窗口，或者又补拉了一份 backend sidecar，这就是回归，不是“方便多开”。
+- 二次启动桌面壳后，如果又弹出一个新壳窗口，或者又补拉了一份 backend sidecar，这就是回归，不是“方便多开”。
 
 根因：
 - 壳窗口生命周期和 backend 复用不是一回事。
@@ -627,23 +631,22 @@
 处理：
 - `desktop-shell/src-tauri/src/main.rs` 必须把 `tauri-plugin-single-instance` 放在第一个 plugin。
 - 二次启动只做两件事：记录 `single-instance relaunch detected, focus existing window`，然后聚焦已有 `main` 窗口。
-- release 验证必须实际跑 `python scripts/smoke_desktop_shell_release.py`，确认整轮里只有一次 `spawning backend sidecar`。
+- release 验证必须实际跑 `python3 scripts/smoke_desktop_shell_release.py`，确认整轮里只有一次 `spawning backend sidecar`。
 
 ### 29.2) 安装版点右上角关闭后，backend / worker 不能留后台残活
 现象：
-- 安装版桌面壳打开后点关闭，窗口没了，但任务管理器里还能看到 `wechat-auto-backend.exe`、`group_listener_worker.exe`，或者其对应的 Python payload 继续活着。
+- release shell 打开后点关闭，窗口没了，但 backend / worker 或其 payload 继续活着。
 - 再次启动 installer 版时，`/healthz` 已经先通了，表现成“像是自动续命”。
 
 根因：
-- 当前 sidecar / worker 都是 PyInstaller `onefile`，Windows 下常见是“父进程 + payload 子进程”的进程树。
+- 当前 sidecar / worker 都是 PyInstaller `onefile`，常见是“父进程 + payload 子进程”的进程树。
 - 如果退出时只杀根进程 pid，不杀整棵树，就可能只打掉 bootloader，把真正跑 runtime 的 payload 留在后台。
 - `desktop-shell/src-tauri/src/main.rs` 只监听 `RunEvent::Exit` 也不够稳，用户点关闭按钮先经过的是窗口销毁和 `ExitRequested` 路径。
 
 处理：
 - `desktop-shell/src-tauri/src/main.rs` 必须至少在 `RunEvent::ExitRequested` 和 `RunEvent::Exit` 两条路径都触发 sidecar 清理，不能只赌最后一个事件。
-- `desktop-shell/src-tauri/src/backend/bootstrap.rs` 里的 `ManagedBackendState.kill_owned_child()` 必须按 Windows 进程树清理 `wechat-auto-backend.exe`，不能只调 `CommandChild.kill()`。
-- `listener_app/backend_runtime.py` 停 worker 时也必须走进程树清理；`group_listener_worker.exe` 同样是 `onefile`，只 `terminate()` 根 pid 不够。
-- Windows 下统一按 `taskkill /PID <pid> /T /F` 处理 tree cleanup；改成单 pid kill 属于回归。
+- `desktop-shell/src-tauri/src/backend/bootstrap.rs` 里的 `ManagedBackendState.kill_owned_child()` 必须按当前平台的进程树或 graceful terminate 语义清理 owned backend，不能只赌 root pid 消失。
+- `listener_app/backend_runtime.py` 停 worker 时也必须收干净子进程；`group_listener_worker` 同样是 `onefile`，不能把 payload 留后台。
 - 仅靠“壳正常退出时杀树”还不够；backend 还要有 owner watchdog：
   - sidecar 启动时由壳注入 `owner_pid + owner_start_token`
   - backend 定期向操作系统确认 owner 是否还活着，而且还是原来那一个进程
@@ -651,8 +654,8 @@
   - watchdog 是异常退出兜底，不是拿来替代正常 close cleanup
 - 验证不要只看窗口是否消失；必须在关闭后确认：
   - `http://127.0.0.1:8765/healthz` 不再可达
-  - 任务管理器里不再残留 `wechat-auto-backend.exe` / `group_listener_worker.exe`
-  - `%LOCALAPPDATA%\\com.wechatauto.shell\\logs\\desktop-shell-bootstrap.log` 能看到退出清理痕迹
+  - backend / worker 对应的进程不再残留
+  - `~/Library/Application Support/com.wechatauto.shell/logs/desktop-shell-bootstrap.log` 能看到 relaunch / cleanup 相关痕迹
 
 ### 30) GUI 配置保存不是热更新，也不是文件直通车
 现象：
@@ -697,8 +700,7 @@
 
 ### 新主路径（推荐）
 ```bash
-python listener_app/backend_main.py ^
-  --config ".\config\listener.json"
+python3 listener_app/backend_main.py --config "./config/listener.json"
 ```
 
 然后在另一个终端启动前端开发页：
@@ -725,7 +727,7 @@ cd desktop-shell
 npm run tauri build
 ```
 
-这一步现在能产出一体化 Windows 桌面壳，并把 backend sidecar 一起带上。
+这一步现在会走当前分支的一体化 mac 桌面壳构建，并把 backend sidecar 一起带上。
 更具体的产物路径和验收边界看 `docs/desktop-shell-build.md`。
 
 ### 接入 DeepLX
