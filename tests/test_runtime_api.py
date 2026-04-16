@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import unittest
@@ -161,6 +163,15 @@ class RuntimeApiServerTest(unittest.TestCase):
         health_payload = self._json_get("/healthz")
         self.assertEqual(health_payload["status"], "startup_failed")
         self.assertEqual(health_payload["detail"], "missing config")
+        self.assertEqual(health_payload["worker_state"], "startup_failed")
+
+    def test_http_runtime_endpoint_preserves_mac_worker_state(self):
+        self.service.runtime.publish_status("permission_required", "assistive access denied")
+
+        runtime_payload = self._json_get("/api/runtime")
+
+        self.assertEqual(runtime_payload["runtime"]["worker_state"], "permission_required")
+        self.assertEqual(runtime_payload["runtime"]["worker_detail"], "assistive access denied")
 
     def test_http_health_endpoint_fails_closed_when_service_has_no_health_snapshot(self):
         class MissingHealthService:

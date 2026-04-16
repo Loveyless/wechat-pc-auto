@@ -118,10 +118,22 @@ HEALTH_STATUS_STARTING = "starting"
 HEALTH_STATUS_OK = "ok"
 HEALTH_STATUS_STARTUP_FAILED = "startup_failed"
 HEALTH_STATUS_DEGRADED = "degraded"
+# 这些状态表示“微信当前不可读或正在恢复”，但本地 API 仍然可服务。
+RECOVERABLE_WORKER_STATES = {
+    "starting",
+    "connecting",
+    "running",
+    "waiting_wechat",
+    "permission_required",
+    "ui_paused",
+    "window_lost",
+    "reconnecting",
+    "window_query_failed",
+}
 DEGRADED_WORKER_STATES = {"worker_backoff", "stopped"}
 
 
-@dataclass(slots=True)
+@dataclass
 class BackendSettings:
     config_path: str
     config_dir: str
@@ -198,6 +210,8 @@ class BackendHealthState:
             return HEALTH_STATUS_STARTING
         if self._runtime_state in DEGRADED_WORKER_STATES:
             return HEALTH_STATUS_DEGRADED
+        if self._runtime_state in RECOVERABLE_WORKER_STATES:
+            return HEALTH_STATUS_OK
         return HEALTH_STATUS_OK
 
     def _detail_locked(self, status: str) -> str:

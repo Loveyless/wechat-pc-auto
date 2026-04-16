@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import tempfile
 import time
@@ -81,7 +83,8 @@ class BackendRuntimeTest(unittest.TestCase):
                 "file": "",
             },
         }
-        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8", newline="\n")
+        with path.open("w", encoding="utf-8", newline="\n") as f:
+            json.dump(payload, f, ensure_ascii=False)
         return str(path)
 
     @mock.patch("listener_app.backend_runtime.release_managed_target_locks")
@@ -195,10 +198,33 @@ class BackendRuntimeTest(unittest.TestCase):
     def test_health_snapshot_reports_ok_when_worker_waits_for_wechat(self):
         service = BackendRuntimeService(config_path=self._write_config())
         service.health.mark_ready()
-        service.health.update_runtime("waiting_wechat", "wechat not ready")
+        for worker_state in (
+            "waiting_wechat",
+            "permission_required",
+            "ui_paused",
+            "window_lost",
+            "reconnecting",
+            "window_query_failed",
+        ):
+            with self.subTest(worker_state=worker_state):
+                service.health.update_runtime(worker_state, f"{worker_state} detail")
+                health = service.get_health_snapshot()
+                self.assertEqual(health["status"], HEALTH_STATUS_OK)
+                self.assertEqual(health["worker_state"], worker_state)
+
+    def test_runtime_snapshot_preserves_permission_required_state(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        service.health.mark_ready()
+        service.runtime.publish_status("permission_required", "assistive access denied")
+        service._sync_health_from_runtime()
+
+        runtime_snapshot = service.snapshot()["runtime"]
         health = service.get_health_snapshot()
+
+        self.assertEqual(runtime_snapshot["worker_state"], "permission_required")
+        self.assertEqual(runtime_snapshot["worker_detail"], "assistive access denied")
         self.assertEqual(health["status"], HEALTH_STATUS_OK)
-        self.assertEqual(health["worker_state"], "waiting_wechat")
+        self.assertEqual(health["worker_state"], "permission_required")
 
     def test_health_snapshot_degrades_on_worker_backoff(self):
         service = BackendRuntimeService(config_path=self._write_config())

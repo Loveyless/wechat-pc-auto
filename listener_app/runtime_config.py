@@ -50,7 +50,7 @@ DEEPLX_ENV_FIELD = "deeplx_url_env"
 OPENAI_COMPATIBLE_PROVIDER = "openai_compatible"
 
 
-@dataclass(slots=True)
+@dataclass
 class RuntimeListenConfig:
     mode: str
     targets: list[str]
@@ -61,7 +61,7 @@ class RuntimeListenConfig:
     session_preview_dedupe_window_seconds: float
 
 
-@dataclass(slots=True)
+@dataclass
 class RuntimeTranslateConfig:
     enabled: bool
     provider: str
@@ -74,20 +74,20 @@ class RuntimeTranslateConfig:
     openai_api_key: str
 
 
-@dataclass(slots=True)
+@dataclass
 class RuntimeDisplayConfig:
     english_only: bool
     tts_auto_read_active_chat: bool
     on_translate_fail: str
 
 
-@dataclass(slots=True)
+@dataclass
 class RuntimeTTSConfig:
     provider: str
     raw_config: dict[str, Any]
 
 
-@dataclass(slots=True)
+@dataclass
 class DesktopRuntimeConfig:
     config_path: str
     config_dir: str

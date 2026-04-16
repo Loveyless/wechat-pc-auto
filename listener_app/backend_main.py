@@ -25,7 +25,7 @@ OWNER_WATCHDOG_POLL_SECONDS = 3.0
 OWNER_WATCHDOG_GRACE_SECONDS = 30.0
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class OwnerProcessIdentity:
     pid: int
     start_token: str

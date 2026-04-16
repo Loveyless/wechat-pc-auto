@@ -19,7 +19,7 @@ def infer_capture_level(source: str) -> str:
     return CAPTURE_LEVEL_FULL
 
 
-@dataclass(slots=True)
+@dataclass
 class RuntimeMessage:
     message_id: str
     session_id: str
@@ -38,7 +38,7 @@ class RuntimeMessage:
         return asdict(self)
 
 
-@dataclass(slots=True)
+@dataclass
 class SessionState:
     session_id: str
     session_name: str
@@ -52,7 +52,7 @@ class SessionState:
         return asdict(self)
 
 
-@dataclass(slots=True)
+@dataclass
 class RuntimeState:
     worker_state: str = "idle"
     worker_detail: str = ""
@@ -65,7 +65,7 @@ class RuntimeState:
         return asdict(self)
 
 
-@dataclass(slots=True)
+@dataclass
 class TranslationState:
     enabled: bool = False
     provider: str = ""
@@ -76,7 +76,7 @@ class TranslationState:
         return asdict(self)
 
 
-@dataclass(slots=True)
+@dataclass
 class TTSState:
     auto_read_enabled: bool = False
     provider: str = ""
@@ -87,7 +87,7 @@ class TTSState:
         return asdict(self)
 
 
-@dataclass(slots=True)
+@dataclass
 class RuntimeEvent:
     event_type: str
     payload: dict[str, Any]
