@@ -12,4 +12,4 @@
 
 - [x] 3.1 重写 `scripts/smoke_desktop_shell_release.py` 及其测试，让 smoke 在 mac 上校验 release shell 路径、`/healthz`、single-instance relaunch 和 cleanup 观察点
 - [x] 3.2 更新 `docs/desktop-shell-build.md` 与 `docs/wechat-listening-pitfalls.md`，把 mac-only sidecar 命名、runtime root、release smoke 和 cleanup 语义写成正式事实
-- [ ] 3.3 运行目标回归与构建命令；若受限于当前环境，记录受限验收步骤、缺口和风险等级
+- [x] 3.3 运行目标回归与构建命令；若受限于当前环境，记录受限验收步骤、缺口和风险等级
