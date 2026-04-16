@@ -7,8 +7,10 @@ import json
 import math
 import os
 import queue
+import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -51,10 +53,12 @@ else:
         validate_positive_float,
     )
 
-PREFERRED_ENGLISH_TTS_VOICES = ("Microsoft Zira Desktop", "Microsoft David Desktop")
-SUPPORTED_TTS_PROVIDERS = ("windows_system", "doubao", "less_tts", "tencent_cloud")
+LEGACY_TTS_PROVIDER_ALIASES = {
+    "windows_system": "macos_system",
+}
+SUPPORTED_TTS_PROVIDERS = ("macos_system", "doubao", "less_tts", "tencent_cloud")
 SUPPORTED_TTS_AUDIO_FORMATS = ("wav", "mp3")
-DEFAULT_TTS_PROVIDER = "tencent_cloud"
+DEFAULT_TTS_PROVIDER = "macos_system"
 DOUBAO_TTS_DEFAULT_CONFIG_PATH = os.path.join("config", "doubao_tts.json")
 DOUBAO_TTS_DEFAULT_APPID_ENV_KEY = "VOLCENGINE_TTS_APPID"
 DOUBAO_TTS_DEFAULT_ACCESS_TOKEN_ENV_KEY = "VOLCENGINE_TTS_ACCESS_TOKEN"
@@ -129,6 +133,7 @@ def read_secret_config_value(cfg: dict[str, Any], key: str, env_key: str) -> str
 def normalize_tts_provider(value: Any) -> str:
     provider = str(value or DEFAULT_TTS_PROVIDER).strip().lower()
     provider = provider or DEFAULT_TTS_PROVIDER
+    provider = LEGACY_TTS_PROVIDER_ALIASES.get(provider, provider)
     if provider not in SUPPORTED_TTS_PROVIDERS:
         raise RuntimeError(
             f"tts.provider must be one of {', '.join(SUPPORTED_TTS_PROVIDERS)}, got {value!r}"
@@ -142,9 +147,31 @@ def normalize_tts_audio_format(value: Any, *, field_name: str) -> str:
     if audio_format not in SUPPORTED_TTS_AUDIO_FORMATS:
         raise RuntimeError(
             f"{field_name} must be one of {', '.join(SUPPORTED_TTS_AUDIO_FORMATS)} "
-            f"for current Windows playback path, got {value!r}"
+            f"for current playback path, got {value!r}"
         )
     return audio_format
+
+
+def probe_command_runtime(command_name: str) -> str:
+    if shutil.which(command_name):
+        return ""
+    return f"missing command '{command_name}'"
+
+
+def _run_command_without_output(args: list[str], *, input_text: str | None = None) -> None:
+    result = subprocess.run(
+        args,
+        input=input_text,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=input_text is not None,
+        encoding="utf-8" if input_text is not None else None,
+        errors="replace" if input_text is not None else None,
+        check=False,
+    )
+    if result.returncode != 0:
+        command_name = args[0] if args else "command"
+        raise RuntimeError(f"{command_name} exited code={result.returncode}")
 
 
 def load_doubao_tts_settings_from_payload(raw: dict[str, Any]) -> DoubaoTTSSettings:
@@ -497,32 +524,41 @@ def play_audio_bytes_on_windows(audio_data: bytes, *, audio_format: str) -> bool
     raise RuntimeError(f"unsupported audio format for Windows playback: {normalized_format!r}")
 
 
-class WindowsSystemTTS:
-    def __init__(self, voice_name: str = ""):
-        self.voice_name = str(voice_name or "").strip()
+def play_audio_bytes_on_macos(audio_data: bytes, *, audio_format: str) -> bool:
+    normalized_format = normalize_tts_audio_format(audio_format, field_name="playback.audio_format")
+    dependency_error = probe_command_runtime("afplay")
+    if dependency_error:
+        raise RuntimeError(dependency_error)
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{normalized_format}") as f:
+            temp_path = f.name
+            f.write(audio_data)
+        _run_command_without_output(["afplay", temp_path])
+    finally:
+        if temp_path:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+    return True
+
+
+class MacOSSystemTTS:
+    def __init__(self):
         self._lock = threading.Lock()
-        self._voice_probe_done = bool(self.voice_name)
         self._queue: "queue.SimpleQueue[str | None]" = queue.SimpleQueue()
         self._worker_started = False
         self._last_error = ""
         self._logger: Callable[[str], None] | None = None
 
     @classmethod
-    def create_default(cls) -> "WindowsSystemTTS | None":
-        if os.name != "nt":
+    def create_default(cls) -> "MacOSSystemTTS | None":
+        if sys.platform != "darwin":
+            return None
+        if probe_command_runtime("say"):
             return None
         return cls()
-
-    def _resolve_voice_name(self) -> str:
-        with self._lock:
-            if self._voice_probe_done:
-                return self.voice_name
-            self.voice_name = pick_preferred_tts_voice(list_windows_tts_voices())
-            self._voice_probe_done = True
-            if not self.voice_name:
-                self._last_error = "no english system voice detected"
-                self._emit_log("tts failed backend=windows_system reason=no english system voice detected")
-            return self.voice_name
 
     def set_logger(self, logger: Callable[[str], None] | None):
         with self._lock:
@@ -538,60 +574,19 @@ class WindowsSystemTTS:
             pass
 
     def _run_speak_blocking(self, payload: str) -> bool:
-        voice_name = self._resolve_voice_name()
-        if not voice_name:
-            return False
         preview = summarize_tts_text(payload)
         self._emit_log(
-            f"tts synthesize start backend=windows_system voice={voice_name} chars={len(payload)} preview={preview}"
+            f"tts synthesize start backend=macos_system chars={len(payload)} preview={preview}"
         )
-        command = (
-            "$ErrorActionPreference='Stop';"
-            "Add-Type -AssemblyName System.Speech;"
-            "$text=[Console]::In.ReadToEnd();"
-            "if([string]::IsNullOrWhiteSpace($text)){exit 1};"
-            "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-            "$s.SelectVoice($env:WX_SIDEBAR_TTS_VOICE);"
-            "$s.Volume=100;"
-            "$s.Rate=0;"
-            "$s.Speak($text);"
-        )
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        env = os.environ.copy()
-        env["WX_SIDEBAR_TTS_VOICE"] = voice_name
         try:
-            result = subprocess.run(
-                [
-                    "powershell",
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    command,
-                ],
-                input=payload,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                creationflags=creationflags,
-                check=False,
-            )
+            _run_command_without_output(["say", "--", payload])
         except Exception as e:
             self._last_error = str(e)
-            self._emit_log(f"tts failed backend=windows_system error={self._last_error}")
-            return False
-        if result.returncode != 0:
-            self._last_error = f"tts process exited code={result.returncode}"
-            self._emit_log(f"tts failed backend=windows_system error={self._last_error}")
+            self._emit_log(f"tts failed backend=macos_system error={self._last_error}")
             return False
         self._last_error = ""
         self._emit_log(
-            f"tts played backend=windows_system voice={voice_name} chars={len(payload)} preview={preview}"
+            f"tts played backend=macos_system chars={len(payload)} preview={preview}"
         )
         return True
 
@@ -610,19 +605,19 @@ class WindowsSystemTTS:
             self._run_speak_blocking(payload)
 
     def speak_async(self, text: str) -> bool:
-        if os.name != "nt":
-            self._emit_log("tts rejected backend=windows_system reason=non_windows")
+        if sys.platform != "darwin":
+            self._emit_log("tts rejected backend=macos_system reason=non_macos")
             return False
         payload = normalize_tts_text(text)
         if not is_speakable_english_text(payload):
             self._emit_log(
-                f"tts rejected backend=windows_system reason=non_speakable preview={summarize_tts_text(payload)}"
+                f"tts rejected backend=macos_system reason=non_speakable preview={summarize_tts_text(payload)}"
             )
             return False
         self._ensure_worker_started()
         self._queue.put(payload)
         self._emit_log(
-            f"tts queued backend=windows_system chars={len(payload)} preview={summarize_tts_text(payload)}"
+            f"tts queued backend=macos_system chars={len(payload)} preview={summarize_tts_text(payload)}"
         )
         return True
 
@@ -975,8 +970,8 @@ class DoubaoWebsocketTTS:
 
     @classmethod
     def create_from_config(cls, config_path: str, *, base_dir: str = ROOT_DIR) -> "DoubaoWebsocketTTS":
-        if os.name != "nt":
-            raise RuntimeError("doubao tts playback currently only supports Windows")
+        if sys.platform != "darwin":
+            raise RuntimeError("doubao tts playback currently only supports macOS")
         settings = load_doubao_tts_settings(config_path, base_dir=base_dir)
         return cls(settings)
 
@@ -1061,7 +1056,7 @@ class DoubaoWebsocketTTS:
             await websocket.close()
 
     def _play_audio_bytes(self, audio_data: bytes, audio_format: str) -> bool:
-        return play_audio_bytes_on_windows(audio_data, audio_format=audio_format)
+        return play_audio_bytes_on_macos(audio_data, audio_format=audio_format)
 
     def _run_speak_blocking(self, payload: str) -> bool:
         preview = summarize_tts_text(payload)
@@ -1081,8 +1076,8 @@ class DoubaoWebsocketTTS:
         return True
 
     def speak_async(self, text: str) -> bool:
-        if os.name != "nt":
-            self._emit_log("tts rejected backend=doubao reason=non_windows")
+        if sys.platform != "darwin":
+            self._emit_log("tts rejected backend=doubao reason=non_macos")
             return False
         payload = normalize_tts_text(text)
         if not is_speakable_english_text(payload):
@@ -1114,8 +1109,8 @@ class TencentCloudSDKTTS:
         *,
         base_dir: str = ROOT_DIR,
     ) -> "TencentCloudSDKTTS":
-        if os.name != "nt":
-            raise RuntimeError("tencent_cloud tts playback currently only supports Windows")
+        if sys.platform != "darwin":
+            raise RuntimeError("tencent_cloud tts playback currently only supports macOS")
         settings = load_tencent_cloud_tts_settings(config_path, base_dir=base_dir)
         return cls(settings)
 
@@ -1222,7 +1217,7 @@ class TencentCloudSDKTTS:
         return audio_data, request_id, response_session_id
 
     def _play_audio_bytes(self, audio_data: bytes, audio_format: str) -> bool:
-        return play_audio_bytes_on_windows(audio_data, audio_format=audio_format)
+        return play_audio_bytes_on_macos(audio_data, audio_format=audio_format)
 
     def _run_speak_blocking(self, payload: str) -> bool:
         preview = summarize_tts_text(payload)
@@ -1245,8 +1240,8 @@ class TencentCloudSDKTTS:
         return True
 
     def speak_async(self, text: str) -> bool:
-        if os.name != "nt":
-            self._emit_log("tts rejected backend=tencent_cloud reason=non_windows")
+        if sys.platform != "darwin":
+            self._emit_log("tts rejected backend=tencent_cloud reason=non_macos")
             return False
         payload = normalize_tts_text(text)
         if not is_speakable_english_text(payload):
@@ -1278,8 +1273,8 @@ class LessTTSHttpPlayer:
         *,
         base_dir: str = ROOT_DIR,
     ) -> "LessTTSHttpPlayer":
-        if os.name != "nt":
-            raise RuntimeError("less_tts playback currently only supports Windows")
+        if sys.platform != "darwin":
+            raise RuntimeError("less_tts playback currently only supports macOS")
         settings = load_less_tts_settings(config_path, base_dir=base_dir)
         return cls(settings)
 
@@ -1357,7 +1352,7 @@ class LessTTSHttpPlayer:
         return audio_data
 
     def _play_audio_bytes(self, audio_data: bytes, audio_format: str) -> bool:
-        return play_audio_bytes_on_windows(audio_data, audio_format=audio_format)
+        return play_audio_bytes_on_macos(audio_data, audio_format=audio_format)
 
     def _run_speak_blocking(self, payload: str) -> bool:
         preview = summarize_tts_text(payload)
@@ -1377,8 +1372,8 @@ class LessTTSHttpPlayer:
         return True
 
     def speak_async(self, text: str) -> bool:
-        if os.name != "nt":
-            self._emit_log("tts rejected backend=less_tts reason=non_windows")
+        if sys.platform != "darwin":
+            self._emit_log("tts rejected backend=less_tts reason=non_macos")
             return False
         payload = normalize_tts_text(text)
         if not is_speakable_english_text(payload):
@@ -1399,15 +1394,19 @@ def create_tts_player(
     *,
     config_dir: str = ROOT_DIR,
 ) -> tuple[Any | None, str]:
+    raw_provider = str(tts_cfg.get("provider", DEFAULT_TTS_PROVIDER) or "").strip().lower()
     provider = normalize_tts_provider(tts_cfg.get("provider", DEFAULT_TTS_PROVIDER))
-    if provider == "windows_system":
-        player = WindowsSystemTTS.create_default()
+    if provider == "macos_system":
+        player = MacOSSystemTTS.create_default()
+        runtime_text = "tts configured backend=macos_system command=say"
+        if raw_provider == "windows_system":
+            runtime_text += " legacy_provider=windows_system normalized=macos_system"
         if player:
             return (
                 player,
-                "tts configured backend=windows_system voice_probe=lazy preferred=Microsoft Zira Desktop,Microsoft David Desktop",
+                runtime_text,
             )
-        return None, "tts unavailable: no english system voice detected"
+        return None, "tts unavailable backend=macos_system reason=missing command 'say'"
 
     if provider == "doubao":
         config_path = str(tts_cfg.get("config_path") or DOUBAO_TTS_DEFAULT_CONFIG_PATH).strip()
@@ -1451,9 +1450,16 @@ def create_tts_player(
 def check_tts_dependency_packaging(
     tts_cfg: dict[str, Any],
 ) -> tuple[bool, str]:
+    raw_provider = str(tts_cfg.get("provider", DEFAULT_TTS_PROVIDER) or "").strip().lower()
     provider = normalize_tts_provider(tts_cfg.get("provider", DEFAULT_TTS_PROVIDER))
-    if provider == "windows_system":
-        return True, "tts dependency check passed backend=windows_system"
+    if provider == "macos_system":
+        dependency_error = probe_command_runtime("say")
+        if dependency_error:
+            return False, f"tts dependency check failed backend=macos_system reason={dependency_error}"
+        detail = "tts dependency check passed backend=macos_system command=say"
+        if raw_provider == "windows_system":
+            detail += " legacy_provider=windows_system normalized=macos_system"
+        return True, detail
     if provider == "doubao":
         dependency_error = probe_doubao_websocket_runtime()
         if dependency_error:

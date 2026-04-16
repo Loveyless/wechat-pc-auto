@@ -168,7 +168,9 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertEqual(sidebar.normalize_tts_provider("DOUBAO"), "doubao")
         self.assertEqual(sidebar.normalize_tts_provider("LESS_TTS"), "less_tts")
         self.assertEqual(sidebar.normalize_tts_provider("TENCENT_CLOUD"), "tencent_cloud")
-        self.assertEqual(sidebar.normalize_tts_provider(""), "tencent_cloud")
+        self.assertEqual(sidebar.normalize_tts_provider("MACOS_SYSTEM"), "macos_system")
+        self.assertEqual(sidebar.normalize_tts_provider("WINDOWS_SYSTEM"), "macos_system")
+        self.assertEqual(sidebar.normalize_tts_provider(""), "macos_system")
         with self.assertRaises(RuntimeError):
             sidebar.normalize_tts_provider("unknown")
 
@@ -598,6 +600,22 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         play_wav.assert_not_called()
         play_mp3.assert_called_once_with(b"mp3-bytes")
 
+    def test_play_audio_bytes_on_macos_uses_afplay(self):
+        played = []
+
+        def fake_run(args, **kwargs):
+            played.append((args, kwargs))
+            return mock.Mock(returncode=0)
+
+        with mock.patch.object(sidebar, "probe_command_runtime", return_value=""), mock.patch.object(
+            sidebar.subprocess,
+            "run",
+            side_effect=fake_run,
+        ):
+            self.assertTrue(sidebar.play_audio_bytes_on_macos(b"mp3-bytes", audio_format="mp3"))
+
+        self.assertEqual(played[0][0][0], "afplay")
+
     def test_create_tts_player_doubao_uses_external_config(self):
         settings = sidebar.DoubaoTTSSettings(
             endpoint="wss://example.invalid/tts",
@@ -783,6 +801,13 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("tts dependency check passed backend=less_tts", detail)
 
+    def test_check_tts_dependency_packaging_accepts_macos_system(self):
+        with mock.patch.object(sidebar, "probe_command_runtime", return_value=""):
+            ok, detail = sidebar.check_tts_dependency_packaging({"provider": "macos_system"})
+
+        self.assertTrue(ok)
+        self.assertIn("tts dependency check passed backend=macos_system", detail)
+
     def test_doubao_run_blocking_emits_failure_log(self):
         settings = sidebar.DoubaoTTSSettings(
             endpoint="wss://example.invalid/tts",
@@ -950,16 +975,27 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             "Some English Voice",
         )
 
-    def test_windows_system_tts_create_default_is_lazy_on_windows(self):
-        original_os_name = sidebar.os.name
-        sidebar.os.name = "nt"
-        try:
-            player = sidebar.WindowsSystemTTS.create_default()
-        finally:
-            sidebar.os.name = original_os_name
-
+    def test_macos_system_tts_create_default_is_lazy_on_macos(self):
+        with mock.patch.object(sidebar.sys, "platform", "darwin"), mock.patch.object(
+            sidebar,
+            "probe_command_runtime",
+            return_value="",
+        ):
+            player = sidebar.MacOSSystemTTS.create_default()
         self.assertIsNotNone(player)
-        self.assertEqual(player.voice_name, "")
+
+    def test_create_tts_player_normalizes_legacy_windows_provider(self):
+        player = object()
+        with mock.patch.object(
+            sidebar.MacOSSystemTTS,
+            "create_default",
+            return_value=player,
+        ):
+            resolved_player, runtime_text = sidebar.create_tts_player({"provider": "windows_system"})
+
+        self.assertIs(resolved_player, player)
+        self.assertIn("backend=macos_system", runtime_text)
+        self.assertIn("legacy_provider=windows_system", runtime_text)
 
     def test_create_translator_rejects_missing_deeplx_url(self):
         with self.assertRaises(RuntimeError):
