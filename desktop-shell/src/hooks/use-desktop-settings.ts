@@ -65,7 +65,7 @@ export function createDesktopSettingsDraft(config: DesktopRuntimeConfig): Deskto
       provider: config.tts.provider,
       available_providers: [...config.tts.available_providers],
       providers: {
-        windows_system: {},
+        macos_system: {},
         doubao: {
           config_path: config.tts.providers.doubao.config_path,
           endpoint: config.tts.providers.doubao.endpoint,

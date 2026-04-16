@@ -49,10 +49,10 @@ function createRuntimeConfig(): DesktopRuntimeConfig {
       on_translate_fail: "show_cn_with_reason",
     },
     tts: {
-      provider: "windows_system",
-      available_providers: ["windows_system", "doubao", "less_tts", "tencent_cloud"],
+      provider: "macos_system",
+      available_providers: ["macos_system", "doubao", "less_tts", "tencent_cloud"],
       providers: {
-        windows_system: {},
+        macos_system: {},
         doubao: {
           config_path: "config/doubao_tts.json",
           endpoint: "wss://doubao.local",

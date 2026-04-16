@@ -48,7 +48,7 @@ export type DesktopDisplayConfig = {
   on_translate_fail: "show_cn_with_reason" | "show_cn" | "show_reason"
 }
 
-export type DesktopTtsProvider = "windows_system" | "doubao" | "less_tts" | "tencent_cloud"
+export type DesktopTtsProvider = "macos_system" | "doubao" | "less_tts" | "tencent_cloud"
 
 export type DesktopDoubaoProviderConfig = {
   config_path: string
@@ -94,7 +94,7 @@ export type DesktopLessTtsProviderConfig = {
 }
 
 export type DesktopTtsProvidersConfig = {
-  windows_system: Record<string, never>
+  macos_system: Record<string, never>
   doubao: DesktopDoubaoProviderConfig
   less_tts: DesktopLessTtsProviderConfig
   tencent_cloud: DesktopTencentCloudProviderConfig
@@ -197,7 +197,7 @@ export type DesktopSettingsDraft = {
     provider: DesktopTtsProvider
     available_providers: DesktopTtsProvider[]
     providers: {
-      windows_system: Record<string, never>
+      macos_system: Record<string, never>
       doubao: DesktopDoubaoProviderDraft
       less_tts: DesktopLessTtsProviderDraft
       tencent_cloud: DesktopTencentCloudProviderDraft
