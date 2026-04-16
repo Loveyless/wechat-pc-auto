@@ -339,12 +339,12 @@
 - 当前正文支持“轻点朗读”：按下后小位移松开会播放；若形成拖拽选区，或触发双击/三击选词，则不会播放。
 - 正文点击范围只覆盖正文字符，不包括时间、发送人和空白区。
 - TTS provider 现在走独立配置：`listener.json` 只负责选择 `tts.provider`，provider 私有参数拆到独立 JSON（例如 `config/doubao_tts.json`、`config/less_tts.json`、`config/tencent_tts.json`）。
-- 仓库跟踪的默认 provider 现在回到 `windows_system`；目标不是“偏爱系统语音”，而是保证 fresh install 无密钥也能先进入桌面壳和设置页。
+- 仓库跟踪的默认 provider 现在是 `macos_system`；目标不是“偏爱系统语音”，而是保证 fresh install 无云凭据也能先进入桌面壳和设置页。
 - 仓库跟踪的 provider JSON 只应保留安全默认值；真实凭证通过设置页或当前 runtime root 里的 provider 配置直接写入，不应把仓库样例改成带真值的提交。
-- `tts.provider=windows_system` 时，仍走 Windows 系统 `System.Speech`，默认优先选 `Microsoft Zira Desktop`，不存在时再回退到其他英文 voice。
-- `tts.provider=doubao` 时，走豆包单向流式 WebSocket；当前播放链路支持 `audio_format=wav/mp3`，其中 `wav` 仍走头部修正 + `winsound`，`mp3` 走 Windows MCI 播放。
+- `tts.provider=macos_system` 时，走 macOS 系统 `say`；旧 `windows_system` 只作为兼容输入保留，运行时会规范化到 `macos_system`，不再落回 Windows-only 播放代码。
+- `tts.provider=doubao` 时，走豆包单向流式 WebSocket；当前播放链路支持 `audio_format=wav/mp3`，合成后的音频统一落临时文件并交给 macOS `afplay` 播放。
 - `tts.provider=less_tts` 时，走 HTTP `audio/mpeg` 合成接口；当前固定按 MP3 播放，不额外引入第三方 Python 依赖。
-- `tts.provider=tencent_cloud` 时，走腾讯云基础语音合成 `TextToVoice`（官方 Python SDK）；当前播放链路支持 `codec=wav/mp3`，其中 `pcm` 仍未放开。
+- `tts.provider=tencent_cloud` 时，走腾讯云基础语音合成 `TextToVoice`（官方 Python SDK）；当前播放链路支持 `codec=wav/mp3`，其中 `pcm` 仍未放开，播放同样统一走 `afplay`。
 - `less_tts` 配置当前只暴露 `endpoint` / `api_key`；`voice/speed/pitch/style` 固定走仓库默认值，不在设置页展开。
 - 设置页里的 secret 现在统一是“直接输入、直接保存、下次回显”；如果读到的是旧 `*_env` 配置，不会因为保存别的字段被顺手改写，只有在你输入新值或点击“清空配置”时才会落盘。
 - 腾讯云默认音色当前固定成 `WeJames`，也就是 `VoiceType=501008`；`501008` 不是 `sample_rate`，采样率仍只接受 `8000 / 16000 / 24000`。
@@ -379,7 +379,7 @@
 - 旧逻辑只在启动时记录 `tts configured ...`。
 - 运行期失败原因只写进 TTS 对象内部 `_last_error`，UI 和日志文件都看不到。
 - 正文点击与自动朗读的触发点原先也没有补充运行期日志。
-- 豆包单向流式返回的 WAV 可能把 `RIFF` / `data` chunk size 写成 `0xFFFFFFFF` 占位值；这种音频有时能被宽松播放器容忍，但 `winsound` 这类 Windows WAV 播放路径兼容性更差，表现成“合成成功但不出声”。
+- 豆包单向流式返回的 WAV 可能把 `RIFF` / `data` chunk size 写成 `0xFFFFFFFF` 占位值；这种音频有时能被宽松播放器容忍，但头部异常仍可能让本机播放链路表现成“合成成功但不出声”。
 
 处理：
 - TTS runtime 日志统一回流到主进程事件队列，再写入状态栏与 `logging.file`。
@@ -390,8 +390,8 @@
   - `tts played`
   - `tts failed`
 - 日志只记录 provider、endpoint host、字节数、文本预览等排障必需信息，不记录豆包密钥。
-- 豆包 `wav` 音频进入 Windows 播放器前，必须先按实际字节数重写 `RIFF` / `data` chunk size，再交给 `winsound`；不能把流式占位头直接落盘播放。
-- `mp3` 播放链不走 `winsound`，而是落临时文件后交给 Windows MCI；这条链路不需要 WAV 头修正，但仍要保证合成结果是完整 MP3。
+- 豆包 `wav` 音频进入本机播放器前，必须先按实际字节数重写 `RIFF` / `data` chunk size，再交给 `afplay`；不能把流式占位头直接落盘播放。
+- `mp3` 播放链同样是落临时文件后交给 `afplay`；这条链路不需要 WAV 头修正，但仍要保证合成结果是完整 MP3。
 - 这类问题的判断标准不是“豆包有没有回包”，而是“回包是不是标准 WAV”；曾复现过未修正头部时被标准库解析成异常超长时长，修正后才恢复正常播放。
 
 ### 25) 打包后自动朗读被触发了，但完全没声音
@@ -409,8 +409,8 @@
 - 这些打包依赖和 smoke 脏告警规则现在统一收口到 `scripts/packaging_manifest.json`；如果以后再补动态依赖，先改清单，不要分头改两套脚本。
 - 打包脚本在真正调用 PyInstaller 前，会先用源码态主程序跑一次 `--check-tts-deps`。但这一步只检查“当前默认 provider 对应的依赖链”，不是替你自动验证所有云 TTS provider 都可用。
 - 主程序启动创建 TTS 时，会先做一次 provider 对应依赖探测；若缺依赖，不再伪装成 `tts configured ...`，而是直接记成 `tts unavailable ... reason=...`。
-- 构建后额外执行 `wechat-auto-backend.exe --check-tts-deps` 做最小冒烟；这一步失败，或者打出 `RequestsDependencyWarning`，都说明“当前默认 provider 的朗读链路”不完整，不该继续分发。
-- 如果你准备把默认 provider 改成 `doubao` 或 `tencent_cloud` 再发包，就必须额外按目标 provider 跑一遍对应依赖和配置验证，别拿 `windows_system` 的通过结果冒充云 TTS 也没问题。
+- 构建后额外执行 `wechat-auto-backend --check-tts-deps` 做最小冒烟；这一步失败，或者打出 `RequestsDependencyWarning`，都说明“当前默认 provider 的朗读链路”不完整，不该继续分发。
+- 如果你准备把默认 provider 改成 `doubao` 或 `tencent_cloud` 再发包，就必须额外按目标 provider 跑一遍对应依赖和配置验证，别拿 `macos_system` 的通过结果冒充云 TTS 也没问题。
 
 ### 26) 收起左侧菜单后，看不出当前正在看哪个群
 现象：
@@ -487,7 +487,7 @@
 ### 28) `npm run tauri build` 现在已经能做一体化桌面壳；密钥仍然外置，但 fresh install 不该被密钥卡死
 现象：
 - `desktop-shell` 现在已经能产出 `wechat-auto-shell.exe`、`msi`、`nsis`，而且双击壳会自动拉起 backend sidecar。
-- 运行时配置、日志、锁会落到 `%LOCALAPPDATA%\com.wechatauto.shell`，不再写回源码目录。
+- 运行时配置、日志、锁会落到 `~/Library/Application Support/com.wechatauto.shell`，不再写回源码目录。
 - fresh runtime root 使用仓库跟踪的默认 bundle 配置时，即使没有 `.env.local`，也应该能先进入桌面壳和设置页。
 - 但已有 runtime root 若残留旧配置，或者你把 DeepLX / 云 TTS 打开后又没补 URL / 凭据，壳启动阶段仍会 fail-fast。
 
@@ -502,15 +502,15 @@
 - `tauri.conf.json` 继续显式维护 Windows `.ico`，否则 bundle 还是会直接失败。
 - 仓库跟踪的默认 `config/listener.json` 必须保持这两个首启安全值：
   - `translate.enabled=false`
-  - `tts.provider=windows_system`
+  - `tts.provider=macos_system`
 - 需要 DeepLX 或云 TTS 时，再通过设置页或运行时配置补下面这些条件：
   - `translate.enabled=true and provider=deeplx` 时，显式提供 `translate.providers.deeplx.deeplx_url`
   - `translate.enabled=true and provider=openai_compatible` 时，补 `translate.providers.openai_compatible.base_url/model/api_key`
   - `tts.provider=doubao` / `less_tts` / `tencent_cloud` 时，补对应 `tts.providers.<provider>.config_path`、provider 私有配置和密钥
-- 验 fresh install 时，必须隔离一个干净 runtime root；已有 `%LOCALAPPDATA%\com.wechatauto.shell\config\listener.json` 不会被 installer 覆盖
+- 验 fresh install 时，必须隔离一个干净 runtime root；已有 `~/Library/Application Support/com.wechatauto.shell/config/listener.json` 不会被 installer 覆盖
 - 真正的最小验证不是“exe 打开了”，而是：
   - `http://127.0.0.1:8765/healthz` 返回 `{"status":"ok"}`
-  - `%LOCALAPPDATA%\com.wechatauto.shell\logs\desktop-shell-bootstrap.log` 出现 `spawned backend sidecar pid=...`
+  - `~/Library/Application Support/com.wechatauto.shell/logs/desktop-shell-bootstrap.log` 出现 `spawned backend sidecar pid=...`
 
 ### 28.0) fast regression 的 Rust 单测不该依赖 sidecar 二进制
 现象：
@@ -743,7 +743,7 @@ npm run tauri build
    - 只有 `tts configured ...`，没有 `tts body click/tts auto`：说明根本没触发朗读入口。
    - 有 `tts body click/tts auto rejected|skipped|ignored`：看 `reason=...` 判断是原文模式、待翻译、已有选区还是非英文。
    - 有 `tts synthesize start` 但没有 `tts played`：优先看后续 `tts failed`，通常就是豆包网络/鉴权/协议或本机播放失败。
-   - 有 `tts synthesize success` 但实际没声：优先怀疑返回的是流式占位 WAV 头或 Windows 播放兼容性，不要先把锅甩给豆包鉴权或系统静音。
+   - 有 `tts synthesize success` 但实际没声：优先怀疑返回的是流式占位 WAV 头或本机 `afplay` 播放链异常，不要先把锅甩给豆包鉴权或系统静音。
 
 ## 契约约束（后续改动必须保持）
 - `group_listener_worker.py` 输出事件必须保持 JSON 行格式（至少包含 `type` 字段）。

@@ -16,17 +16,17 @@ Tk 回退链已经下线，不要再按旧 UI 的字段和行为理解这份配�
   - `http://127.0.0.1:8765`
   - `ws://127.0.0.1:8766/events`
 - `desktop-shell/` 的 `npm run tauri dev` / `npm run tauri build` 会先构建 PyInstaller sidecar，再由 Tauri 壳自动拉起 backend
-- Tauri 壳运行时根目录固定在 `%LOCALAPPDATA%\com.wechatauto.shell`
+- Tauri 壳运行时根目录固定在 `~/Library/Application Support/com.wechatauto.shell`
 - 仓库跟踪的默认 `listener.json` 以“首启可进入桌面壳和设置页”为目标：
   - `translate.enabled=false`
-  - `tts.provider=windows_system`
-  - fresh runtime root 不依赖 `.env.local` 也能启动
+  - `tts.provider=macos_system`
+  - fresh runtime root 不依赖云 TTS 凭据也能启动
 - 当前主路径固定为 `session-only + all_sessions + preview-only`
 
 ## 当前主路径启动方式
 
 ```bash
-python listener_app/backend_main.py --config ".\config\listener.json"
+python3 listener_app/backend_main.py --config "./config/listener.json"
 cd desktop-shell
 npm run dev
 ```
@@ -54,8 +54,8 @@ npm run test:rust
 release 壳交付闸口：
 
 ```bash
-python scripts/build_desktop_shell_sidecars.py --python python
-python scripts/smoke_desktop_shell_release.py
+python3 scripts/build_desktop_shell_sidecars.py --python python3
+python3 scripts/smoke_desktop_shell_release.py
 ```
 
 更完整的测试 / 构建说明看 `docs/desktop-shell-build.md`。
@@ -87,19 +87,18 @@ python scripts/smoke_desktop_shell_release.py
 ## 源码态与 Tauri 壳别混
 
 - 源码态启动：
-  - `python listener_app/backend_main.py --config ".\\config\\listener.json"`
+  - `python3 listener_app/backend_main.py --config "./config/listener.json"`
   - 当前 backend 直接吃仓库里的 `config/listener.json`
   - `.env.local` 默认也在仓库根目录
 - Tauri 壳 / 安装版启动：
   - `npm run tauri dev`
-  - `wechat-auto-shell.exe`
-  - installer 安装后的应用
-  - 当前 backend 吃 `%LOCALAPPDATA%\\com.wechatauto.shell\\config\\listener.json`
-  - `.env.local` 优先读 `%LOCALAPPDATA%\\com.wechatauto.shell\\.env.local`
+  - 桌面壳应用
+  - 当前 backend 吃 `~/Library/Application Support/com.wechatauto.shell/config/listener.json`
+  - `.env.local` 优先读 `~/Library/Application Support/com.wechatauto.shell/.env.local`
 
 这两套配置目录不会自动同步。
 桌面壳设置页保存时，只会写当前 backend 的 `runtime.config_path` 指向的那套配置，不会顺手把另一套也改掉。
-安装目录也不是配置目录；Tauri 壳真正长期落盘的位置还是 `%LOCALAPPDATA%\\com.wechatauto.shell`。
+安装目录也不是配置目录；Tauri 壳真正长期落盘的位置还是 `~/Library/Application Support/com.wechatauto.shell`。
 
 ## 完整配置示例
 
@@ -137,7 +136,7 @@ python scripts/smoke_desktop_shell_release.py
     "on_translate_fail": "show_cn_with_reason"
   },
   "tts": {
-    "provider": "windows_system",
+    "provider": "macos_system",
     "providers": {
       "doubao": {
         "config_path": "config/doubao_tts.json"
@@ -217,18 +216,20 @@ python scripts/smoke_desktop_shell_release.py
 ### `tts`
 
 - `provider`：TTS 后端
-  - `windows_system`
+  - `macos_system`
   - `doubao`
   - `less_tts`
   - `tencent_cloud`
-  - 仓库默认值是 `windows_system`，目的是让 fresh install 不依赖云凭据也能首启进入设置页
+  - 仓库默认值是 `macos_system`，目的是让 fresh install 不依赖云凭据也能首启进入设置页
+  - 旧 `windows_system` 仍作为兼容输入允许加载，但会在运行时和设置页中统一规范化为 `macos_system`
 - `providers.doubao.config_path` / `providers.less_tts.config_path` / `providers.tencent_cloud.config_path`：provider 私有配置文件路径
   - 相对路径优先按 `listener.json` 所在目录解析
   - 找不到时再按项目根目录解析
   - 推荐把 provider 私有参数拆到独立 JSON，不要把不同供应商字段继续堆回 `listener.json`
-  - `windows_system` 没有 provider 私有路径
+  - `macos_system` 没有 provider 私有路径；系统语音直接走内建 `say`
+  - 云 provider 的音频播放统一走 macOS `afplay`
 - 启动加载兼容旧结构：
-  - 若当前激活 provider 缺失 `tts.providers.<provider>.config_path`，会回退读取旧 `tts.config_path`
+  - 若当前激活的云 provider 缺失 `tts.providers.<provider>.config_path`，会回退读取旧 `tts.config_path`
   - GUI 新保存只写 `tts.providers.<provider>.config_path`
   - 未激活 provider 的路径配置会继续保留，不会因为切换 provider 被清掉
 
@@ -237,7 +238,7 @@ python scripts/smoke_desktop_shell_release.py
 - `file`：运行日志输出文件路径
   - 相对路径按当前运行根目录解析
   - 源码态根目录是仓库根目录
-  - Tauri 壳根目录是 `%LOCALAPPDATA%\com.wechatauto.shell`
+  - Tauri 壳根目录是 `~/Library/Application Support/com.wechatauto.shell`
 
 ## `config/doubao_tts.json` 示例
 

@@ -31,7 +31,7 @@
     "on_translate_fail": "show_cn_with_reason"
   },
   "tts": {
-    "provider": "windows_system",
+    "provider": "macos_system",
     "providers": {
       "doubao": {
         "config_path": "config/doubao_tts.json"
