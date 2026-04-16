@@ -22,6 +22,37 @@
 当前只有一条受支持运行路径：
 - `listener_app/backend_main.py` + `desktop-shell/`，默认按 `all_sessions` 方式扫描左侧可见会话列表，不再依赖 `listen.targets` 做主路径筛选。
 
+## 当前 mac 事实
+
+- 当前分支的微信窗口与会话读取已经切到 `wechat_auto/window.py` + `wechat_auto/controls.py` 的 mac-only 路径：
+  - 不再依赖 `uiautomation`
+  - 通过 `osascript -l JavaScript` + macOS Accessibility 读取 WeChat 进程、窗口和左侧 `session_list`
+  - 继续只交付左侧会话预览，不扩成右侧正文抓取
+- 当前窗口读取层会显式区分这些状态：
+  - `waiting_wechat`：微信未启动，或进程存在但当前没有可读主窗口
+  - `permission_required`：当前进程缺少辅助功能权限，无法检查窗口
+  - `ui_paused`：菜单 / popup / sheet / dialog 让 AX 树暂时不稳定，worker 会暂停轮询
+  - `window_query_failed`：窗口检查失败，但 backend 仍保持可服务，等待后续重试
+  - `ready`：已连接到可读主窗口
+- 当前 `listener_app/group_listener_worker.py` 保持“一行一个 JSON 事件”的既有契约，只扩状态值，不改事件类型：
+  - 初始化阶段会透传 `waiting_wechat` / `permission_required` / `ui_paused` / `window_query_failed`
+  - 运行中遇到窗口丢失时走 `window_lost -> reconnecting -> running`
+  - 运行中遇到 popup/menu/sheet/dialog 时进入 `ui_paused`，恢复后重新回到 `running`
+- 当前本地 API 面没有变化，仍只维护：
+  - `/healthz`
+  - `/api/runtime`
+  - `/api/sessions`
+- 当前 health 语义已经明确区分“backend 可服务”和“微信当前是否可读”：
+  - `worker_backoff` / `stopped` 会把 `/healthz.status` 变成 `degraded`
+  - `waiting_wechat` / `permission_required` / `ui_paused` / `window_lost` / `reconnecting` / `window_query_failed` 仍保持 `/healthz.status=ok`，由 `worker_state` 和 `detail` 解释当前不可读原因
+- 当前 runtime 契约仍固定为：
+  - `runtime.monitor_scope=all_sessions`
+  - `runtime.message_fidelity=preview_only`
+- 当前源码态 worker 启动链路固定为 UTF-8 管道：
+  - source mode：`python3 -X utf8 -u listener_app/group_listener_worker.py`
+  - frozen mode：worker 可执行名是 `group_listener_worker`，不再把 `.exe` 当成当前分支事实
+- 当前正式 Python 依赖声明里已移除 `uiautomation`；listener/runtime 主路径只继续声明并验证仓库内真实还在使用的依赖。
+
 ## 架构结论
 - 监听、runtime 和桌面 UI 必须分离：`group_listener_worker.py` 负责抓消息，`backend_runtime.py` 负责 supervisor / 翻译 / TTS / 健康状态，`desktop-shell/` 负责展示和交互。
 - 当前主路径已经按职责拆分：

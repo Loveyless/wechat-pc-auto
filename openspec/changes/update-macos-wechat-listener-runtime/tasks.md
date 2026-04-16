@@ -12,5 +12,5 @@
 
 ## 3. 文档与验收
 
-- [ ] 3.1 更新 `docs/wechat-listening-pitfalls.md`，把 mac 权限、popup 暂停、窗口恢复与受限降级写成正式事实
+- [x] 3.1 更新 `docs/wechat-listening-pitfalls.md`，把 mac 权限、popup 暂停、窗口恢复与受限降级写成正式事实
 - [ ] 3.2 运行目标 Python 测试与最小源码态检查，并记录无法在当前会话自动完成的手工验收步骤和风险
