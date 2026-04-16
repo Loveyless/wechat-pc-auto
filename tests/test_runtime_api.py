@@ -44,10 +44,10 @@ class FakeService:
             },
             "display": {"english_only": True, "tts_auto_read_active_chat": True},
             "tts": {
-                "provider": "windows_system",
-                "available_providers": ["windows_system", "doubao", "less_tts", "tencent_cloud"],
+                "provider": "macos_system",
+                "available_providers": ["macos_system", "doubao", "less_tts", "tencent_cloud"],
                 "providers": {
-                    "windows_system": {},
+                    "macos_system": {},
                     "doubao": {"config_path": "config/doubao_tts.json"},
                     "less_tts": {"config_path": "config/less_tts.json"},
                     "tencent_cloud": {"config_path": "config/tencent_tts.json"},

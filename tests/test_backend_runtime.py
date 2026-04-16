@@ -109,7 +109,7 @@ class BackendRuntimeTest(unittest.TestCase):
         time.sleep(0.05)
         snapshot = service.snapshot()
         self.assertEqual(snapshot["translation"]["provider"], "passthrough")
-        self.assertEqual(snapshot["tts"]["provider"], "windows_system")
+        self.assertEqual(snapshot["tts"]["provider"], "macos_system")
         self.assertTrue(snapshot["tts"]["available"])
         service.stop()
         terminate_process_tree.assert_called_once()
@@ -178,7 +178,7 @@ class BackendRuntimeTest(unittest.TestCase):
             translate_enabled=False,
             translate_provider="passthrough",
             tts_auto_read_enabled=True,
-            tts_provider="windows_system",
+            tts_provider="macos_system",
             tts_available=True,
         )
         service.set_active_session("测试群")

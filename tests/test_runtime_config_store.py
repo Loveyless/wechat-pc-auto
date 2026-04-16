@@ -15,7 +15,8 @@ from listener_app.runtime_config_store import (
 class RuntimeConfigStoreTest(unittest.TestCase):
     def _write_json(self, path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
+        with path.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(payload, ensure_ascii=False, indent=2))
 
     def _create_runtime_files(self) -> tuple[Path, Path, tempfile.TemporaryDirectory[str]]:
         temp_dir = tempfile.TemporaryDirectory()
@@ -109,7 +110,9 @@ class RuntimeConfigStoreTest(unittest.TestCase):
         )
         self.assertEqual(snapshot["translate"]["providers"]["deeplx"]["timeout_seconds"], 8.0)
         self.assertEqual(snapshot["tts"]["provider"], "tencent_cloud")
+        self.assertIn("macos_system", snapshot["tts"]["available_providers"])
         self.assertIn("less_tts", snapshot["tts"]["available_providers"])
+        self.assertIn("macos_system", snapshot["tts"]["providers"])
         self.assertIn("doubao", snapshot["tts"]["providers"])
         self.assertEqual(
             snapshot["tts"]["providers"]["less_tts"]["config_path"],
@@ -442,6 +445,7 @@ class RuntimeConfigStoreTest(unittest.TestCase):
             )
 
         listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
+        self.assertEqual(listener_raw["tts"]["provider"], "macos_system")
         self.assertEqual(listener_raw["translate"]["providers"]["deeplx"]["deeplx_url_env"], "DEEPLX_URL")
         self.assertNotIn("deeplx_url", listener_raw["translate"]["providers"]["deeplx"])
         self.assertEqual(saved["translate"]["providers"]["deeplx"]["deeplx_url"]["source"], "env")
@@ -490,6 +494,7 @@ class RuntimeConfigStoreTest(unittest.TestCase):
 
         listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
         self.assertEqual(listener_raw["translate"]["provider"], "openai_compatible")
+        self.assertEqual(listener_raw["tts"]["provider"], "macos_system")
         self.assertEqual(
             listener_raw["translate"]["providers"]["openai_compatible"]["base_url"],
             "https://openrouter.local/v1",

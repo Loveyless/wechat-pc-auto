@@ -13,7 +13,8 @@ class RuntimeConfigTest(unittest.TestCase):
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
         path = Path(temp_dir.name) / "listener.json"
-        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8", newline="\n")
+        with path.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(payload, ensure_ascii=False))
         return str(path)
 
     def test_load_runtime_config_normalizes_supported_main_path_fields(self):
@@ -60,8 +61,10 @@ class RuntimeConfigTest(unittest.TestCase):
         self.assertFalse(config.display.english_only)
         self.assertFalse(config.display.tts_auto_read_active_chat)
         self.assertEqual(config.display.on_translate_fail, "show_cn_with_reason")
-        self.assertEqual(config.tts.provider, "windows_system")
-        self.assertTrue(config.log_file.endswith("logs\\runtime.log"))
+        self.assertEqual(config.tts.provider, "macos_system")
+        self.assertTrue(
+            config.log_file.replace("\\", "/").endswith("logs/runtime.log")
+        )
 
     def test_load_runtime_config_allows_empty_targets_for_main_path(self):
         config_path = self._write_config(
@@ -349,7 +352,7 @@ class RuntimeConfigTest(unittest.TestCase):
         self.assertFalse(runtime_config.translate.enabled)
         self.assertEqual(runtime_config.translate.provider, "deeplx")
         self.assertEqual(runtime_config.translate.deeplx_url, "")
-        self.assertEqual(runtime_config.tts.provider, "windows_system")
+        self.assertEqual(runtime_config.tts.provider, "macos_system")
 
 
 if __name__ == "__main__":

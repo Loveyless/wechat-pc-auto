@@ -158,7 +158,7 @@ def build_config_snapshot(config_path: str) -> dict[str, Any]:
             "provider": runtime_config.tts.provider,
             "available_providers": list(SUPPORTED_TTS_PROVIDERS),
             "providers": {
-                "windows_system": {},
+                "macos_system": {},
                 "doubao": _build_doubao_provider_snapshot(doubao_raw, doubao_path),
                 "less_tts": _build_less_tts_provider_snapshot(less_tts_raw, less_tts_path),
                 "tencent_cloud": _build_tencent_provider_snapshot(tencent_raw, tencent_path),

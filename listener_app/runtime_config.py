@@ -156,8 +156,9 @@ def _resolve_openai_compatible_fields(
 def _resolve_effective_tts_config(tts_cfg: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     provider = normalize_tts_provider(tts_cfg.get("provider"))
     effective_tts = dict(tts_cfg)
+    effective_tts["provider"] = provider
     provider_cfg = _read_provider_section(tts_cfg, provider)
-    if provider == "windows_system":
+    if provider == "macos_system":
         effective_tts.pop("config_path", None)
         return provider, effective_tts
     config_path = str(
