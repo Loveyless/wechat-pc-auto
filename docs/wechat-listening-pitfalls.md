@@ -1,10 +1,15 @@
-# 微信监听踩坑参考（Windows / Weixin / UIAutomation）
+# 微信监听踩坑参考（旧实现对照 + 当前 mac 风险）
 
 ## 分支说明
 
 - 当前分支目标已经切到 `Apple Silicon macOS`。
 - 本文下面的大部分内容仍记录的是迁移前的 `Windows / Weixin / UIAutomation` 旧实现，当前主要作用是给迁移期做对照和避坑参考。
 - 在本分支里，如果本文下文与 `README.md`、`AGENTS.md` 或 `docs/apple-silicon-mac-adaptation-plan.md` 的 mac-only 定位冲突，以后者为准。
+
+## 阅读方式
+
+- 第 1 到 27 节默认按“旧实现对照 / 迁移期参考”阅读，不作为当前 Apple Silicon macOS 分支的操作手册。
+- 当前分支有效的构建、release、runtime root 和 GUI 专项验收口径，以第 28 节之后的 mac 事实为准。
 
 ## 适用范围
 本说明覆盖以下实现：
@@ -490,9 +495,9 @@
 - `pendingTranslation=true` 时，正文区是否进入 loading 态取决于“原文”开关：关闭时必须 loading，打开时允许直接展示中文原文。
 - 当前桌面壳必须显式区分 `no sessions` 和 `no messages` 两种空态，且这两种空态的优先级低于 `startup_failed` / `degraded` / `reconnecting` 这类异常态。
 
-### 28) `npm run tauri build` 现在已经能做一体化桌面壳；密钥仍然外置，但 fresh install 不该被密钥卡死
+### 28) 当前默认发布闸口已经收口到 `.app build + smoke`；`DMG` 只保留 GUI 专项验收
 现象：
-- `desktop-shell` 当前分支的本地构建链已经按 mac-only 事实运行：`npm run tauri dev` / `npm run tauri build` 会先构建 target-triple sidecar，再由 shell 自动拉起 backend。
+- `desktop-shell` 当前分支的本地构建链已经按 mac-only 事实运行：`npm run tauri dev` 和 `npm run tauri -- build --bundles app` 会先构建 target-triple sidecar，再由 shell 自动拉起 backend。
 - 运行时配置、日志、锁会落到 `~/Library/Application Support/com.wechatauto.shell`，不再写回源码目录。
 - fresh runtime root 使用仓库跟踪的默认 bundle 配置时，即使没有 `.env.local`，也应该能先进入桌面壳和设置页。
 - 但已有 runtime root 若残留旧配置，或者你把 DeepLX / 云 TTS 打开后又没补 URL / 凭据，壳启动阶段仍会 fail-fast。
@@ -518,7 +523,7 @@
 - 验 fresh install 时，必须隔离一个干净 runtime root；已有 `~/Library/Application Support/com.wechatauto.shell/config/listener.json` 不会被 installer 覆盖
 - 默认自动化发布闸口改成 `npm run tauri -- build --bundles app` + `python3 scripts/smoke_desktop_shell_release.py --skip-build --shell-exe "desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell"`，先对 `.app` 和真实启动链路背书。
 - `npm run tauri build` 保留给可交互 Finder 会话下的 `DMG` 专项验收；如果这里只有 `DMG` 美化失败，而 `.app` build + smoke 已通过，应把它归类为 `DMG` 风险，不要把整个 release shell 判死。
-- 真正的最小验证不是“exe 打开了”，而是：
+- 真正的最小验证不是“壳可执行文件能点开了”，而是：
   - `http://127.0.0.1:8765/healthz` 返回 `{"status":"ok"}`
   - `~/Library/Application Support/com.wechatauto.shell/logs/desktop-shell-bootstrap.log` 出现 `spawned backend sidecar pid=...`
 
