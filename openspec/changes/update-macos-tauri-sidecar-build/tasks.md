@@ -6,7 +6,7 @@
 ## 2. Sidecar 构建与 Tauri 接线
 
 - [x] 2.1 重写 `scripts/build_desktop_shell_sidecars.py`，让 PyInstaller 产物和 `desktop-shell/src-tauri/binaries/` 安装名遵守 mac 平台的 target-triple + 无 `.exe` 规则
-- [ ] 2.2 更新 `desktop-shell/package.json`、必要的 Tauri 接线与相关测试/脚本辅助逻辑，使 `npm run tauri dev` / `npm run tauri build` 继续复用同一套 sidecar 构建约定
+- [x] 2.2 更新 `desktop-shell/package.json`、必要的 Tauri 接线与相关测试/脚本辅助逻辑，使 `npm run tauri dev` / `npm run tauri build` 继续复用同一套 sidecar 构建约定
 
 ## 3. Release smoke 与文档收口
 

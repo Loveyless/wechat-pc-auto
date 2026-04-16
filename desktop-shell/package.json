@@ -9,7 +9,7 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "vitest run",
     "test:rust": "node ./scripts/run-rust-tests.mjs",
-    "build:sidecars": "python ../scripts/build_desktop_shell_sidecars.py",
+    "build:sidecars": "python3 ../scripts/build_desktop_shell_sidecars.py --python python3",
     "pretauri": "npm run build:sidecars",
     "tauri": "tauri"
   },
