@@ -29,23 +29,32 @@ describe("settings workspace translate sections", () => {
 })
 
 describe("settings workspace provider sections", () => {
-  it("renders windows_system as notice-only branch", () => {
-    expect(resolveDesktopSettingsProviderSections("windows_system")).toEqual({
-      showWindowsSystemNotice: true,
+  it("renders macos_system as notice-only branch", () => {
+    expect(resolveDesktopSettingsProviderSections("macos_system")).toEqual({
+      showMacOSSystemNotice: true,
       showDoubaoFields: false,
+      showLessTtsFields: false,
       showTencentFields: false,
     })
   })
 
-  it("renders doubao and tencent_cloud as exclusive provider forms", () => {
+  it("renders doubao, less_tts, and tencent_cloud as exclusive provider forms", () => {
     expect(resolveDesktopSettingsProviderSections("doubao")).toEqual({
-      showWindowsSystemNotice: false,
+      showMacOSSystemNotice: false,
       showDoubaoFields: true,
+      showLessTtsFields: false,
+      showTencentFields: false,
+    })
+    expect(resolveDesktopSettingsProviderSections("less_tts")).toEqual({
+      showMacOSSystemNotice: false,
+      showDoubaoFields: false,
+      showLessTtsFields: true,
       showTencentFields: false,
     })
     expect(resolveDesktopSettingsProviderSections("tencent_cloud")).toEqual({
-      showWindowsSystemNotice: false,
+      showMacOSSystemNotice: false,
       showDoubaoFields: false,
+      showLessTtsFields: false,
       showTencentFields: true,
     })
   })

@@ -150,8 +150,8 @@ function statusLabel(draft: DesktopSecretInputDraft) {
 
 function providerLabel(provider: string) {
   switch (provider) {
-    case "windows_system":
-      return "系统朗读"
+    case "macos_system":
+      return "macOS 系统朗读"
     case "doubao":
       return "豆包 TTS"
     case "less_tts":
@@ -179,7 +179,7 @@ export function resolveDesktopSettingsTranslateSections(provider: DesktopTransla
 
 export function resolveDesktopSettingsProviderSections(provider: DesktopTtsProvider) {
   return {
-    showWindowsSystemNotice: provider === "windows_system",
+    showMacOSSystemNotice: provider === "macos_system",
     showDoubaoFields: provider === "doubao",
     showLessTtsFields: provider === "less_tts",
     showTencentFields: provider === "tencent_cloud",
@@ -655,9 +655,10 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
               </select>
             </Field>
 
-            {providerSections.showWindowsSystemNotice ? (
+            {providerSections.showMacOSSystemNotice ? (
               <div className="rounded-[0.95rem] border border-dashed border-border-strong bg-workspace-canvas-strong/75 px-3 py-3 text-[12px] leading-6 text-text-secondary">
-                `windows_system` 没有 provider-private 表单，当前只保留 provider 选择本身。
+                `macos_system` 走内建 macOS `say` 语音路径，没有 provider-private 表单，也不需要单独
+                `config_path`。
               </div>
             ) : null}
 

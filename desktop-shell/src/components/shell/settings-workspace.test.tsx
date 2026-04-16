@@ -55,9 +55,9 @@ function createRuntimeConfig(params: {
     },
     tts: {
       provider: params.ttsProvider,
-      available_providers: ["windows_system", "doubao", "less_tts", "tencent_cloud"],
+      available_providers: ["macos_system", "doubao", "less_tts", "tencent_cloud"],
       providers: {
-        windows_system: {},
+        macos_system: {},
         doubao: {
           config_path: "config/doubao_tts.json",
           endpoint: "wss://doubao.local",
@@ -194,7 +194,7 @@ describe("settings workspace", () => {
       <SettingsWorkspace
         settings={createSettingsResult({
           translateProvider: "deeplx",
-          ttsProvider: "windows_system",
+          ttsProvider: "macos_system",
           managedApply: false,
         })}
       />,
@@ -203,7 +203,7 @@ describe("settings workspace", () => {
       <SettingsWorkspace
         settings={createSettingsResult({
           translateProvider: "openai_compatible",
-          ttsProvider: "windows_system",
+          ttsProvider: "macos_system",
           managedApply: false,
         })}
       />,
@@ -212,7 +212,7 @@ describe("settings workspace", () => {
       <SettingsWorkspace
         settings={createSettingsResult({
           translateProvider: "passthrough",
-          ttsProvider: "windows_system",
+          ttsProvider: "macos_system",
           managedApply: false,
         })}
       />,
@@ -289,12 +289,12 @@ describe("settings workspace", () => {
     expect(markup).toContain("这次保存会删除直接值，并移除旧环境变量引用")
   })
 
-  it("renders provider-specific branches for windows_system, doubao, less_tts, and tencent_cloud", () => {
-    const windowsMarkup = renderToStaticMarkup(
+  it("renders provider-specific branches for macos_system, doubao, less_tts, and tencent_cloud", () => {
+    const macosMarkup = renderToStaticMarkup(
       <SettingsWorkspace
         settings={createSettingsResult({
           translateProvider: "deeplx",
-          ttsProvider: "windows_system",
+          ttsProvider: "macos_system",
           managedApply: false,
         })}
       />,
@@ -327,8 +327,9 @@ describe("settings workspace", () => {
       />,
     )
 
-    expect(windowsMarkup).toContain("没有 provider-private 表单")
-    expect(windowsMarkup).not.toContain("豆包 App ID")
+    expect(macosMarkup).toContain("内建 macOS")
+    expect(macosMarkup).toContain("config_path")
+    expect(macosMarkup).not.toContain("豆包 App ID")
     expect(doubaoMarkup).toContain("豆包 App ID")
     expect(doubaoMarkup).toContain("豆包 Access Token")
     expect(lessTtsMarkup).toContain("Less TTS HTTP endpoint")
@@ -342,7 +343,7 @@ describe("settings workspace", () => {
       <SettingsWorkspace
         settings={createSettingsResult({
           translateProvider: "deeplx",
-          ttsProvider: "windows_system",
+          ttsProvider: "macos_system",
           managedApply: false,
         })}
       />,
@@ -351,7 +352,7 @@ describe("settings workspace", () => {
       <SettingsWorkspace
         settings={createSettingsResult({
           translateProvider: "deeplx",
-          ttsProvider: "windows_system",
+          ttsProvider: "macos_system",
           managedApply: true,
         })}
       />,
@@ -364,11 +365,11 @@ describe("settings workspace", () => {
   })
 
   it("renders all boolean config fields as accessible switches", () => {
-    const windowsMarkup = renderToStaticMarkup(
+    const macosMarkup = renderToStaticMarkup(
       <SettingsWorkspace
         settings={createSettingsResult({
           translateProvider: "deeplx",
-          ttsProvider: "windows_system",
+          ttsProvider: "macos_system",
           managedApply: false,
         })}
       />,
@@ -392,10 +393,10 @@ describe("settings workspace", () => {
       />,
     )
 
-    expect(windowsMarkup.match(/role=\"switch\"/g)?.length ?? 0).toBe(3)
+    expect(macosMarkup.match(/role=\"switch\"/g)?.length ?? 0).toBe(3)
     expect(doubaoMarkup.match(/role=\"switch\"/g)?.length ?? 0).toBe(4)
     expect(tencentMarkup.match(/role=\"switch\"/g)?.length ?? 0).toBe(4)
-    expect(windowsMarkup).toContain("aria-checked=\"true\"")
+    expect(macosMarkup).toContain("aria-checked=\"true\"")
     expect(tencentMarkup).toContain("aria-checked=\"false\"")
   })
 })
