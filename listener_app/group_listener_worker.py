@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -184,6 +186,67 @@ def try_focus_refresh(window) -> bool:
         return False
 
 
+def resolve_wait_status(wx, reconnect: bool) -> tuple[str, str]:
+    default_state = "reconnecting" if reconnect else "waiting_wechat"
+    state = default_state
+    detail = ""
+    try:
+        get_state = getattr(wx, "get_window_state", None)
+        if callable(get_state):
+            state = str(get_state() or "").strip() or default_state
+        get_detail = getattr(wx, "get_window_detail", None)
+        if callable(get_detail):
+            detail = str(get_detail() or "").strip()
+    except Exception:
+        return default_state, ""
+
+    if reconnect and state == "waiting_wechat":
+        state = "reconnecting"
+    if state == "ready":
+        state = "connecting"
+    return state or default_state, detail
+
+
+def format_wait_detail(detail: str, retry_seconds: float, will_retry: bool) -> str:
+    clean_detail = str(detail or "").strip() or "wechat not ready"
+    if not will_retry:
+        return clean_detail
+    return f"{clean_detail}; retry in {retry_seconds:.1f}s"
+
+
+def classify_window_exception(exc: Exception) -> tuple[str, str]:
+    detail = str(exc or "").strip()
+    detail_lower = detail.lower()
+    class_name = exc.__class__.__name__.lower()
+    if (
+        "accessibilitypermissionerror" in class_name
+        or "assistive access" in detail_lower
+        or "辅助访问" in detail
+        or "辅助功能" in detail
+    ):
+        return "permission_required", "accessibility permission required for WeChat window inspection"
+    if not detail:
+        detail = exc.__class__.__name__
+    return "window_query_failed", f"failed to inspect WeChat window: {detail}"
+
+
+def inspect_window_state(window) -> tuple[str, str]:
+    if not window:
+        return "window_lost", "wechat window handle is missing"
+    try:
+        has_popup = getattr(window, "has_popup_or_menu", None)
+        if callable(has_popup) and has_popup():
+            return "ui_paused", "wechat popup/menu/dialog blocks the main window"
+    except Exception as exc:
+        return classify_window_exception(exc)
+    try:
+        if window.Exists(0.2):
+            return "ready", ""
+    except Exception as exc:
+        return classify_window_exception(exc)
+    return "window_lost", "wechat window lost, reconnecting"
+
+
 def wait_for_wechat_ready(
     wx,
     retry_seconds: float,
@@ -191,9 +254,12 @@ def wait_for_wechat_ready(
     reconnect: bool = False,
     sleep_fn=time.sleep,
 ) -> bool:
-    wait_state = "reconnecting" if reconnect else "waiting_wechat"
     while not wx.load_wechat():
-        emit_status(wait_state, f"wechat not ready, retry in {retry_seconds:.1f}s")
+        wait_state, wait_detail = resolve_wait_status(wx, reconnect)
+        emit_status(
+            wait_state,
+            format_wait_detail(wait_detail, retry_seconds, will_retry=not probe),
+        )
         if probe:
             return False
         sleep_fn(retry_seconds)
@@ -381,6 +447,7 @@ def main():
         snapshot_repeat_polls = 0
         missing_target_polls = 0
         last_focus_refresh_at = 0.0
+        was_ui_paused = False
         if args.all_sessions:
             emit_status("running", "running all-session previews")
         else:
@@ -406,9 +473,18 @@ def main():
         while True:
             cycle_started_at = time.monotonic()
             should_stop = False
+            pause_polling = False
             try:
-                if not window or not window.Exists(0.2):
-                    emit_status("window_lost", "wechat window lost, reconnecting")
+                window_state, window_detail = inspect_window_state(window)
+                if window_state == "ui_paused":
+                    if not was_ui_paused:
+                        emit_status(window_state, window_detail)
+                        clear_control_cache(window)
+                    was_ui_paused = True
+                    pause_polling = True
+                elif window_state != "ready":
+                    if window_state == "window_lost":
+                        emit_status(window_state, window_detail)
                     runtime = connect_runtime(
                         wx,
                         targets=targets,
@@ -426,165 +502,176 @@ def main():
                     snapshot_repeat_polls = 0
                     missing_target_polls = 0
                     last_focus_refresh_at = 0.0
+                    was_ui_paused = False
                     if args.all_sessions:
                         emit_status("running", "running all-session previews")
                     else:
                         emit_status("running", f"running session-only targets={len(targets)}")
                     continue
 
-                now = datetime.now().strftime("%H:%M:%S")
-                now_ts = time.time()
-                if now_ts - last_emit_cleanup >= EMIT_CLEANUP_INTERVAL_SECONDS:
-                    cleanup_recent_emit_cache(recent_emit_at, now_ts)
-                    last_emit_cleanup = now_ts
-
-                if args.all_sessions:
-                    session_entries = collect_session_entries(window)
-                    current_signature = build_all_session_snapshot_signature(session_entries)
-                else:
-                    session_map = collect_target_session_map(window, targets)
-                    current_signature = build_session_snapshot_signature(session_map, targets)
-                snapshot_changed = current_signature != last_snapshot_signature
-                if not snapshot_changed:
-                    snapshot_repeat_polls += 1
-                else:
-                    snapshot_repeat_polls = 0
-                    last_snapshot_signature = current_signature
-
-                if args.all_sessions:
-                    missing_target_polls = 0
-                else:
-                    if len(session_map) < len(targets):
-                        missing_target_polls += 1
+                if pause_polling:
+                    pass
+                elif was_ui_paused:
+                    clear_control_cache(window)
+                    was_ui_paused = False
+                    if args.all_sessions:
+                        emit_status("running", "running all-session previews")
                     else:
-                        missing_target_polls = 0
+                        emit_status("running", f"running session-only targets={len(targets)}")
 
-                unread_total = 0
-                if args.all_sessions:
-                    unread_total = sum(int(item.get("unread") or 0) for item in session_entries)
                 else:
-                    for target in targets:
-                        unread_total += extract_session_unread_count(session_map.get(target, ""))
+                    now = datetime.now().strftime("%H:%M:%S")
+                    now_ts = time.time()
+                    if now_ts - last_emit_cleanup >= EMIT_CLEANUP_INTERVAL_SECONDS:
+                        cleanup_recent_emit_cache(recent_emit_at, now_ts)
+                        last_emit_cleanup = now_ts
 
-                if should_force_focus_refresh(
-                    args.focus_refresh,
-                    missing_target_polls=missing_target_polls,
-                    snapshot_repeat_polls=snapshot_repeat_polls,
-                    unread_total=unread_total,
-                    now_ts=now_ts,
-                    last_focus_refresh_at=last_focus_refresh_at,
-                ):
-                    if try_focus_refresh(window):
-                        last_focus_refresh_at = now_ts
-                        emit(
-                            {
-                                "type": "log",
-                                "value": (
-                                    "focus refresh triggered "
-                                    f"missing_target_polls={missing_target_polls} "
-                                    f"repeat_polls={snapshot_repeat_polls} unread_total={unread_total}"
-                                ),
-                            }
-                        )
-                        if args.all_sessions:
-                            session_entries = collect_session_entries(window)
-                            current_signature = build_all_session_snapshot_signature(session_entries)
-                        else:
-                            session_map = collect_target_session_map(window, targets)
-                            current_signature = build_session_snapshot_signature(
-                                session_map,
-                                targets,
-                            )
-                        snapshot_changed = current_signature != last_snapshot_signature
-                        last_snapshot_signature = current_signature
+                    if args.all_sessions:
+                        session_entries = collect_session_entries(window)
+                        current_signature = build_all_session_snapshot_signature(session_entries)
+                    else:
+                        session_map = collect_target_session_map(window, targets)
+                        current_signature = build_session_snapshot_signature(session_map, targets)
+                    snapshot_changed = current_signature != last_snapshot_signature
+                    if not snapshot_changed:
+                        snapshot_repeat_polls += 1
+                    else:
                         snapshot_repeat_polls = 0
-                        if args.all_sessions:
-                            missing_target_polls = 0
+                        last_snapshot_signature = current_signature
+
+                    if args.all_sessions:
+                        missing_target_polls = 0
+                    else:
+                        if len(session_map) < len(targets):
+                            missing_target_polls += 1
                         else:
-                            missing_target_polls = 0 if len(session_map) == len(targets) else 1
+                            missing_target_polls = 0
 
-                if args.all_sessions and snapshot_changed:
-                    emit(
-                        {
-                            "type": "session_snapshot",
-                            "source": "session_preview",
-                            "updated_at": now,
-                            "items": [
-                                {
-                                    "chat_name": str(item.get("chat_name") or ""),
-                                    "preview": str(item.get("preview") or ""),
-                                    "unread": int(item.get("unread") or 0),
-                                    "updated_at": now,
-                                }
-                                for item in session_entries
-                            ],
-                        }
-                    )
+                    unread_total = 0
+                    if args.all_sessions:
+                        unread_total = sum(int(item.get("unread") or 0) for item in session_entries)
+                    else:
+                        for target in targets:
+                            unread_total += extract_session_unread_count(session_map.get(target, ""))
 
-                current_items = (
-                    session_entries
-                    if args.all_sessions
-                    else [
-                        {
-                            "chat_name": target,
-                            "preview": extract_session_preview(session_map.get(target, "")),
-                            "unread": extract_session_unread_count(session_map.get(target, "")),
-                        }
-                        for target in targets
-                    ]
-                )
-
-                next_state_map: dict[str, dict[str, int | str]] = {}
-                for item in current_items:
-                    chat_name = str(item.get("chat_name") or "").strip()
-                    if not chat_name:
-                        continue
-                    current_preview = str(item.get("preview") or "")
-                    current_unread = int(item.get("unread") or 0)
-                    previous_state = target_states.setdefault(
-                        chat_name,
-                        {"preview": "", "unread": 0},
-                    )
-                    last_preview = str(previous_state.get("preview", ""))
-                    last_unread = int(previous_state.get("unread", 0))
-
-                    if args.debug:
-                        emit(
-                            {
-                                "type": "log",
-                                "value": (
-                                    f"debug target={chat_name} "
-                                    f"session_preview={current_preview} unread={current_unread}"
-                                ),
-                            }
-                        )
-
-                    if should_emit_session_preview(
-                        current_preview,
-                        current_unread,
-                        last_preview,
-                        last_unread,
+                    if should_force_focus_refresh(
+                        args.focus_refresh,
+                        missing_target_polls=missing_target_polls,
+                        snapshot_repeat_polls=snapshot_repeat_polls,
+                        unread_total=unread_total,
+                        now_ts=now_ts,
+                        last_focus_refresh_at=last_focus_refresh_at,
                     ):
-                        if last_preview and should_emit(
-                            recent_emit_at,
-                            f"{chat_name}::{current_preview}",
-                            now_ts,
-                        ):
+                        if try_focus_refresh(window):
+                            last_focus_refresh_at = now_ts
                             emit(
                                 {
-                                    "type": "message",
-                                    "source": "session_preview",
-                                    "chat_name": chat_name,
-                                    "text": current_preview,
-                                    "created_at": now,
+                                    "type": "log",
+                                    "value": (
+                                        "focus refresh triggered "
+                                        f"missing_target_polls={missing_target_polls} "
+                                        f"repeat_polls={snapshot_repeat_polls} unread_total={unread_total}"
+                                    ),
+                                }
+                            )
+                            if args.all_sessions:
+                                session_entries = collect_session_entries(window)
+                                current_signature = build_all_session_snapshot_signature(session_entries)
+                            else:
+                                session_map = collect_target_session_map(window, targets)
+                                current_signature = build_session_snapshot_signature(
+                                    session_map,
+                                    targets,
+                                )
+                            snapshot_changed = current_signature != last_snapshot_signature
+                            last_snapshot_signature = current_signature
+                            snapshot_repeat_polls = 0
+                            if args.all_sessions:
+                                missing_target_polls = 0
+                            else:
+                                missing_target_polls = 0 if len(session_map) == len(targets) else 1
+
+                    if args.all_sessions and snapshot_changed:
+                        emit(
+                            {
+                                "type": "session_snapshot",
+                                "source": "session_preview",
+                                "updated_at": now,
+                                "items": [
+                                    {
+                                        "chat_name": str(item.get("chat_name") or ""),
+                                        "preview": str(item.get("preview") or ""),
+                                        "unread": int(item.get("unread") or 0),
+                                        "updated_at": now,
+                                    }
+                                    for item in session_entries
+                                ],
+                            }
+                        )
+                    current_items = (
+                        session_entries
+                        if args.all_sessions
+                        else [
+                            {
+                                "chat_name": target,
+                                "preview": extract_session_preview(session_map.get(target, "")),
+                                "unread": extract_session_unread_count(session_map.get(target, "")),
+                            }
+                            for target in targets
+                        ]
+                    )
+
+                    next_state_map: dict[str, dict[str, int | str]] = {}
+                    for item in current_items:
+                        chat_name = str(item.get("chat_name") or "").strip()
+                        if not chat_name:
+                            continue
+                        current_preview = str(item.get("preview") or "")
+                        current_unread = int(item.get("unread") or 0)
+                        previous_state = target_states.setdefault(
+                            chat_name,
+                            {"preview": "", "unread": 0},
+                        )
+                        last_preview = str(previous_state.get("preview", ""))
+                        last_unread = int(previous_state.get("unread", 0))
+
+                        if args.debug:
+                            emit(
+                                {
+                                    "type": "log",
+                                    "value": (
+                                        f"debug target={chat_name} "
+                                        f"session_preview={current_preview} unread={current_unread}"
+                                    ),
                                 }
                             )
 
-                    next_state_map[chat_name] = {
-                        "preview": current_preview,
-                        "unread": current_unread,
-                    }
-                target_states = next_state_map
+                        if should_emit_session_preview(
+                            current_preview,
+                            current_unread,
+                            last_preview,
+                            last_unread,
+                        ):
+                            if last_preview and should_emit(
+                                recent_emit_at,
+                                f"{chat_name}::{current_preview}",
+                                now_ts,
+                            ):
+                                emit(
+                                    {
+                                        "type": "message",
+                                        "source": "session_preview",
+                                        "chat_name": chat_name,
+                                        "text": current_preview,
+                                        "created_at": now,
+                                    }
+                                )
+
+                        next_state_map[chat_name] = {
+                            "preview": current_preview,
+                            "unread": current_unread,
+                        }
+                    target_states = next_state_map
             except KeyboardInterrupt:
                 emit_status("stopped", "stopped")
                 should_stop = True

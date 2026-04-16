@@ -114,6 +114,62 @@ class GroupListenerWorkerHelpersTest(unittest.TestCase):
         self.assertEqual(sleeps, [])
         self.assertEqual(events[0]["state"], "reconnecting")
 
+    def test_wait_for_wechat_ready_uses_permission_required_state(self):
+        class FakeWx:
+            def load_wechat(self):
+                return False
+
+            def get_window_state(self):
+                return "permission_required"
+
+            def get_window_detail(self):
+                return "assistive access denied"
+
+        events = []
+        original_emit = worker.emit
+        worker.emit = events.append
+        try:
+            ready = worker.wait_for_wechat_ready(
+                FakeWx(),
+                retry_seconds=2.0,
+                probe=True,
+                reconnect=False,
+            )
+        finally:
+            worker.emit = original_emit
+
+        self.assertFalse(ready)
+        self.assertEqual(events[0]["state"], "permission_required")
+        self.assertEqual(events[0]["value"], "assistive access denied")
+
+    def test_wait_for_wechat_ready_uses_ui_paused_state(self):
+        class FakeWx:
+            def load_wechat(self):
+                return False
+
+            def get_window_state(self):
+                return "ui_paused"
+
+            def get_window_detail(self):
+                return "wechat popup/menu/dialog blocks the main window"
+
+        events = []
+        original_emit = worker.emit
+        worker.emit = events.append
+        try:
+            ready = worker.wait_for_wechat_ready(
+                FakeWx(),
+                retry_seconds=1.0,
+                probe=True,
+                reconnect=False,
+            )
+        finally:
+            worker.emit = original_emit
+
+        self.assertFalse(ready)
+        self.assertEqual(events[0]["state"], "ui_paused")
+        self.assertIn("popup/menu/dialog", events[0]["value"])
+
     def test_parse_targets_supports_multiple_sources(self):
         args = types.SimpleNamespace(
             target=["群1", "群2", "群1"],
@@ -192,6 +248,48 @@ class GroupListenerWorkerHelpersTest(unittest.TestCase):
             ]
         )
         self.assertNotEqual(first, second)
+
+    def test_inspect_window_state_detects_popup_pause(self):
+        class FakeWindow:
+            def has_popup_or_menu(self):
+                return True
+
+            def Exists(self, timeout=0.2):
+                return True
+
+        state, detail = worker.inspect_window_state(FakeWindow())
+
+        self.assertEqual(state, "ui_paused")
+        self.assertIn("popup/menu/dialog", detail)
+
+    def test_inspect_window_state_detects_permission_required_from_exception(self):
+        class AccessibilityPermissionError(RuntimeError):
+            pass
+
+        class FakeWindow:
+            def has_popup_or_menu(self):
+                raise AccessibilityPermissionError("assistive access denied")
+
+            def Exists(self, timeout=0.2):
+                return True
+
+        state, detail = worker.inspect_window_state(FakeWindow())
+
+        self.assertEqual(state, "permission_required")
+        self.assertIn("permission", detail)
+
+    def test_inspect_window_state_detects_window_lost_without_popup(self):
+        class FakeWindow:
+            def has_popup_or_menu(self):
+                return False
+
+            def Exists(self, timeout=0.2):
+                return False
+
+        state, detail = worker.inspect_window_state(FakeWindow())
+
+        self.assertEqual(state, "window_lost")
+        self.assertIn("window lost", detail)
 
     def test_should_force_focus_refresh_only_when_stalled_or_missing(self):
         self.assertFalse(
