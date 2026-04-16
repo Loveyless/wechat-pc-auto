@@ -37,7 +37,6 @@ def default_shell_executable_candidates() -> list[Path]:
     if os.name == "nt":
         return [SRC_TAURI_ROOT / "target" / "release" / "wechat-auto-shell.exe"]
     return [
-        SRC_TAURI_ROOT / "target" / "release" / "wechat-auto-shell",
         SRC_TAURI_ROOT
         / "target"
         / "release"
@@ -46,7 +45,8 @@ def default_shell_executable_candidates() -> list[Path]:
         / "WeChat Auto Shell.app"
         / "Contents"
         / "MacOS"
-        / "WeChat Auto Shell",
+        / "wechat-auto-shell",
+        SRC_TAURI_ROOT / "target" / "release" / "wechat-auto-shell",
     ]
 
 
@@ -61,17 +61,17 @@ def default_runtime_root() -> Path:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build and smoke-test the Tauri desktop shell release flow."
+        description="Build and smoke-test the packaged desktop shell release flow."
     )
     parser.add_argument(
         "--skip-build",
         action="store_true",
-        help="Skip `npm run tauri build` and use an existing release executable.",
+        help="Skip `npm run tauri -- build --bundles app` and use an existing release executable.",
     )
     parser.add_argument(
         "--shell-exe",
         default="",
-        help="Path to the release shell executable. Omit to auto-detect the current platform default.",
+        help="Path to the packaged release shell executable. Omit to auto-detect the current platform default.",
     )
     parser.add_argument(
         "--runtime-root",
@@ -329,9 +329,9 @@ def maybe_build_release(skip_build: bool) -> None:
     if skip_build:
         return
     run_command(
-        [resolve_tool_path("npm"), "run", "tauri", "--", "build"],
+        [resolve_tool_path("npm"), "run", "tauri", "--", "build", "--bundles", "app"],
         cwd=DESKTOP_SHELL_ROOT,
-        step="Tauri release build",
+        step="Tauri release app bundle build",
     )
 
 
@@ -350,13 +350,13 @@ def assert_log_contains(log_delta: str, needle: str, *, timeout: float, log_path
 
 def main() -> None:
     args = parse_args()
-    shell_exe = resolve_shell_executable(args.shell_exe)
     runtime_root = Path(args.runtime_root).resolve()
     log_path = bootstrap_log_path(runtime_root)
     log_offset = log_path.stat().st_size if log_path.exists() else 0
 
     ensure_clean_start(args.health_url)
     maybe_build_release(args.skip_build)
+    shell_exe = resolve_shell_executable(args.shell_exe)
     if not shell_exe.exists():
         raise RuntimeError(f"missing shell executable: {shell_exe}")
 

@@ -11,7 +11,8 @@
 
 ## 结论
 
-- `npm run tauri dev` / `npm run tauri build` 会先构建 PyInstaller sidecar，再由 Tauri 自动托管 backend。
+- `npm run tauri dev` 会先构建 PyInstaller sidecar，再由 Tauri 自动托管 backend。
+- 当前自动化发布闸口默认执行 `npm run tauri -- build --bundles app`，先验证可交付的 `.app`；完整 `DMG` 仍可通过 `npm run tauri build` 产出，但它依赖 Finder AppleScript，属于 GUI 专项验收。
 - 桌面壳继续按 `single-instance` 运行：第二次启动只聚焦已有窗口，不得再拉第二个壳窗口。
 - 当前 sidecar 安装名已经切到 target-triple 规则；在 Apple Silicon macOS 上，构建后会落：
   - `desktop-shell/src-tauri/binaries/wechat-auto-backend-aarch64-apple-darwin`
@@ -64,15 +65,25 @@ python3 ../scripts/build_desktop_shell_sidecars.py --python python3
 
 然后由 Tauri 壳托管 sidecar，不再要求你手工先跑 `backend_main.py`。
 
-### Tauri 壳构建
+### 默认 release app 构建
+
+```bash
+cd desktop-shell
+npm run tauri -- build --bundles app
+```
+
+这条命令同样会先自动构建 sidecar，再产出 `WeChat Auto Shell.app`。  
+当前自动化发布闸口默认使用这条命令；`scripts/smoke_desktop_shell_release.py` 的默认 build 路径也已经切到这里，并优先启动 `desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell` 做 smoke。
+
+### 可选：DMG 构建（GUI 专项验收）
 
 ```bash
 cd desktop-shell
 npm run tauri build
 ```
 
-这条命令同样会先自动构建 sidecar，再产出 release shell。  
-当前 smoke 默认先探测 `desktop-shell/src-tauri/target/release/wechat-auto-shell`，若存在 bundle app，则也会探测 `desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/WeChat Auto Shell`。
+这条命令会继续尝试产出 `DMG`，但当前 mac 打包器会在最后一步调用 Finder AppleScript 做窗口美化。  
+只有在可交互 Finder 会话里，这一步才应该作为正式验收；如果 `.app` 构建和 smoke 已通过，而 `DMG` 卡在 `bundle_dmg.sh` / `osascript`，应把它归类为 `DMG` 专项风险，不要误判成桌面壳主链路回归。
 
 ### sidecar 构建
 
@@ -151,20 +162,25 @@ fresh runtime root 不带 `.env.local` 也应该能进壳和设置页；只有�
 2. `cd desktop-shell && npm test`
 3. `cd desktop-shell && npm run build`
 4. `cd desktop-shell && npm run test:rust`
-5. `python3 scripts/smoke_desktop_shell_release.py`
+5. `cd desktop-shell && npm run tauri -- build --bundles app`
+6. `python3 scripts/smoke_desktop_shell_release.py --skip-build --shell-exe "desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell"`
 
-只有这几步都过，才允许把 release shell 当成可交付产物。
+只有这 6 步都过，才允许把当前 mac release app 当成可交付产物。  
+若还要发布 `DMG`，再额外在 GUI 会话里执行 `cd desktop-shell && npm run tauri build`。
 
 `scripts/smoke_desktop_shell_release.py` 当前会做这些事：
 
-- 必要时执行 `cd desktop-shell && npm run tauri -- build`
-- 启动探测到的 mac release shell
+- 必要时执行 `cd desktop-shell && npm run tauri -- build --bundles app`
+- 优先启动探测到的 mac bundle app 可执行文件；找不到时才回退到 `target/release/wechat-auto-shell`
 - 轮询 `http://127.0.0.1:8765/healthz`
 - 检查 `~/Library/Application Support/com.wechatauto.shell/logs/desktop-shell-bootstrap.log`
 - 再启动第二次壳，确认出现 `single-instance relaunch detected, focus existing window`
 - 断言整轮 smoke 里只出现一次 `spawning backend sidecar`
 - 关闭壳后确认 backend health 不再可达
 - 断言 bootstrap log 里不能出现 `backend stderr:`、`backend error:`、`bootstrap failed:`、traceback 或 panic 片段
+
+完整 `DMG` 构建不再是默认 smoke 闸口的一部分。  
+如果要验 `DMG`，应在可交互 Finder 会话里单独跑 `npm run tauri build`；自动化默认只对 `.app` 和实际启动链路背书。
 
 ## 图标输入
 
@@ -197,6 +213,11 @@ python3 scripts/generate_desktop_shell_icon.py
 - `http://127.0.0.1:8765/healthz` 不再可达
 - `desktop-shell-bootstrap.log` 有 relaunch / cleanup 相关记录
 - 再次启动时不会复用一份“残活但无主”的 backend
+
+### 4) `DMG` 打包失败不等于 release app 回归
+
+- `npm run tauri build` 的最后一段 `DMG` bundling 依赖 Finder AppleScript；它和 sidecar 托管、`.app` 启动、`/healthz`、single-instance、cleanup 不是同一层问题。
+- 当前默认自动化闸口已经改成 `.app build + --skip-build smoke`；如果这条链通过，而 `DMG` 在 `bundle_dmg.sh` / `osascript` 失败，应把问题归到 GUI 专项验收，不要把它回报成桌面壳主链路坏了。
 
 ## 回滚边界
 

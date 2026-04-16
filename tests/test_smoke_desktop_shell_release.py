@@ -87,18 +87,50 @@ class SmokeDesktopShellReleaseTest(unittest.TestCase):
             Path("/Users/test/Library/Application Support/com.wechatauto.shell"),
         )
 
-    def test_resolve_shell_executable_uses_existing_candidate(self):
+    def test_resolve_shell_executable_prefers_packaged_app_candidate(self):
         with TemporaryDirectory() as temp_dir:
-            missing = Path(temp_dir) / "missing-shell"
-            existing = Path(temp_dir) / "wechat-auto-shell"
-            existing.write_text("", encoding="utf-8")
+            packaged = (
+                Path(temp_dir)
+                / "bundle"
+                / "macos"
+                / "WeChat Auto Shell.app"
+                / "Contents"
+                / "MacOS"
+                / "wechat-auto-shell"
+            )
+            raw_shell = Path(temp_dir) / "wechat-auto-shell"
+            packaged.parent.mkdir(parents=True, exist_ok=True)
+            raw_shell.parent.mkdir(parents=True, exist_ok=True)
+            packaged.write_text("", encoding="utf-8")
+            raw_shell.write_text("", encoding="utf-8")
             with mock.patch.object(
                 smoke,
                 "default_shell_executable_candidates",
-                return_value=[missing, existing],
+                return_value=[packaged, raw_shell],
             ):
                 resolved = smoke.resolve_shell_executable("")
-        self.assertEqual(resolved, existing.resolve())
+        self.assertEqual(resolved, packaged.resolve())
+
+    def test_maybe_build_release_uses_app_bundle_target(self):
+        with mock.patch.object(
+            smoke,
+            "resolve_tool_path",
+            return_value="/opt/homebrew/bin/npm",
+        ), mock.patch.object(smoke, "run_command") as run_command_mock:
+            smoke.maybe_build_release(skip_build=False)
+        run_command_mock.assert_called_once_with(
+            [
+                "/opt/homebrew/bin/npm",
+                "run",
+                "tauri",
+                "--",
+                "build",
+                "--bundles",
+                "app",
+            ],
+            cwd=smoke.DESKTOP_SHELL_ROOT,
+            step="Tauri release app bundle build",
+        )
 
     def test_force_kill_process_tree_uses_graceful_shutdown_on_posix(self):
         class FakeProcess:

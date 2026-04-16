@@ -496,6 +496,7 @@
 - 运行时配置、日志、锁会落到 `~/Library/Application Support/com.wechatauto.shell`，不再写回源码目录。
 - fresh runtime root 使用仓库跟踪的默认 bundle 配置时，即使没有 `.env.local`，也应该能先进入桌面壳和设置页。
 - 但已有 runtime root 若残留旧配置，或者你把 DeepLX / 云 TTS 打开后又没补 URL / 凭据，壳启动阶段仍会 fail-fast。
+- 在当前这类非稳定 GUI 会话里，`npm run tauri build` 可能在最后的 `DMG` bundling 阶段卡在 `bundle_dmg.sh` / `osascript`；这时 `.app` 往往已经产出，不该直接判成主链路回归。
 
 根因：
 - `desktop-shell/package.json` 的 `pretauri` 会先构建 PyInstaller sidecar。
@@ -503,6 +504,7 @@
 - `listener_app/sidebar_shared.py` 会按运行时根目录解析配置/日志，并在 Tauri 壳下按“运行时目录优先、可执行目录兜底”读取 `.env.local`。
 - `listener_app/sidebar_shared.py` 复制 bundle 配置时只补不存在的文件，不覆盖已有 runtime 配置。
 - 一体化不等于“顺手把你的密钥一起烘焙进 installer”；这条边界必须保留。
+- Tauri 当前产出的 `bundle_dmg.sh` 会调用 Finder AppleScript 布局 `DMG` 窗口；这一步依赖可交互 Finder / Automation 会话，不适合作为当前默认自动闸口。
 
 处理：
 - `tauri.conf.json` 继续显式维护 `bundle.icon`，并把 `icon.png` 作为当前 mac build/test 的显式输入。
@@ -514,6 +516,8 @@
   - `translate.enabled=true and provider=openai_compatible` 时，补 `translate.providers.openai_compatible.base_url/model/api_key`
   - `tts.provider=doubao` / `less_tts` / `tencent_cloud` 时，补对应 `tts.providers.<provider>.config_path`、provider 私有配置和密钥
 - 验 fresh install 时，必须隔离一个干净 runtime root；已有 `~/Library/Application Support/com.wechatauto.shell/config/listener.json` 不会被 installer 覆盖
+- 默认自动化发布闸口改成 `npm run tauri -- build --bundles app` + `python3 scripts/smoke_desktop_shell_release.py --skip-build --shell-exe "desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell"`，先对 `.app` 和真实启动链路背书。
+- `npm run tauri build` 保留给可交互 Finder 会话下的 `DMG` 专项验收；如果这里只有 `DMG` 美化失败，而 `.app` build + smoke 已通过，应把它归类为 `DMG` 风险，不要把整个 release shell 判死。
 - 真正的最小验证不是“exe 打开了”，而是：
   - `http://127.0.0.1:8765/healthz` 返回 `{"status":"ok"}`
   - `~/Library/Application Support/com.wechatauto.shell/logs/desktop-shell-bootstrap.log` 出现 `spawned backend sidecar pid=...`
@@ -555,7 +559,8 @@
 - 这种错最坏的地方不是 CI 红了，而是包已经发出去了，用户才替你做 smoke。
 
 根因：
-- `npm run tauri -- build` 只能证明 Tauri/sidecar 构建成功，不能证明 release 壳真的能拉起 backend、通过 `/healthz`、守住 single-instance、也不能证明 bootstrap log 干净。
+- `npm run tauri -- build --bundles app` 只能证明 `.app` 构建成功，不能证明 release 壳真的能拉起 backend、通过 `/healthz`、守住 single-instance、也不能证明 bootstrap log 干净。
+- `npm run tauri build` 还会额外触发 `DMG` AppleScript 美化；把它塞进默认自动闸口，只会把 GUI 会话前提和桌面壳主链路绑死在一起。
 - 如果不复用 `python3 scripts/smoke_desktop_shell_release.py`，就等于又发明了一条和现有发布闸口不一致的发版链。
 
 处理：
@@ -563,9 +568,10 @@
   - sidecar build
   - frontend test/build
   - `npm run test:rust`
-  - `npm run tauri -- build`
-  - `python3 scripts/smoke_desktop_shell_release.py --skip-build`
-- 只有 smoke 通过后，才允许把当前 mac release shell 当成可交付产物。
+  - `npm run tauri -- build --bundles app`
+  - `python3 scripts/smoke_desktop_shell_release.py --skip-build --shell-exe "desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell"`
+- 只有 `.app build + smoke` 通过后，才允许把当前 mac release app 当成可交付产物。
+- `DMG` 验收另算：需要时再在可交互 Finder 会话里单独执行 `npm run tauri build`。
 - raw shell 和 sidecar 继续只是本地 build / 排障输出，不要把内部 sidecar 当最终用户下载面。
 
 ### 28.07) 图标链路不完整时，通常不是 Tauri 坏了，而是输入资源只接了一半
