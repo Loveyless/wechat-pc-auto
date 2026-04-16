@@ -20,7 +20,7 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
-use crate::backend::win32::{
+use crate::backend::platform::{
     acquire_bootstrap_lock, kill_process_tree, process_is_alive, process_start_token,
     BackendBootstrapLock,
 };
@@ -33,7 +33,7 @@ const BACKEND_READY_TIMEOUT_SECONDS: u64 = 15;
 const BACKEND_READY_POLL_INTERVAL_MS: u64 = 250;
 const BACKEND_BOOTSTRAP_LOCK_TIMEOUT_MS: u32 = 20_000;
 const BACKEND_SIDECAR_NAME: &str = "wechat-auto-backend";
-const BACKEND_BOOTSTRAP_MUTEX_NAMESPACE: &str = "Local\\com.wechatauto.shell.backend-bootstrap";
+const BACKEND_BOOTSTRAP_LOCK_NAMESPACE: &str = "com.wechatauto.shell.backend-bootstrap";
 const BACKEND_MARKER_FILE: &str = "backend-sidecar.json";
 const BACKEND_OWNER_PID_ENV: &str = "WECHAT_AUTO_OWNER_PID";
 const BACKEND_OWNER_START_TOKEN_ENV: &str = "WECHAT_AUTO_OWNER_START_TOKEN";
@@ -402,18 +402,18 @@ fn backend_marker_path(runtime_root: &Path) -> PathBuf {
     runtime_state_dir(runtime_root).join(BACKEND_MARKER_FILE)
 }
 
-fn build_backend_bootstrap_mutex_name(runtime_root: &Path) -> String {
+fn build_backend_bootstrap_lock_name(runtime_root: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     runtime_root.to_string_lossy().hash(&mut hasher);
     format!(
-        "{BACKEND_BOOTSTRAP_MUTEX_NAMESPACE}.{:016x}",
+        "{BACKEND_BOOTSTRAP_LOCK_NAMESPACE}.{:016x}",
         hasher.finish()
     )
 }
 
 fn acquire_backend_bootstrap_lock(runtime_root: &Path) -> Result<BackendBootstrapLock, String> {
-    let mutex_name = build_backend_bootstrap_mutex_name(runtime_root);
-    acquire_bootstrap_lock(&mutex_name, BACKEND_BOOTSTRAP_LOCK_TIMEOUT_MS)
+    let lock_name = build_backend_bootstrap_lock_name(runtime_root);
+    acquire_bootstrap_lock(&lock_name, BACKEND_BOOTSTRAP_LOCK_TIMEOUT_MS)
 }
 
 fn build_backend_pid_marker(pid: u32) -> Result<BackendPidMarker, String> {
@@ -833,39 +833,39 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        backend_marker_path, build_backend_bootstrap_mutex_name, build_backend_info,
+        backend_marker_path, build_backend_bootstrap_lock_name, build_backend_info,
         ManagedBackendState,
     };
 
     #[test]
-    fn backend_bootstrap_mutex_name_is_stable_for_same_runtime_root() {
-        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+    fn backend_bootstrap_lock_name_is_stable_for_same_runtime_root() {
+        let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
         assert_eq!(
-            build_backend_bootstrap_mutex_name(runtime_root),
-            build_backend_bootstrap_mutex_name(runtime_root)
+            build_backend_bootstrap_lock_name(runtime_root),
+            build_backend_bootstrap_lock_name(runtime_root)
         );
     }
 
     #[test]
-    fn backend_bootstrap_mutex_name_changes_with_runtime_root() {
-        let left = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
-        let right = Path::new("D:/sandbox/com.wechatauto.shell");
+    fn backend_bootstrap_lock_name_changes_with_runtime_root() {
+        let left = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
+        let right = Path::new("/tmp/wechatauto-sandbox");
         assert_ne!(
-            build_backend_bootstrap_mutex_name(left),
-            build_backend_bootstrap_mutex_name(right)
+            build_backend_bootstrap_lock_name(left),
+            build_backend_bootstrap_lock_name(right)
         );
     }
 
     #[test]
     fn backend_marker_path_stays_under_runtime_log_state_dir() {
-        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
         let marker_path = backend_marker_path(runtime_root);
         assert!(marker_path.ends_with("logs/.runtime/backend-sidecar.json"));
     }
 
     #[test]
     fn build_backend_info_marks_owned_managed_backend_as_restartable() {
-        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
         let info = build_backend_info(runtime_root, true, true, true, String::new());
         assert!(info.managed);
         assert!(info.owns_backend);
@@ -875,7 +875,7 @@ mod tests {
 
     #[test]
     fn build_backend_info_marks_reused_backend_as_unowned() {
-        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
         let info = build_backend_info(runtime_root, false, false, false, String::new());
         assert!(!info.managed);
         assert!(!info.owns_backend);
@@ -884,7 +884,7 @@ mod tests {
 
     #[test]
     fn take_owned_child_for_restart_rejects_unowned_backend() {
-        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
         let state = ManagedBackendState::new(
             build_backend_info(runtime_root, true, false, false, String::new()),
             None,
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn take_owned_child_for_restart_requires_owned_marker_after_passing_gate() {
-        let runtime_root = Path::new("C:/Users/test/AppData/Local/com.wechatauto.shell");
+        let runtime_root = Path::new("/Users/test/Library/Application Support/com.wechatauto.shell");
         let state = ManagedBackendState::new(
             build_backend_info(runtime_root, true, true, true, String::new()),
             None,

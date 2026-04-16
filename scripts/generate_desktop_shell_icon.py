@@ -146,7 +146,7 @@ def build_ico(iconSizes: list[int]) -> bytes:
     header = struct.pack("<HHH", 0, 1, len(iconSizes))
     entries = []
     offset = 6 + len(iconSizes) * 16
-    for size, pngBlob in zip(iconSizes, pngBlobs, strict=True):
+    for size, pngBlob in zip(iconSizes, pngBlobs):
         encodedSize = 0 if size >= 256 else size
         entries.append(
             struct.pack(
@@ -196,12 +196,16 @@ def main() -> None:
 
     svgPath = iconsDir / "icon.svg"
     icoPath = iconsDir / "icon.ico"
+    pngPath = iconsDir / "icon.png"
 
-    svgPath.write_text(build_svg(), encoding="utf-8", newline="\n")
+    with svgPath.open("w", encoding="utf-8", newline="\n") as svgFile:
+        svgFile.write(build_svg())
     icoPath.write_bytes(build_ico([16, 24, 32, 48, 64, 128, 256]))
+    pngPath.write_bytes(build_png(256, render_icon(256)))
 
     print(f"Wrote {svgPath}")
     print(f"Wrote {icoPath}")
+    print(f"Wrote {pngPath}")
 
 
 if __name__ == "__main__":
