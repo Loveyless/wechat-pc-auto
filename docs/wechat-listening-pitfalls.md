@@ -532,6 +532,26 @@
 - raw `wechat-auto-shell.exe`、`wechat-auto-backend.exe`、`group_listener_worker.exe` 继续留在本地 build 输出和 workflow artifact，别再把内部 sidecar 当最终用户下载面。
 - 分支 / PR 上继续跑 `windows-fast-regression` 和 `windows-packaging-smoke`；`v*` tag 则交给 `windows-release-on-tag`，不要让同一个 tag 触发多套重复 Windows 重活。
 
+### 28.061) 当前仓库已经拆成 Windows/mac 两条 release 维护线，Windows 分支不要碰 `mac-v*`
+现象：
+- 现在仓库同时维护 `spike/tauri-react-refactor` 和 `spike/tauri-react-refactor-mac` 两条 release 线，如果在当前 Windows 分支手滑推了 `mac-v*` tag，就会把平台语义彻底搅乱。
+
+根因：
+- 当前分支只负责 Windows release。
+- mac release 的 tag 规则、runner、公开资产和 smoke 口径都不在这条分支上维护。
+
+处理：
+- 当前分支只用：
+  - stable：`v0.1.0`
+  - rc：`v0.1.0-rc.1`
+- Apple Silicon macOS release 只在 `spike/tauri-react-refactor-mac` 上维护：
+  - stable：`mac-v0.1.0`
+  - rc：`mac-v0.1.0-rc.1`
+- 当前 Windows workflow 对外 GitHub Release 应稳定展示：
+  - 标题：`WeChat Auto Shell Windows <version>`
+  - 资产：`wechat-auto-shell-<version>-windows-x64.msi`、`wechat-auto-shell-<version>-windows-x64-setup.exe`、`SHA256SUMS.txt`
+- 具体的双分支维护步骤、tag 命名和 GitHub Release 自查项，统一收口在 `docs/release-maintenance.md`。
+
 ### 28.07) Windows 包没图标，通常不是 Tauri 坏了，是你把图标链路只接了一半
 现象：
 - `wechat-auto-shell.exe`、`msi` 或 `nsis setup.exe` 带着默认空白图标，看起来像没做完的内部包。

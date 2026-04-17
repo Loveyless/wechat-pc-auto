@@ -23,6 +23,8 @@ Tk 回退打包链已经下线，不要再把仓库理解成“双桌面入口�
   - `translate.enabled=false`
   - `tts.provider=windows_system`
   - fresh runtime root 不依赖 `.env.local` 也应能启动
+- 当前分支只负责 Windows release；Apple Silicon macOS release 请切到 `spike/tauri-react-refactor-mac`
+- 双分支维护、tag 操作顺序和 GitHub Release 核对清单，统一看 `docs/release-maintenance.md`
 
 别再把“密钥仍然外置”误读成“不是一体化”。
 真正的边界只有一个：`.env.local` 不会被自动打进安装包。
@@ -98,7 +100,13 @@ npm run test:rust
 - `desktop-shell/src-tauri/target/release/bundle/nsis/*-setup.exe`
 
 这些都是本地 build 目录产物，不等于 GitHub Release 对外附件。
-当前对外 release 只发布 `msi`、`nsis setup.exe` 和 `SHA256SUMS.txt`；raw shell / backend / worker exe 保留为本地构建和 workflow artifact。
+当前对外 release 只发布：
+
+- `wechat-auto-shell-<version>-windows-x64.msi`
+- `wechat-auto-shell-<version>-windows-x64-setup.exe`
+- `SHA256SUMS.txt`
+
+raw shell / backend / worker exe 保留为本地构建和 workflow artifact。
 
 Windows 图标链路也别再搞丢：
 
@@ -182,7 +190,7 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 3. 执行 `cd desktop-shell && npm run build`
 4. 执行 `cd desktop-shell && npm run test:rust`
 5. 执行 `python scripts/smoke_desktop_shell_release.py`
-6. 只有这五步都过，才允许把 release 壳当成可交付产物
+6. 只有这 6 步都过，才允许把 release 壳当成可交付产物
 
 `scripts/smoke_desktop_shell_release.py` 会实际做这些事：
 
@@ -197,6 +205,7 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 ## GitHub Tag 发布
 
 - 推送 `v*` tag 会触发 `windows-release-on-tag`
+- 当前分支不要推 `mac-v*`；mac release 线在 `spike/tauri-react-refactor-mac`
 - 这条 workflow 只跑 Windows，不做跨平台发包
 - 它会先执行：
   - `python scripts/build_desktop_shell_sidecars.py --python python`
@@ -206,9 +215,10 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
   - `cd desktop-shell && npm run tauri -- build`
 - 然后执行 `python scripts/smoke_desktop_shell_release.py --skip-build`
 - 只有 smoke 通过后，才会把这些产物附到 GitHub Release：
-  - `msi`
-  - `nsis setup.exe`
+  - `wechat-auto-shell-<version>-windows-x64.msi`
+  - `wechat-auto-shell-<version>-windows-x64-setup.exe`
   - `SHA256SUMS.txt`
+- GitHub Release 标题固定为 `WeChat Auto Shell Windows <version>`
 - `wechat-auto-shell.exe`、`wechat-auto-backend.exe`、`group_listener_worker.exe` 继续保留在本地 build 输出和 workflow artifact，用于维护与排障，不作为 GitHub Release 对外下载项
 - 分支 / PR 上的 `windows-fast-regression` 和 `windows-packaging-smoke` 继续负责回归，不负责发版；tag 发布由 `windows-release-on-tag` 接管，避免同一个 tag 重复跑多套 Windows 重活
 

@@ -10,6 +10,17 @@
 
 它不是聊天机器人，也不是“完整聊天记录抓取器”。它不发消息、不自动回复、不写输入框，也不读取右侧聊天区全文。
 
+## 分支与发布
+
+- 当前 `spike/tauri-react-refactor` 是 Windows 维护线。
+- `spike/tauri-react-refactor-mac` 是 Apple Silicon macOS 维护线；mac release 不在当前分支发。
+- 当前分支只使用：
+  - stable tag：`v0.x.y`
+  - rc tag：`v0.x.y-rc.n`
+- 如果你要维护 GitHub Release、版本同步或 tag 发布，直接看 [docs/release-maintenance.md](./docs/release-maintenance.md)。
+- GitHub Releases 总入口：
+  - [GitHub Releases](https://github.com/Loveyless/wechat-pc-auto/releases)
+
 ## 它适合谁
 
 - 想低打扰跟踪微信群或私聊最新动静的人
@@ -100,6 +111,7 @@ npm run tauri dev
 
 - 普通用户：看这份 `README.md` 就够了
 - 开发者 / 维护者：看 [docs/developer-guide.md](./docs/developer-guide.md)
+- 双分支 release 维护：看 [docs/release-maintenance.md](./docs/release-maintenance.md)
 
 ## 协议
 
