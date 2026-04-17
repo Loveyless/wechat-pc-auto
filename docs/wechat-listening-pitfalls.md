@@ -615,6 +615,7 @@
   - mac：`WeChat Auto Shell macOS Apple Silicon <version>`
   - 不要让页面标题继续只显示裸 tag，否则用户很难在 Releases 列表里一眼区分平台线。
 - 这里的 `<version>` 不能直接从 tag 去前缀得出，必须跟随桌面壳真实 bundle 版本；当前 workflow 会读取 `desktop-shell/package.json` 与 `desktop-shell/src-tauri/tauri.conf.json` 并校验两者一致。
+- 具体的双分支维护步骤、tag 命名和 GitHub Release 自查项，统一收口在 `docs/release-maintenance.md`；不要只靠 README 或这份 pitfalls 的零散段落操作。
 
 ### 28.07) 图标链路不完整时，通常不是 Tauri 坏了，而是输入资源只接了一半
 现象：

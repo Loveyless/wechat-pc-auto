@@ -41,6 +41,7 @@
 - 现在不会有“同一个 release 页面同时挂 win/mac 两套资产”的自动化；双 release 页面就是当前约定。
 - `DMG` 继续只保留为可选 GUI 专项验收产物，不是默认 GitHub Release 自动发布资产。
 - 这里的 `<version>` 以桌面壳真实 bundle 版本为准，取自 `desktop-shell/package.json` / `desktop-shell/src-tauri/tauri.conf.json`；stable 通常等于去掉 tag 前缀后的版本，而 RC 继续遵守仓库现有的桌面壳版本规则，例如 tag `mac-v0.1.0-rc.1` 对应公开资产版本 `0.1.0-1`。
+- 如果你维护发版链、tag 或 GitHub Release 操作，直接看 [docs/release-maintenance.md](./docs/release-maintenance.md)。
 
 ## 它适合谁
 
@@ -98,6 +99,7 @@
 - 配置契约：看 [config/listener.md](./config/listener.md)
 - 开发者 / 维护者：看 [docs/developer-guide.md](./docs/developer-guide.md)
 - 桌面壳构建与 release 验收：看 [docs/desktop-shell-build.md](./docs/desktop-shell-build.md)
+- 双分支 release 维护：看 [docs/release-maintenance.md](./docs/release-maintenance.md)
 
 ## 协议
 

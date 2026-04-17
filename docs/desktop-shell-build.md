@@ -26,6 +26,7 @@
   - Windows 老分支继续使用 `.github/workflows/windows-release-on-tag.yml`，tag 规则保持 `v*`
   - 当前 mac 分支使用 `.github/workflows/macos-release-on-tag.yml`，tag 规则是 `mac-v*`
 - mac tag 是否标记成 prerelease 只看是否包含 `-rc.`，不要再沿用“只要 tag 里有 `-` 就是 prerelease”的 Windows 旧判断。
+- 具体的双分支维护、tag 操作顺序和 GitHub Release 核对清单，统一看 `docs/release-maintenance.md`。
 
 别把“密钥仍然外置”误读成“不是一体化”。  
 真正的边界只有一个：`.env.local` 不会被自动打进产物。

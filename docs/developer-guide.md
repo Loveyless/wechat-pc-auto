@@ -108,6 +108,7 @@ npm run tauri build
 
 - 配置契约与字段说明：[`config/listener.md`](../config/listener.md)
 - 桌面壳测试、构建、产物与发布闸口：[`docs/desktop-shell-build.md`](./desktop-shell-build.md)
+- 双分支维护、tag 规则与 GitHub Release 操作：[`docs/release-maintenance.md`](./release-maintenance.md)
 - 监听、健康契约、打包与排障坑位：[`docs/wechat-listening-pitfalls.md`](./wechat-listening-pitfalls.md)
 
 ## 目录总览
