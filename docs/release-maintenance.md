@@ -61,7 +61,6 @@ python scripts/sync_desktop_shell_release_version.py --channel rc --base-version
 4. 跑完整发布闸口：
 
 ```bash
-python -m build --sdist --wheel
 python scripts/build_desktop_shell_sidecars.py --python python
 cd desktop-shell
 npm test
@@ -71,6 +70,14 @@ npm run tauri -- build
 cd ..
 python scripts/smoke_desktop_shell_release.py --skip-build
 ```
+
+如果你还要单独验证 Python 包的 `sdist` / `wheel`，再额外手工执行：
+
+```bash
+python -m build --sdist --wheel
+```
+
+这一步不在当前 `windows-release-on-tag.yml` 的自动发布闸口里。
 
 5. 只有上面全部通过，才允许打 annotated tag，例如：
 

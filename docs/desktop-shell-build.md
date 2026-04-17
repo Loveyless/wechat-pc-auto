@@ -190,7 +190,7 @@ Tauri 壳运行时按这个顺序找 `.env.local`：
 3. 执行 `cd desktop-shell && npm run build`
 4. 执行 `cd desktop-shell && npm run test:rust`
 5. 执行 `python scripts/smoke_desktop_shell_release.py`
-6. 只有这 6 步都过，才允许把 release 壳当成可交付产物
+只有这 5 步都过，才允许把 release 壳当成可交付产物
 
 `scripts/smoke_desktop_shell_release.py` 会实际做这些事：
 
