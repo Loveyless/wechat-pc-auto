@@ -60,6 +60,10 @@ class FakeService:
         }
         self._saved_payload = None
         self._save_error: Exception | None = None
+        self._translate_test_payload = None
+        self._tts_test_payload = None
+        self._translate_test_error: Exception | None = None
+        self._tts_test_error: Exception | None = None
 
     def snapshot(self):
         return self.runtime.snapshot()
@@ -78,6 +82,27 @@ class FakeService:
             raise self._save_error
         self._saved_payload = dict(payload)
         return dict(self._config)
+
+    def test_translate_config(self, payload: dict):
+        if self._translate_test_error is not None:
+            raise self._translate_test_error
+        self._translate_test_payload = dict(payload)
+        return {
+            "provider": "openai_compatible",
+            "input_text": "这是一条翻译测试消息。",
+            "output_text": "This is a translation test message.",
+            "detail": "translator=openai_compatible model=gpt-4o-mini endpoint=openrouter.local",
+        }
+
+    def test_tts_config(self, payload: dict):
+        if self._tts_test_error is not None:
+            raise self._tts_test_error
+        self._tts_test_payload = dict(payload)
+        return {
+            "provider": "less_tts",
+            "input_text": "This is a playback test from WeChat Auto.",
+            "detail": "tts configured backend=less_tts module=stdlib",
+        }
 
     def get_health_snapshot(self):
         return dict(self._health)
@@ -112,6 +137,20 @@ class RuntimeApiServerTest(unittest.TestCase):
         )
         with request.urlopen(req, timeout=3) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def _json_post_status(self, path: str, payload: dict) -> tuple[int, dict]:
+        raw = json.dumps(payload).encode("utf-8")
+        req = request.Request(
+            f"{self.server.http_base_url}{path}",
+            data=raw,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with request.urlopen(req, timeout=3) as response:
+                return response.status, json.loads(response.read().decode("utf-8"))
+        except error.HTTPError as exc:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
 
     def _json_put(self, path: str, payload: dict) -> tuple[int, dict]:
         raw = json.dumps(payload).encode("utf-8")
@@ -244,6 +283,42 @@ class RuntimeApiServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["error"], "validation_failed")
         self.assertEqual(payload["field_errors"]["tts.provider"], "invalid provider")
+
+    def test_http_post_translate_test_returns_test_result(self):
+        status, payload = self._json_post_status(
+            "/api/config/test-translate",
+            {
+                "translate": {
+                    "provider": "openai_compatible",
+                }
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["result"]["provider"], "openai_compatible")
+        self.assertEqual(
+            self.service._translate_test_payload["translate"]["provider"],
+            "openai_compatible",
+        )
+
+    def test_http_post_tts_test_returns_validation_errors(self):
+        self.service._tts_test_error = ConfigValidationError(
+            "config validation failed",
+            field_errors={"tts.providers.less_tts.api_key": "less_tts api_key is required"},
+        )
+        status, payload = self._json_post_status(
+            "/api/config/test-tts",
+            {
+                "tts": {
+                    "provider": "less_tts",
+                }
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "validation_failed")
+        self.assertEqual(
+            payload["field_errors"]["tts.providers.less_tts.api_key"],
+            "less_tts api_key is required",
+        )
 
     def test_websocket_stream_emits_runtime_events(self):
         async def run_test():

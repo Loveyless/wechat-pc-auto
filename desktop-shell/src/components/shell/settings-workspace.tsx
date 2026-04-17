@@ -43,6 +43,17 @@ type AdvancedSectionProps = {
   children: ReactNode
 }
 
+type ActionCardProps = {
+  title: string
+  detail: string
+  buttonLabel: string
+  pending: boolean
+  notice: string
+  error: string
+  disabled?: boolean
+  onRun: () => void
+}
+
 type BooleanSwitchProps = {
   value: boolean
   onToggle: () => void
@@ -84,6 +95,41 @@ function AdvancedSection({ summary, detail, children }: AdvancedSectionProps) {
       <p className="settings-text-wrap mt-1 text-[11px] leading-5 text-text-secondary">{detail}</p>
       <div className="mt-3 grid gap-3">{children}</div>
     </details>
+  )
+}
+
+function ActionCard({
+  title,
+  detail,
+  buttonLabel,
+  pending,
+  notice,
+  error,
+  disabled = false,
+  onRun,
+}: ActionCardProps) {
+  return (
+    <div className="rounded-[0.95rem] border border-border-subtle bg-workspace-canvas-strong/70 px-3 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[12px] font-semibold text-text-primary">{title}</p>
+          <p className="settings-text-wrap mt-1 text-[11px] leading-5 text-text-secondary">{detail}</p>
+        </div>
+        <Button disabled={disabled || pending} onClick={onRun} size="sm" type="button" variant="outline">
+          {pending ? `${buttonLabel}中...` : buttonLabel}
+        </Button>
+      </div>
+      {notice ? (
+        <div className="mt-3 rounded-[0.95rem] border border-state-ready/25 bg-state-ready-soft px-3 py-2 text-[11px] leading-5 text-state-ready">
+          {notice}
+        </div>
+      ) : null}
+      {error ? (
+        <div className="mt-3 rounded-[0.95rem] border border-state-danger/25 bg-state-danger-soft px-3 py-2 text-[11px] leading-5 text-state-danger">
+          {error}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -309,6 +355,8 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
 
   const ttsProvider = draft.tts.provider as DesktopTtsProvider
   const providerSections = resolveDesktopSettingsProviderSections(ttsProvider)
+  const testActionDisabled =
+    settings.loading || settings.saving || settings.testingTranslate || settings.testingTts
 
   return (
     <aside className="settings-workspace flex h-full min-h-0 flex-col border-l border-border-subtle bg-surface-panel/92">
@@ -573,6 +621,17 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 `passthrough` 只保留语言方向，不请求外部翻译 provider，也没有 secret 表单。
               </div>
             ) : null}
+
+            <ActionCard
+              buttonLabel="测试翻译"
+              detail={`使用当前 ${providerLabel(draft.translate.provider)} 草稿配置立即试跑，不会写回 listener.json；样例文本固定为中文句子。`}
+              disabled={testActionDisabled}
+              error={settings.translateTestError}
+              notice={settings.translateTestNotice}
+              onRun={() => void settings.runTranslateTest()}
+              pending={settings.testingTranslate}
+              title="翻译测试"
+            />
           </Section>
 
           <Section
@@ -1596,6 +1655,17 @@ export function SettingsWorkspace({ settings }: SettingsWorkspaceProps) {
                 </AdvancedSection>
               </>
             ) : null}
+
+            <ActionCard
+              buttonLabel="测试朗读"
+              detail={`使用当前 ${providerLabel(draft.tts.provider)} 草稿配置立即试播，不会写回 listener.json；样例文本固定为英文句子。`}
+              disabled={testActionDisabled}
+              error={settings.ttsTestError}
+              notice={settings.ttsTestNotice}
+              onRun={() => void settings.runTtsTest()}
+              pending={settings.testingTts}
+              title="朗读测试"
+            />
           </Section>
         </div>
       </div>

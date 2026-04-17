@@ -497,6 +497,21 @@ def play_audio_bytes_on_windows(audio_data: bytes, *, audio_format: str) -> bool
     raise RuntimeError(f"unsupported audio format for Windows playback: {normalized_format!r}")
 
 
+def run_tts_test_blocking(player: Any, text: str) -> bool:
+    payload = normalize_tts_text(text)
+    if not payload:
+        raise RuntimeError("tts test text is empty")
+    if not is_speakable_english_text(payload):
+        raise RuntimeError("tts test text must be speakable english")
+    runner = getattr(player, "_run_speak_blocking", None)
+    if callable(runner):
+        return bool(runner(payload))
+    speak_async = getattr(player, "speak_async", None)
+    if callable(speak_async):
+        return bool(speak_async(payload))
+    raise RuntimeError("tts player does not support test playback")
+
+
 class WindowsSystemTTS:
     def __init__(self, voice_name: str = ""):
         self.voice_name = str(voice_name or "").strip()

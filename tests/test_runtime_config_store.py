@@ -8,6 +8,9 @@ from unittest import mock
 from listener_app.runtime_config_store import (
     ConfigValidationError,
     build_config_snapshot,
+    prepare_runtime_config_for_test,
+    prepare_translate_runtime_config_for_test,
+    prepare_tts_runtime_config_for_test,
     save_config_snapshot,
 )
 
@@ -604,6 +607,154 @@ class RuntimeConfigStoreTest(unittest.TestCase):
 
         self.assertEqual(listener_path.read_text(encoding="utf-8"), before_listener)
         self.assertEqual(tencent_path.read_text(encoding="utf-8"), before_tencent)
+
+    def test_prepare_runtime_config_for_test_uses_temp_files(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+        before_listener = listener_path.read_text(encoding="utf-8")
+
+        with prepare_runtime_config_for_test(
+            str(listener_path),
+            {
+                "translate": {
+                    "enabled": True,
+                    "provider": "openai_compatible",
+                    "source_lang": "ZH",
+                    "target_lang": "EN",
+                    "providers": {
+                        "openai_compatible": {
+                            "base_url": "https://openrouter.local/v1",
+                            "model": "gpt-4o-mini",
+                            "timeout_seconds": 11.0,
+                        }
+                    },
+                },
+                "tts": {
+                    "provider": "less_tts",
+                    "providers": {
+                        "less_tts": {
+                            "config_path": "config/less_tts.json",
+                            "endpoint": "https://less-tts.changed/v1/audio/speech",
+                        }
+                    },
+                },
+                "secret_updates": {
+                    "translate": {
+                        "openai_compatible": {
+                            "api_key": {
+                                "value": "openai-token",
+                            }
+                        }
+                    },
+                    "tts": {
+                        "less_tts": {
+                            "api_key": {
+                                "value": "less-token-1",
+                            }
+                        }
+                    },
+                },
+            },
+        ) as runtime_config:
+            self.assertEqual(runtime_config.translate.provider, "openai_compatible")
+            self.assertEqual(runtime_config.translate.openai_model, "gpt-4o-mini")
+            self.assertEqual(runtime_config.tts.provider, "less_tts")
+
+        self.assertEqual(listener_path.read_text(encoding="utf-8"), before_listener)
+
+    def test_prepare_translate_runtime_config_for_test_ignores_invalid_tts_draft(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+        before_listener = listener_path.read_text(encoding="utf-8")
+
+        with prepare_translate_runtime_config_for_test(
+            str(listener_path),
+            {
+                "translate": {
+                    "enabled": True,
+                    "provider": "openai_compatible",
+                    "source_lang": "ZH",
+                    "target_lang": "EN",
+                    "providers": {
+                        "openai_compatible": {
+                            "base_url": "https://openrouter.local/v1",
+                            "model": "gpt-4o-mini",
+                            "timeout_seconds": 11.0,
+                        }
+                    },
+                },
+                "tts": {
+                    "provider": "less_tts",
+                    "providers": {
+                        "less_tts": {
+                            "config_path": "config/less_tts.json",
+                            "endpoint": "https://less-tts.invalid/v1/audio/speech",
+                        }
+                    },
+                },
+                "secret_updates": {
+                    "translate": {
+                        "openai_compatible": {
+                            "api_key": {
+                                "value": "openai-token",
+                            }
+                        }
+                    }
+                },
+            },
+        ) as runtime_config:
+            self.assertEqual(runtime_config.translate.provider, "openai_compatible")
+            self.assertEqual(runtime_config.translate.openai_model, "gpt-4o-mini")
+            self.assertEqual(runtime_config.tts.provider, "windows_system")
+
+        self.assertEqual(listener_path.read_text(encoding="utf-8"), before_listener)
+
+    def test_prepare_tts_runtime_config_for_test_ignores_invalid_translate_draft(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+        before_listener = listener_path.read_text(encoding="utf-8")
+
+        with prepare_tts_runtime_config_for_test(
+            str(listener_path),
+            {
+                "translate": {
+                    "enabled": True,
+                    "provider": "openai_compatible",
+                    "source_lang": "ZH",
+                    "target_lang": "EN",
+                    "providers": {
+                        "openai_compatible": {
+                            "base_url": "https://openrouter.local/v1",
+                            "model": "gpt-4o-mini",
+                            "timeout_seconds": 11.0,
+                        }
+                    },
+                },
+                "tts": {
+                    "provider": "less_tts",
+                    "providers": {
+                        "less_tts": {
+                            "config_path": "config/less_tts.json",
+                            "endpoint": "https://less-tts.changed/v1/audio/speech",
+                        }
+                    },
+                },
+                "secret_updates": {
+                    "tts": {
+                        "less_tts": {
+                            "api_key": {
+                                "value": "less-token-1",
+                            }
+                        }
+                    }
+                },
+            },
+        ) as runtime_config:
+            self.assertEqual(runtime_config.tts.provider, "less_tts")
+            self.assertEqual(runtime_config.translate.provider, "passthrough")
+            self.assertEqual(runtime_config.tts.raw_config.get("config_path"), "config/less_tts.json")
+
+        self.assertEqual(listener_path.read_text(encoding="utf-8"), before_listener)
 
 
 if __name__ == "__main__":

@@ -192,6 +192,88 @@ class BackendRuntimeTest(unittest.TestCase):
         self.assertEqual(event.event_type, "tts.updated")
         self.assertEqual(player.spoken, ["HELLO"])
 
+    @mock.patch("listener_app.backend_runtime.prepare_translate_runtime_config_for_test")
+    @mock.patch("listener_app.backend_runtime.create_translator")
+    def test_translate_config_uses_temp_runtime_config(
+        self,
+        create_translator,
+        prepare_translate_runtime_config_for_test,
+    ):
+        service = BackendRuntimeService(config_path=self._write_config())
+        runtime_config = mock.Mock()
+        runtime_config.translate.provider = "openai_compatible"
+        runtime_config.translate.deeplx_url = ""
+        runtime_config.translate.source_lang = "ZH"
+        runtime_config.translate.target_lang = "EN"
+        runtime_config.translate.timeout_seconds = 12.0
+        runtime_config.translate.openai_base_url = "https://openrouter.local/v1"
+        runtime_config.translate.openai_model = "gpt-4o-mini"
+        runtime_config.translate.openai_api_key = "token"
+        prepare_translate_runtime_config_for_test.return_value.__enter__.return_value = runtime_config
+        translator = mock.Mock()
+        translator.translate.return_value = "This is a translation test message."
+        create_translator.return_value = translator
+
+        result = service.test_translate_config({"translate": {"provider": "openai_compatible"}})
+
+        prepare_translate_runtime_config_for_test.assert_called_once_with(
+            service.config_path,
+            {"translate": {"provider": "openai_compatible"}},
+        )
+        create_translator.assert_called_once_with(
+            enabled=True,
+            provider="openai_compatible",
+            deeplx_url="",
+            source_lang="ZH",
+            target_lang="EN",
+            timeout_seconds=12.0,
+            openai_base_url="https://openrouter.local/v1",
+            openai_model="gpt-4o-mini",
+            openai_api_key="token",
+        )
+        translator.translate.assert_called_once()
+        self.assertEqual(result["provider"], "openai_compatible")
+        self.assertEqual(result["output_text"], "This is a translation test message.")
+
+    @mock.patch("listener_app.backend_runtime.prepare_tts_runtime_config_for_test")
+    @mock.patch("listener_app.backend_runtime.create_tts_player")
+    @mock.patch("listener_app.backend_runtime.run_tts_test_blocking", return_value=True)
+    def test_tts_config_uses_temp_runtime_config(
+        self,
+        run_tts_test_blocking,
+        create_tts_player,
+        prepare_tts_runtime_config_for_test,
+    ):
+        service = BackendRuntimeService(config_path=self._write_config())
+        runtime_config = mock.Mock()
+        runtime_config.config_dir = "D:/temp/runtime"
+        runtime_config.tts.provider = "less_tts"
+        runtime_config.tts.raw_config = {
+            "provider": "less_tts",
+            "providers": {
+                "less_tts": {
+                    "config_path": "config/less_tts.json",
+                }
+            },
+        }
+        prepare_tts_runtime_config_for_test.return_value.__enter__.return_value = runtime_config
+        player = mock.Mock()
+        create_tts_player.return_value = (player, "tts configured backend=less_tts")
+
+        result = service.test_tts_config({"tts": {"provider": "less_tts"}})
+
+        prepare_tts_runtime_config_for_test.assert_called_once_with(
+            service.config_path,
+            {"tts": {"provider": "less_tts"}},
+        )
+        create_tts_player.assert_called_once_with(
+            runtime_config.tts.raw_config,
+            config_dir="D:/temp/runtime",
+        )
+        run_tts_test_blocking.assert_called_once()
+        self.assertEqual(result["provider"], "less_tts")
+        self.assertIn("playback test", result["input_text"])
+
     def test_health_snapshot_reports_ok_when_worker_waits_for_wechat(self):
         service = BackendRuntimeService(config_path=self._write_config())
         service.health.mark_ready()

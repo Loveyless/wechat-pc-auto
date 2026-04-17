@@ -10,6 +10,10 @@ import type {
 import type {
   DesktopRuntimeConfig,
   DesktopSettingsSavePayload,
+  DesktopTranslateTestPayload,
+  DesktopTranslateTestResult,
+  DesktopTtsTestPayload,
+  DesktopTtsTestResult,
 } from "@/lib/settings-types"
 
 export type BackendConnectionInfo = {
@@ -211,6 +215,42 @@ export async function saveRuntimeConfig(payload: DesktopSettingsSavePayload) {
     )
   }
   throw new Error(errorMessage)
+}
+
+async function postConfigAction<T>(
+  path: string,
+  payload: DesktopTranslateTestPayload | DesktopTtsTestPayload,
+): Promise<T> {
+  const backendInfo = await requireBackendConnectionInfo()
+  const response = await fetch(`${backendInfo.httpBaseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  })
+  if (response.ok) {
+    const result = (await response.json()) as { result: T }
+    return result.result
+  }
+  const errorPayload = await readApiErrorPayload(response)
+  const errorMessage = resolveApiErrorMessage(response.status, path, errorPayload)
+  if (
+    typeof errorPayload === "object" &&
+    errorPayload !== null &&
+    errorPayload.error === "validation_failed"
+  ) {
+    throw new ConfigSaveError(errorMessage, errorPayload.field_errors ?? {})
+  }
+  throw new Error(errorMessage)
+}
+
+export async function testTranslateConfig(payload: DesktopTranslateTestPayload) {
+  return postConfigAction<DesktopTranslateTestResult>("/api/config/test-translate", payload)
+}
+
+export async function testTtsConfig(payload: DesktopTtsTestPayload) {
+  return postConfigAction<DesktopTtsTestResult>("/api/config/test-tts", payload)
 }
 
 export async function restartManagedBackend() {

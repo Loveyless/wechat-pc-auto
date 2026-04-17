@@ -6,6 +6,8 @@ import {
   fetchRuntimeConfig,
   restartManagedBackend,
   saveRuntimeConfig,
+  testTranslateConfig,
+  testTtsConfig,
 } from "@/lib/api"
 import type {
   DesktopRuntimeConfig,
@@ -18,6 +20,10 @@ import type {
   DesktopSettingsSaveIntent,
   DesktopSettingsSavePayload,
   DesktopSecretDrafts,
+  DesktopTranslateTestPayload,
+  DesktopTranslateTestResult,
+  DesktopTtsTestPayload,
+  DesktopTtsTestResult,
 } from "@/lib/settings-types"
 
 function createSecretInputDraft(status: DesktopSecretStatus): DesktopSecretInputDraft {
@@ -317,6 +323,30 @@ export function buildDesktopSettingsSavePayload(
   }
 }
 
+export function buildDesktopTranslateTestPayload(
+  draft: DesktopSettingsDraft,
+): DesktopTranslateTestPayload {
+  const payload = buildDesktopSettingsSavePayload(draft)
+  return {
+    translate: payload.translate,
+    secret_updates: {
+      translate: payload.secret_updates.translate,
+    },
+  }
+}
+
+export function buildDesktopTtsTestPayload(
+  draft: DesktopSettingsDraft,
+): DesktopTtsTestPayload {
+  const payload = buildDesktopSettingsSavePayload(draft)
+  return {
+    tts: payload.tts,
+    secret_updates: {
+      tts: payload.secret_updates.tts,
+    },
+  }
+}
+
 export function resolveDesktopSettingsActionState(params: {
   config: DesktopRuntimeConfig | null
   backendInfo: Pick<BackendConnectionInfo, "managed" | "ownsBackend" | "restartSupported">
@@ -396,6 +426,27 @@ function resolveDesktopSettingsSavedNotice(
   return "配置已保存。当前连接仅支持 save-only，需手动重启 backend 生效。"
 }
 
+function summarizeTestResult(value: string, maxLength = 160): string {
+  const normalized = value.replace(/\s+/g, " ").trim()
+  if (!normalized) {
+    return ""
+  }
+  if (normalized.length <= maxLength) {
+    return normalized
+  }
+  return `${normalized.slice(0, maxLength)}...`
+}
+
+function resolveTranslateTestNotice(result: DesktopTranslateTestResult): string {
+  const outputPreview = summarizeTestResult(result.output_text, 180)
+  return `${result.provider} 测试成功：${outputPreview || "已返回结果"}`
+}
+
+function resolveTtsTestNotice(result: DesktopTtsTestResult): string {
+  const inputPreview = summarizeTestResult(result.input_text, 120)
+  return `${result.provider} 试播成功：${inputPreview || "测试文本已播放"}`
+}
+
 export type PersistDesktopSettingsDependencies = {
   saveConfig: (payload: DesktopSettingsSavePayload) => Promise<DesktopRuntimeConfig>
   applyManagedRestart: () => Promise<BackendConnectionInfo>
@@ -465,6 +516,8 @@ export type UseDesktopSettingsResult = {
   reload: () => Promise<void>
   loading: boolean
   saving: boolean
+  testingTranslate: boolean
+  testingTts: boolean
   draft: DesktopSettingsDraft | null
   secretDrafts: DesktopSecretDrafts | null
   fieldErrors: Record<string, string>
@@ -472,6 +525,10 @@ export type UseDesktopSettingsResult = {
   errorMessage: string
   saveNotice: string
   saveMessage: string
+  translateTestNotice: string
+  translateTestError: string
+  ttsTestNotice: string
+  ttsTestError: string
   isDirty: boolean
   actionState: DesktopSettingsActionState
   applyMode: DesktopSettingsApplyMode
@@ -479,6 +536,8 @@ export type UseDesktopSettingsResult = {
   setSecretDrafts: Dispatch<SetStateAction<DesktopSecretDrafts | null>>
   saveSettings: (intent?: DesktopSettingsSaveIntent) => Promise<boolean>
   save: () => Promise<boolean>
+  runTranslateTest: () => Promise<boolean>
+  runTtsTest: () => Promise<boolean>
   updateTranslateField: <K extends keyof DesktopSettingsDraft["translate"]>(
     key: K,
     value: DesktopSettingsDraft["translate"][K],
@@ -522,6 +581,19 @@ export function useDesktopSettings(
   const [saveError, setSaveError] = useState("")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [saveNotice, setSaveNotice] = useState("")
+  const [testingTranslate, setTestingTranslate] = useState(false)
+  const [testingTts, setTestingTts] = useState(false)
+  const [translateTestNotice, setTranslateTestNotice] = useState("")
+  const [translateTestError, setTranslateTestError] = useState("")
+  const [ttsTestNotice, setTtsTestNotice] = useState("")
+  const [ttsTestError, setTtsTestError] = useState("")
+
+  const clearTestFeedback = useCallback(() => {
+    setTranslateTestNotice("")
+    setTranslateTestError("")
+    setTtsTestNotice("")
+    setTtsTestError("")
+  }, [])
 
   const actionState = useMemo(
     () => resolveDesktopSettingsActionState({ config, backendInfo }),
@@ -533,13 +605,14 @@ export function useDesktopSettings(
       setFieldErrors({})
       setSaveError("")
       setSaveNotice("")
+      clearTestFeedback()
       setDraftState((current) =>
         typeof value === "function"
           ? (value as (draft: DesktopSettingsDraft | null) => DesktopSettingsDraft | null)(current)
           : value,
       )
     },
-    [],
+    [clearTestFeedback],
   )
 
   const secretDrafts = useMemo(() => extractDesktopSecretDrafts(draftState), [draftState])
@@ -549,6 +622,7 @@ export function useDesktopSettings(
       setFieldErrors({})
       setSaveError("")
       setSaveNotice("")
+      clearTestFeedback()
       setDraftState((current) => {
         if (!current) {
           return current
@@ -565,7 +639,7 @@ export function useDesktopSettings(
         return mergeDesktopSecretDrafts(current, nextValue)
       })
     },
-    [],
+    [clearTestFeedback],
   )
 
   const loadSettings = useCallback(async () => {
@@ -577,12 +651,13 @@ export function useDesktopSettings(
       setConfig(nextConfig)
       setDraftState(createDesktopSettingsDraft(nextConfig))
       setSaveNotice("")
+      clearTestFeedback()
     } catch (error) {
       setSaveError(resolveErrorMessage(error, "加载配置失败"))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [clearTestFeedback])
 
   const openSettings = useCallback(async () => {
     setIsOpen(true)
@@ -609,6 +684,7 @@ export function useDesktopSettings(
       setSaveError("")
       setFieldErrors({})
       setSaveNotice("")
+      clearTestFeedback()
       try {
         const result = await persistDesktopSettings({
           draft: draftState,
@@ -640,8 +716,58 @@ export function useDesktopSettings(
         setSaving(false)
       }
     },
-    [actionState, draftState, options.onApply],
+    [actionState, clearTestFeedback, draftState, options.onApply],
   )
+
+  const runTranslateTest = useCallback(async () => {
+    if (!draftState) {
+      return false
+    }
+    setTestingTranslate(true)
+    setTranslateTestError("")
+    setTranslateTestNotice("")
+    setFieldErrors({})
+    try {
+      const result = await testTranslateConfig(buildDesktopTranslateTestPayload(draftState))
+      setTranslateTestNotice(resolveTranslateTestNotice(result))
+      return true
+    } catch (error) {
+      if (error instanceof ConfigSaveError) {
+        setFieldErrors(error.fieldErrors)
+        setTranslateTestError(resolveConfigSaveErrorMessage(error))
+      } else {
+        setTranslateTestError(resolveErrorMessage(error, "翻译测试失败"))
+      }
+      return false
+    } finally {
+      setTestingTranslate(false)
+    }
+  }, [draftState])
+
+  const runTtsTest = useCallback(async () => {
+    if (!draftState) {
+      return false
+    }
+    setTestingTts(true)
+    setTtsTestError("")
+    setTtsTestNotice("")
+    setFieldErrors({})
+    try {
+      const result = await testTtsConfig(buildDesktopTtsTestPayload(draftState))
+      setTtsTestNotice(resolveTtsTestNotice(result))
+      return true
+    } catch (error) {
+      if (error instanceof ConfigSaveError) {
+        setFieldErrors(error.fieldErrors)
+        setTtsTestError(resolveConfigSaveErrorMessage(error))
+      } else {
+        setTtsTestError(resolveErrorMessage(error, "朗读测试失败"))
+      }
+      return false
+    } finally {
+      setTestingTts(false)
+    }
+  }, [draftState])
 
   const applyMode: DesktopSettingsApplyMode =
     actionState.mode === "save_and_apply" ? "managed" : "save_only"
@@ -654,6 +780,8 @@ export function useDesktopSettings(
     reload: reloadSettings,
     loading,
     saving,
+    testingTranslate,
+    testingTts,
     draft: draftState,
     secretDrafts,
     fieldErrors,
@@ -661,6 +789,10 @@ export function useDesktopSettings(
     errorMessage: saveError,
     saveNotice,
     saveMessage: saveNotice,
+    translateTestNotice,
+    translateTestError,
+    ttsTestNotice,
+    ttsTestError,
     isDirty: isDesktopSettingsDirty(config, draftState),
     actionState,
     applyMode,
@@ -668,6 +800,8 @@ export function useDesktopSettings(
     setSecretDrafts,
     saveSettings,
     save: () => saveSettings("save"),
+    runTranslateTest,
+    runTtsTest,
     updateTranslateField(key, value) {
       setDraft((current) =>
         current

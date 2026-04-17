@@ -33,19 +33,28 @@ describe("settings workspace provider sections", () => {
     expect(resolveDesktopSettingsProviderSections("windows_system")).toEqual({
       showWindowsSystemNotice: true,
       showDoubaoFields: false,
+      showLessTtsFields: false,
       showTencentFields: false,
     })
   })
 
-  it("renders doubao and tencent_cloud as exclusive provider forms", () => {
+  it("renders doubao, less_tts, and tencent_cloud as exclusive provider forms", () => {
     expect(resolveDesktopSettingsProviderSections("doubao")).toEqual({
       showWindowsSystemNotice: false,
       showDoubaoFields: true,
+      showLessTtsFields: false,
+      showTencentFields: false,
+    })
+    expect(resolveDesktopSettingsProviderSections("less_tts")).toEqual({
+      showWindowsSystemNotice: false,
+      showDoubaoFields: false,
+      showLessTtsFields: true,
       showTencentFields: false,
     })
     expect(resolveDesktopSettingsProviderSections("tencent_cloud")).toEqual({
       showWindowsSystemNotice: false,
       showDoubaoFields: false,
+      showLessTtsFields: false,
       showTencentFields: true,
     })
   })

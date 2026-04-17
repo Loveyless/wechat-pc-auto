@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import copy
 import os
-from typing import Any
+import shutil
+import tempfile
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 if __package__:
     from .runtime_config import DEEPLX_ENV_FIELD, load_runtime_config
@@ -389,6 +392,239 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
         previous_provider_payload=previous_provider_raw,
     )
     return build_config_snapshot(listener_path)
+
+
+@contextmanager
+def prepare_runtime_config_for_test(
+    config_path: str,
+    payload: dict[str, Any],
+) -> Iterator[Any]:
+    with _prepare_runtime_config_with_payload(config_path, payload) as runtime_config:
+        yield runtime_config
+
+
+@contextmanager
+def prepare_translate_runtime_config_for_test(
+    config_path: str,
+    payload: dict[str, Any],
+) -> Iterator[Any]:
+    merged_payload = _build_translate_test_payload(config_path, payload)
+    with _prepare_runtime_config_with_payload(config_path, merged_payload) as runtime_config:
+        yield runtime_config
+
+
+@contextmanager
+def prepare_tts_runtime_config_for_test(
+    config_path: str,
+    payload: dict[str, Any],
+) -> Iterator[Any]:
+    merged_payload = _build_tts_test_payload(config_path, payload)
+    with _prepare_runtime_config_with_payload(config_path, merged_payload) as runtime_config:
+        yield runtime_config
+
+
+@contextmanager
+def _prepare_runtime_config_with_payload(
+    config_path: str,
+    payload: dict[str, Any],
+) -> Iterator[Any]:
+    runtime_config = load_runtime_config(config_path)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        shutil.copytree(runtime_config.config_dir, temp_dir, dirs_exist_ok=True)
+        temp_listener_path = os.path.join(
+            temp_dir,
+            os.path.basename(runtime_config.config_path),
+        )
+        save_config_snapshot(temp_listener_path, payload)
+        yield load_runtime_config(temp_listener_path)
+
+
+def _build_translate_test_payload(config_path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    base_payload = _build_save_payload_from_snapshot(build_config_snapshot(config_path))
+    base_payload["tts"] = _merge_nested_dicts(
+        _read_section(base_payload, "tts"),
+        {
+            "provider": "windows_system",
+        },
+    )
+    base_payload["translate"] = _merge_nested_dicts(
+        _read_section(base_payload, "translate"),
+        _read_section(payload, "translate"),
+    )
+    secret_updates = _read_section(base_payload, "secret_updates")
+    secret_updates["translate"] = _merge_nested_dicts(
+        _read_section(secret_updates, "translate"),
+        _read_section(_read_section(payload, "secret_updates"), "translate"),
+    )
+    base_payload["secret_updates"] = secret_updates
+    return base_payload
+
+
+def _build_tts_test_payload(config_path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    base_payload = _build_save_payload_from_snapshot(build_config_snapshot(config_path))
+    base_payload["translate"] = _merge_nested_dicts(
+        _read_section(base_payload, "translate"),
+        {
+            "enabled": False,
+            "provider": "passthrough",
+        },
+    )
+    base_payload["tts"] = _merge_nested_dicts(
+        _read_section(base_payload, "tts"),
+        _read_section(payload, "tts"),
+    )
+    secret_updates = _read_section(base_payload, "secret_updates")
+    secret_updates["tts"] = _merge_nested_dicts(
+        _read_section(secret_updates, "tts"),
+        _read_section(_read_section(payload, "secret_updates"), "tts"),
+    )
+    base_payload["secret_updates"] = secret_updates
+    return base_payload
+
+
+def _build_save_payload_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    translate = _read_section(snapshot, "translate")
+    translate_providers = _read_section(translate, "providers")
+    display = _read_section(snapshot, "display")
+    tts = _read_section(snapshot, "tts")
+    tts_providers = _read_section(tts, "providers")
+    return {
+        "translate": {
+            "enabled": bool(translate.get("enabled", True)),
+            "provider": str(translate.get("provider") or "passthrough"),
+            "source_lang": str(translate.get("source_lang") or "auto"),
+            "target_lang": str(translate.get("target_lang") or "EN"),
+            "providers": {
+                "deeplx": {
+                    "timeout_seconds": float(
+                        _read_section(translate_providers, "deeplx").get("timeout_seconds") or 8.0
+                    ),
+                },
+                OPENAI_COMPATIBLE_PROVIDER: {
+                    "base_url": str(
+                        _read_section(translate_providers, OPENAI_COMPATIBLE_PROVIDER).get("base_url")
+                        or ""
+                    ),
+                    "model": str(
+                        _read_section(translate_providers, OPENAI_COMPATIBLE_PROVIDER).get("model")
+                        or ""
+                    ),
+                    "timeout_seconds": float(
+                        _read_section(translate_providers, OPENAI_COMPATIBLE_PROVIDER).get(
+                            "timeout_seconds"
+                        )
+                        or 8.0
+                    ),
+                },
+                "passthrough": {},
+            },
+        },
+        "display": {
+            "english_only": bool(display.get("english_only", True)),
+            "tts_auto_read_active_chat": bool(display.get("tts_auto_read_active_chat", True)),
+            "on_translate_fail": str(display.get("on_translate_fail") or "show_cn_with_reason"),
+        },
+        "tts": {
+            "provider": str(tts.get("provider") or DEFAULT_TTS_PROVIDER),
+            "providers": {
+                "doubao": {
+                    "config_path": str(_read_section(tts_providers, "doubao").get("config_path") or ""),
+                    "endpoint": str(_read_section(tts_providers, "doubao").get("endpoint") or ""),
+                    "resource_id": str(_read_section(tts_providers, "doubao").get("resource_id") or ""),
+                    "speaker": str(_read_section(tts_providers, "doubao").get("speaker") or ""),
+                    "audio_format": str(_read_section(tts_providers, "doubao").get("audio_format") or "wav"),
+                    "sample_rate": int(
+                        _read_section(tts_providers, "doubao").get("sample_rate")
+                        or DOUBAO_TTS_DEFAULT_SAMPLE_RATE
+                    ),
+                    "speech_rate": int(
+                        _read_section(tts_providers, "doubao").get("speech_rate")
+                        or DOUBAO_TTS_DEFAULT_SPEECH_RATE
+                    ),
+                    "loudness_rate": int(
+                        _read_section(tts_providers, "doubao").get("loudness_rate")
+                        or DOUBAO_TTS_DEFAULT_LOUDNESS_RATE
+                    ),
+                    "use_cache": bool(_read_section(tts_providers, "doubao").get("use_cache", False)),
+                    "uid": str(_read_section(tts_providers, "doubao").get("uid") or "wechat-pc-auto"),
+                    "connect_timeout_seconds": float(
+                        _read_section(tts_providers, "doubao").get("connect_timeout_seconds") or 10.0
+                    ),
+                },
+                "less_tts": {
+                    "config_path": str(_read_section(tts_providers, "less_tts").get("config_path") or ""),
+                    "endpoint": str(_read_section(tts_providers, "less_tts").get("endpoint") or ""),
+                },
+                "tencent_cloud": {
+                    "config_path": str(
+                        _read_section(tts_providers, "tencent_cloud").get("config_path") or ""
+                    ),
+                    "endpoint": str(_read_section(tts_providers, "tencent_cloud").get("endpoint") or ""),
+                    "region": str(_read_section(tts_providers, "tencent_cloud").get("region") or ""),
+                    "voice_type": int(
+                        _read_section(tts_providers, "tencent_cloud").get("voice_type") or 0
+                    ),
+                    "codec": str(_read_section(tts_providers, "tencent_cloud").get("codec") or "wav"),
+                    "sample_rate": int(
+                        _read_section(tts_providers, "tencent_cloud").get("sample_rate")
+                        or TENCENT_CLOUD_TTS_DEFAULT_SAMPLE_RATE
+                    ),
+                    "speed": float(
+                        _read_section(tts_providers, "tencent_cloud").get("speed")
+                        or TENCENT_CLOUD_TTS_DEFAULT_SPEED
+                    ),
+                    "volume": float(
+                        _read_section(tts_providers, "tencent_cloud").get("volume")
+                        or TENCENT_CLOUD_TTS_DEFAULT_VOLUME
+                    ),
+                    "primary_language": int(
+                        _read_section(tts_providers, "tencent_cloud").get("primary_language")
+                        or TENCENT_CLOUD_TTS_DEFAULT_PRIMARY_LANGUAGE
+                    ),
+                    "model_type": int(
+                        _read_section(tts_providers, "tencent_cloud").get("model_type")
+                        or TENCENT_CLOUD_TTS_DEFAULT_MODEL_TYPE
+                    ),
+                    "project_id": int(
+                        _read_section(tts_providers, "tencent_cloud").get("project_id")
+                        or TENCENT_CLOUD_TTS_DEFAULT_PROJECT_ID
+                    ),
+                    "segment_rate": int(
+                        _read_section(tts_providers, "tencent_cloud").get("segment_rate")
+                        or TENCENT_CLOUD_TTS_DEFAULT_SEGMENT_RATE
+                    ),
+                    "enable_subtitle": bool(
+                        _read_section(tts_providers, "tencent_cloud").get("enable_subtitle", False)
+                    ),
+                    "emotion_category": str(
+                        _read_section(tts_providers, "tencent_cloud").get("emotion_category") or ""
+                    ),
+                    "emotion_intensity": int(
+                        _read_section(tts_providers, "tencent_cloud").get("emotion_intensity") or 100
+                    ),
+                    "request_timeout_seconds": float(
+                        _read_section(tts_providers, "tencent_cloud").get("request_timeout_seconds")
+                        or 15.0
+                    ),
+                },
+            },
+        },
+        "secret_updates": {
+            "translate": {},
+            "tts": {},
+        },
+    }
+
+
+def _merge_nested_dicts(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    merged = copy.deepcopy(base)
+    for key, value in overrides.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _merge_nested_dicts(current, value)
+            continue
+        merged[key] = copy.deepcopy(value)
+    return merged
 
 
 def _build_runtime_meta(config_path: str) -> dict[str, Any]:

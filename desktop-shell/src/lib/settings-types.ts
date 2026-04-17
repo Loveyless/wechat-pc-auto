@@ -120,6 +120,19 @@ export type DesktopRuntimeConfig = {
   runtime: DesktopRuntimeConfigMeta
 }
 
+export type DesktopTranslateTestResult = {
+  provider: DesktopTranslateProvider
+  input_text: string
+  output_text: string
+  detail: string
+}
+
+export type DesktopTtsTestResult = {
+  provider: DesktopTtsProvider
+  input_text: string
+  detail: string
+}
+
 export type DesktopDeeplxProviderDraft = {
   timeout_seconds: number
   deeplx_url: DesktopSecretInputDraft
@@ -283,6 +296,20 @@ export type DesktopSettingsSavePayload = {
         secret_key?: DesktopSecretUpdate
       }
     }
+  }
+}
+
+export type DesktopTranslateTestPayload = {
+  translate: DesktopSettingsSavePayload["translate"]
+  secret_updates: {
+    translate: DesktopSettingsSavePayload["secret_updates"]["translate"]
+  }
+}
+
+export type DesktopTtsTestPayload = {
+  tts: DesktopSettingsSavePayload["tts"]
+  secret_updates: {
+    tts: DesktopSettingsSavePayload["secret_updates"]["tts"]
   }
 }
 

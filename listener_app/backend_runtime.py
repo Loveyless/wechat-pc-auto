@@ -11,7 +11,12 @@ from typing import Any
 
 if __package__:
     from .runtime_config import DesktopRuntimeConfig, load_runtime_config
-    from .runtime_config_store import build_config_snapshot, save_config_snapshot
+    from .runtime_config_store import (
+        build_config_snapshot,
+        prepare_translate_runtime_config_for_test,
+        prepare_tts_runtime_config_for_test,
+        save_config_snapshot,
+    )
     from .runtime_engine import ListenerRuntime
     from .sidebar_runtime_support import (
         acquire_target_lock,
@@ -60,10 +65,16 @@ if __package__:
     from .sidebar_tts import (
         create_tts_player,
         normalize_tts_provider,
+        run_tts_test_blocking,
     )
 else:
     from runtime_config import DesktopRuntimeConfig, load_runtime_config
-    from runtime_config_store import build_config_snapshot, save_config_snapshot
+    from runtime_config_store import (
+        build_config_snapshot,
+        prepare_translate_runtime_config_for_test,
+        prepare_tts_runtime_config_for_test,
+        save_config_snapshot,
+    )
     from runtime_engine import ListenerRuntime
     from sidebar_runtime_support import (
         acquire_target_lock,
@@ -112,6 +123,7 @@ else:
     from sidebar_tts import (
         create_tts_player,
         normalize_tts_provider,
+        run_tts_test_blocking,
     )
 
 HEALTH_STATUS_STARTING = "starting"
@@ -119,6 +131,8 @@ HEALTH_STATUS_OK = "ok"
 HEALTH_STATUS_STARTUP_FAILED = "startup_failed"
 HEALTH_STATUS_DEGRADED = "degraded"
 DEGRADED_WORKER_STATES = {"worker_backoff", "stopped"}
+SETTINGS_TRANSLATE_TEST_TEXT = "这是一条翻译测试消息。"
+SETTINGS_TTS_TEST_TEXT = "This is a playback test from WeChat Auto."
 
 
 @dataclass(slots=True)
@@ -332,6 +346,74 @@ class BackendRuntimeService:
 
     def get_health_snapshot(self) -> dict[str, str]:
         return self.health.snapshot()
+
+    def test_translate_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with prepare_translate_runtime_config_for_test(self.config_path, payload) as runtime_config:
+            force_enabled = runtime_config.translate.provider != "passthrough"
+            translator = create_translator(
+                enabled=force_enabled,
+                provider=runtime_config.translate.provider,
+                deeplx_url=runtime_config.translate.deeplx_url,
+                source_lang=runtime_config.translate.source_lang,
+                target_lang=runtime_config.translate.target_lang,
+                timeout_seconds=runtime_config.translate.timeout_seconds,
+                openai_base_url=runtime_config.translate.openai_base_url,
+                openai_model=runtime_config.translate.openai_model,
+                openai_api_key=runtime_config.translate.openai_api_key,
+            )
+            try:
+                output_text = translator.translate(SETTINGS_TRANSLATE_TEST_TEXT)
+            except Exception as exc:
+                self._log_line(
+                    f"translate settings test failed provider={runtime_config.translate.provider} error={exc}"
+                )
+                raise RuntimeError(str(exc)) from exc
+            detail = build_translator_runtime_text(
+                force_enabled,
+                runtime_config.translate.provider,
+                openai_base_url=runtime_config.translate.openai_base_url,
+                openai_model=runtime_config.translate.openai_model,
+            )
+            self._log_line(
+                f"translate settings test ok provider={runtime_config.translate.provider} chars={len(output_text)}"
+            )
+            return {
+                "provider": runtime_config.translate.provider,
+                "input_text": SETTINGS_TRANSLATE_TEST_TEXT,
+                "output_text": output_text,
+                "detail": detail,
+            }
+
+    def test_tts_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with prepare_tts_runtime_config_for_test(self.config_path, payload) as runtime_config:
+            player, runtime_text = create_tts_player(
+                runtime_config.tts.raw_config,
+                config_dir=runtime_config.config_dir,
+            )
+            if player is None:
+                raise RuntimeError(runtime_text or "tts unavailable")
+            if hasattr(player, "set_logger"):
+                player.set_logger(self._log_line)
+            try:
+                ok = bool(run_tts_test_blocking(player, SETTINGS_TTS_TEST_TEXT))
+            except Exception as exc:
+                self._log_line(
+                    f"tts settings test failed provider={runtime_config.tts.provider} error={exc}"
+                )
+                raise RuntimeError(str(exc)) from exc
+            if not ok:
+                last_error = str(getattr(player, "_last_error", "") or "").strip()
+                detail = last_error or "tts rejected"
+                self._log_line(
+                    f"tts settings test rejected provider={runtime_config.tts.provider} detail={detail}"
+                )
+                raise RuntimeError(detail)
+            self._log_line(f"tts settings test ok provider={runtime_config.tts.provider}")
+            return {
+                "provider": runtime_config.tts.provider,
+                "input_text": SETTINGS_TTS_TEST_TEXT,
+                "detail": runtime_text,
+            }
 
     def mark_startup_failed(self, detail: str) -> None:
         self.health.mark_startup_failed(detail)

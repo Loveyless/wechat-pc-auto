@@ -4,6 +4,8 @@ import type { BackendConnectionInfo } from "@/lib/api"
 import type { DesktopRuntimeConfig } from "@/lib/settings-types"
 import {
   buildDesktopSettingsSavePayload,
+  buildDesktopTranslateTestPayload,
+  buildDesktopTtsTestPayload,
   createDesktopSettingsDraft,
   isDesktopSettingsDirty,
   persistDesktopSettings,
@@ -263,6 +265,59 @@ describe("desktop settings state", () => {
     expect(lessTtsUpdates!.api_key).toEqual({
       value: "less-token",
     })
+  })
+
+  it("builds translate test payload without carrying unrelated tts draft fields", () => {
+    const draft = createDesktopSettingsDraft(createRuntimeConfig())
+
+    draft.translate.provider = "openai_compatible"
+    draft.translate.providers.openai_compatible.base_url = "https://gateway.local/v1"
+    draft.translate.providers.openai_compatible.model = "gpt-4.1-mini"
+    draft.translate.providers.openai_compatible.timeout_seconds = 18
+    draft.translate.providers.openai_compatible.api_key.value = "next-openai-token"
+    draft.tts.provider = "less_tts"
+    draft.tts.providers.less_tts.api_key.value = ""
+
+    const payload = buildDesktopTranslateTestPayload(draft)
+
+    expect(payload.translate.provider).toBe("openai_compatible")
+    expect(payload.translate.providers.openai_compatible).toEqual({
+      base_url: "https://gateway.local/v1",
+      model: "gpt-4.1-mini",
+      timeout_seconds: 18,
+    })
+    expect(payload.secret_updates.translate.openai_compatible).toEqual({
+      api_key: {
+        value: "next-openai-token",
+      },
+    })
+    expect(payload).not.toHaveProperty("tts")
+    expect(payload).not.toHaveProperty("display")
+  })
+
+  it("builds tts test payload without carrying unrelated translate draft fields", () => {
+    const draft = createDesktopSettingsDraft(createRuntimeConfig())
+
+    draft.translate.provider = "openai_compatible"
+    draft.translate.providers.openai_compatible.api_key.value = ""
+    draft.tts.provider = "less_tts"
+    draft.tts.providers.less_tts.endpoint = "https://less-tts.changed/v1/audio/speech"
+    draft.tts.providers.less_tts.api_key.value = "less-token"
+
+    const payload = buildDesktopTtsTestPayload(draft)
+
+    expect(payload.tts.provider).toBe("less_tts")
+    expect(payload.tts.providers.less_tts).toEqual({
+      config_path: "config/less_tts.json",
+      endpoint: "https://less-tts.changed/v1/audio/speech",
+    })
+    expect(payload.secret_updates.tts.less_tts).toEqual({
+      api_key: {
+        value: "less-token",
+      },
+    })
+    expect(payload).not.toHaveProperty("translate")
+    expect(payload).not.toHaveProperty("display")
   })
 
   it("surfaces field-level validation detail when backend only returns a generic save error", () => {

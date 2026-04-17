@@ -163,6 +163,8 @@ function createSettingsResult(params: {
     reload: vi.fn(async () => {}),
     loading: false,
     saving: false,
+    testingTranslate: false,
+    testingTts: false,
     draft,
     secretDrafts,
     fieldErrors: {},
@@ -170,6 +172,10 @@ function createSettingsResult(params: {
     errorMessage: "",
     saveNotice: "",
     saveMessage: "",
+    translateTestNotice: "",
+    translateTestError: "",
+    ttsTestNotice: "",
+    ttsTestError: "",
     isDirty: true,
     actionState,
     applyMode: actionState.mode === "save_and_apply" ? "managed" : "save_only",
@@ -177,6 +183,8 @@ function createSettingsResult(params: {
     setSecretDrafts: vi.fn(),
     saveSettings: vi.fn(async () => true),
     save: vi.fn(async () => true),
+    runTranslateTest: vi.fn(async () => true),
+    runTtsTest: vi.fn(async () => true),
     updateTranslateField: vi.fn(),
     updateDisplayField: vi.fn(),
     updateTtsProvider: vi.fn(),
@@ -227,6 +235,7 @@ describe("settings workspace", () => {
     expect(openAiMarkup).toContain("value=\"openai-token\"")
     expect(openAiMarkup).not.toContain("改成环境变量")
     expect(passthroughMarkup).toContain("不请求外部翻译 provider")
+    expect(deeplxMarkup).toContain("测试翻译")
   })
 
   it("keeps cloud TTS core fields visible and groups secondary tuning under advanced sections", () => {
@@ -329,6 +338,7 @@ describe("settings workspace", () => {
 
     expect(windowsMarkup).toContain("没有 provider-private 表单")
     expect(windowsMarkup).not.toContain("豆包 App ID")
+    expect(windowsMarkup).toContain("测试朗读")
     expect(doubaoMarkup).toContain("豆包 App ID")
     expect(doubaoMarkup).toContain("豆包 Access Token")
     expect(lessTtsMarkup).toContain("Less TTS HTTP endpoint")

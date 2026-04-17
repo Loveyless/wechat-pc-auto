@@ -180,6 +180,48 @@ class RuntimeApiServer:
                         {"tts": service.set_tts_auto_read_enabled(enabled)},
                     )
                     return
+                if path == "/api/config/test-translate":
+                    try:
+                        result = service.test_translate_config(payload)
+                    except ConfigValidationError as exc:
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {
+                                "error": "validation_failed",
+                                "message": str(exc),
+                                "field_errors": exc.field_errors,
+                            },
+                        )
+                        return
+                    except RuntimeError as exc:
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"error": "test_failed", "message": str(exc)},
+                        )
+                        return
+                    self._send_json(HTTPStatus.OK, {"result": result})
+                    return
+                if path == "/api/config/test-tts":
+                    try:
+                        result = service.test_tts_config(payload)
+                    except ConfigValidationError as exc:
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {
+                                "error": "validation_failed",
+                                "message": str(exc),
+                                "field_errors": exc.field_errors,
+                            },
+                        )
+                        return
+                    except RuntimeError as exc:
+                        self._send_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"error": "test_failed", "message": str(exc)},
+                        )
+                        return
+                    self._send_json(HTTPStatus.OK, {"result": result})
+                    return
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
 
             def do_PUT(self) -> None:
