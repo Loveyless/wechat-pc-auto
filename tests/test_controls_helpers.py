@@ -3,6 +3,7 @@ import pathlib
 import sys
 import types
 import unittest
+from typing import Optional
 
 
 def _load_controls_module():
@@ -69,13 +70,16 @@ class FakeWindow:
 
 
 class FakeMacWindow:
-    def __init__(self, pid: int, payload: dict):
+    def __init__(self, pid: int, payload: Optional[dict] = None, payloads=None):
         self.pid = pid
         self._payload = payload
+        self._payloads = list(payloads or [])
         self.calls = []
 
     def run_jxa(self, script: str, timeout: float = 0.0):
         self.calls.append((script, timeout))
+        if self._payloads:
+            return self._payloads.pop(0)
         return self._payload
 
 
@@ -161,20 +165,44 @@ class ControlsHelpersTest(unittest.TestCase):
         self.assertEqual([item.Name for item in session_list.GetChildren()], ["群1\n张三: 你好", "好友A\n李四: ok"])
         self.assertEqual(len(window.calls), 1)
 
-    def test_find_session_list_reuses_cached_mac_session_list(self):
+    def test_find_session_list_requeries_mac_session_list_each_time(self):
         window = FakeMacWindow(
             pid=2002,
-            payload={
-                "found": True,
-                "items": [{"chat_name": "群1", "raw_value": "张三: hi"}],
-            },
+            payloads=[
+                {
+                    "found": True,
+                    "items": [{"chat_name": "群1", "raw_value": "张三: hi"}],
+                },
+                {
+                    "found": True,
+                    "items": [{"chat_name": "群1", "raw_value": "李四: new"}],
+                },
+            ],
         )
 
         first = controls.find_session_list(window)
         second = controls.find_session_list(window)
 
-        self.assertIs(first, second)
+        self.assertIsNot(first, second)
+        self.assertEqual(first.GetChildren()[0].Name, "群1\n张三: hi")
+        self.assertEqual(second.GetChildren()[0].Name, "群1\n李四: new")
+        self.assertEqual(len(window.calls), 2)
+
+    def test_find_session_list_mac_query_includes_main_window_fallback(self):
+        window = FakeMacWindow(
+            pid=2003,
+            payload={
+                "found": False,
+                "items": [],
+            },
+        )
+
+        controls.find_session_list(window)
+
         self.assertEqual(len(window.calls), 1)
+        script, _timeout = window.calls[0]
+        self.assertIn('"AXMainWindow"', script)
+        self.assertIn('"AXFocusedWindow"', script)
 
 
 if __name__ == "__main__":

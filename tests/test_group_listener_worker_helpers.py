@@ -343,6 +343,50 @@ class GroupListenerWorkerHelpersTest(unittest.TestCase):
             )
         )
 
+    def test_try_focus_refresh_returns_false_when_switch_to_window_fails(self):
+        class FakeWindow:
+            def __init__(self):
+                self.calls = []
+
+            def SwitchToThisWindow(self):
+                self.calls.append("switch")
+                return False
+
+            def IsMinimize(self):
+                self.calls.append("is_minimize")
+                return False
+
+        window = FakeWindow()
+
+        refreshed = worker.try_focus_refresh(window)
+
+        self.assertFalse(refreshed)
+        self.assertEqual(window.calls, ["switch"])
+
+    def test_try_focus_refresh_returns_false_when_restore_fails(self):
+        class FakeWindow:
+            def __init__(self):
+                self.calls = []
+
+            def SwitchToThisWindow(self):
+                self.calls.append("switch")
+                return True
+
+            def IsMinimize(self):
+                self.calls.append("is_minimize")
+                return True
+
+            def Restore(self):
+                self.calls.append("restore")
+                return False
+
+        window = FakeWindow()
+
+        refreshed = worker.try_focus_refresh(window)
+
+        self.assertFalse(refreshed)
+        self.assertEqual(window.calls, ["switch", "is_minimize", "restore"])
+
     def test_compute_poll_sleep_seconds_uses_full_cycle_budget(self):
         self.assertAlmostEqual(
             worker.compute_poll_sleep_seconds(0.6, 10.0, 10.2),

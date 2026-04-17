@@ -176,11 +176,14 @@ def should_force_focus_refresh(
 
 def try_focus_refresh(window) -> bool:
     try:
-        window.SwitchToThisWindow()
+        if window.SwitchToThisWindow() is False:
+            return False
         if window.IsMinimize():
-            window.Restore()
+            if window.Restore() is False:
+                return False
             time.sleep(0.2)
-            window.SwitchToThisWindow()
+            if window.SwitchToThisWindow() is False:
+                return False
         return True
     except Exception:
         return False

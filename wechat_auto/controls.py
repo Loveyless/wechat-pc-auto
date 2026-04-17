@@ -167,14 +167,22 @@ def _build_session_list_query_script(pid: int) -> str:
         ObjC.bindFunction("AXUIElementCreateApplication", ["id", ["unsigned int"]]);
         ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id*"]]);
 
-        function attr(element, name) {{
+        function rawAttr(element, name) {{
           const value = Ref();
           const err = $.AXUIElementCopyAttributeValue(element, $(name), value);
           if (Number(err) !== 0 || !value[0]) {{
             return null;
           }}
+          return value[0];
+        }}
+
+        function attr(element, name) {{
+          const value = rawAttr(element, name);
+          if (!value) {{
+            return null;
+          }}
           try {{
-            return value[0].js;
+            return value.js;
           }} catch (error) {{
             return null;
           }}
@@ -242,8 +250,34 @@ def _build_session_list_query_script(pid: int) -> str:
           return items;
         }}
 
+        function collectCandidateWindows(app) {{
+          const windows = [];
+          const seen = Object.create(null);
+          function pushWindow(window) {{
+            if (!window) {{
+              return;
+            }}
+            const signature = [
+              stringAttr(window, "AXTitle"),
+              stringAttr(window, "AXRole"),
+              stringAttr(window, "AXSubrole"),
+            ].join("|");
+            if (seen[signature]) {{
+              return;
+            }}
+            seen[signature] = true;
+            windows.push(window);
+          }}
+          for (const window of arrayAttr(app, "AXWindows")) {{
+            pushWindow(window);
+          }}
+          pushWindow(rawAttr(app, "AXMainWindow"));
+          pushWindow(rawAttr(app, "AXFocusedWindow"));
+          return windows;
+        }}
+
         const app = $.AXUIElementCreateApplication({int(pid)});
-        const windows = arrayAttr(app, "AXWindows");
+        const windows = collectCandidateWindows(app);
         let sessionItems = [];
         let foundSessionList = false;
 
@@ -336,13 +370,13 @@ def _find_session_list_with_legacy_controls(window):
 
 
 def find_session_list(window) -> Optional[Any]:
+    if _has_mac_ax_runner(window):
+        # mac AX 结果是点时快照，不是可持续刷新的 live control，不能跨轮询复用。
+        return _query_mac_session_items(window)
+
     cached = _get_cached_control(window, "session_list")
     if cached:
         return cached
-
-    if _has_mac_ax_runner(window):
-        mac_session_list = _query_mac_session_items(window)
-        return _cache_control(window, "session_list", mac_session_list)
 
     return _find_session_list_with_legacy_controls(window)
 
