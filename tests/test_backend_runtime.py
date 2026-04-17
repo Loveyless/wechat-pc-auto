@@ -195,6 +195,106 @@ class BackendRuntimeTest(unittest.TestCase):
         self.assertEqual(event.event_type, "tts.updated")
         self.assertEqual(player.spoken, ["HELLO"])
 
+    def test_async_tts_failure_log_updates_runtime_state_and_emits_result(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        service.runtime.set_runtime_options(
+            translate_enabled=False,
+            translate_provider="passthrough",
+            tts_auto_read_enabled=True,
+            tts_provider="less_tts",
+            tts_available=True,
+        )
+        q = service.runtime.subscribe()
+
+        service._log_line(
+            "tts failed backend=less_tts error=less_tts request failed status=403 detail=error code: 1010 preview=How are you?"
+        )
+
+        snapshot = service.snapshot()["tts"]
+        self.assertTrue(snapshot["available"])
+        self.assertEqual(
+            snapshot["last_error"],
+            "less_tts request failed status=403 detail=error code: 1010",
+        )
+        events = [q.get(timeout=1) for _ in range(3)]
+        self.assertEqual(events[0].event_type, "tts.updated")
+        self.assertFalse(events[0].payload["accepted"])
+        self.assertTrue(events[0].payload["available"])
+        self.assertEqual(
+            events[0].payload["detail"],
+            "less_tts request failed status=403 detail=error code: 1010",
+        )
+        self.assertEqual(
+            events[0].payload["last_error"],
+            "less_tts request failed status=403 detail=error code: 1010",
+        )
+        self.assertEqual(events[1].event_type, "error.reported")
+        self.assertEqual(events[2].event_type, "backend.log")
+
+    def test_async_tts_played_log_clears_runtime_error(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        service.runtime.set_runtime_options(
+            translate_enabled=False,
+            translate_provider="passthrough",
+            tts_auto_read_enabled=True,
+            tts_provider="macos_system",
+            tts_available=True,
+        )
+        service.runtime.update_tts_state(last_error="say exited code=1")
+        q = service.runtime.subscribe()
+
+        service._log_line("tts played backend=macos_system chars=12 preview=How are you?")
+
+        snapshot = service.snapshot()["tts"]
+        self.assertTrue(snapshot["available"])
+        self.assertEqual(snapshot["last_error"], "")
+        events = [q.get(timeout=1) for _ in range(2)]
+        self.assertEqual(events[0].event_type, "tts.updated")
+        self.assertTrue(events[0].payload["accepted"])
+        self.assertTrue(events[0].payload["available"])
+        self.assertEqual(events[0].payload["last_error"], "")
+        self.assertEqual(events[1].event_type, "backend.log")
+
+    def test_autoplay_accept_keeps_provider_availability_and_existing_error_until_played(self):
+        service = BackendRuntimeService(config_path=self._write_config())
+        player = FakeTTSPlayer()
+        service.settings = mock.Mock(
+            session_preview_dedupe_window_seconds=20.0,
+            translate_fail_behavior="show_cn_with_reason",
+            translate_enabled=False,
+            english_only=True,
+            tts_auto_read_active_chat=True,
+            tts_player=player,
+        )
+        service.runtime.set_runtime_options(
+            translate_enabled=False,
+            translate_provider="passthrough",
+            tts_auto_read_enabled=True,
+            tts_provider="less_tts",
+            tts_available=True,
+        )
+        service.runtime.update_tts_state(last_error="previous playback failed")
+        service.set_active_session("测试群")
+        q = service.runtime.subscribe()
+
+        service._maybe_auto_tts(
+            {
+                "session_id": "测试群",
+                "message_id": "m1",
+                "text_display": "HELLO",
+                "text_translated": "HELLO",
+            }
+        )
+
+        snapshot = service.snapshot()["tts"]
+        self.assertTrue(snapshot["available"])
+        self.assertEqual(snapshot["last_error"], "previous playback failed")
+        event = q.get(timeout=1)
+        self.assertEqual(event.event_type, "tts.updated")
+        self.assertTrue(event.payload["accepted"])
+        self.assertTrue(event.payload["available"])
+        self.assertEqual(event.payload["last_error"], "previous playback failed")
+
     def test_health_snapshot_reports_ok_when_worker_waits_for_wechat(self):
         service = BackendRuntimeService(config_path=self._write_config())
         service.health.mark_ready()

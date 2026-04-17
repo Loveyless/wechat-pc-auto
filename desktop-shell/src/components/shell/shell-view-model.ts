@@ -27,6 +27,7 @@ function formatProviderName(provider: string) {
   switch (provider) {
     case "deeplx":
       return "DeepLX"
+    case "macos_system":
     case "windows_system":
       return "系统朗读"
     case "doubao":
@@ -230,8 +231,11 @@ export function resolveTtsSummary(
   ttsState: Pick<BackendTTSState, "available" | "auto_read_enabled" | "last_error" | "provider">,
 ): { label: string; tone: StatusBadgeTone } {
   const providerLabel = formatProviderName(ttsState.provider)
-  if (!ttsState.available || ttsState.last_error) {
+  if (!ttsState.available) {
     return { label: `${providerLabel} 不可用`, tone: "warning" }
+  }
+  if (ttsState.last_error) {
+    return { label: `${providerLabel} 异常`, tone: "warning" }
   }
   if (!ttsState.auto_read_enabled) {
     return { label: `${providerLabel} 手动`, tone: "neutral" }

@@ -129,6 +129,8 @@ class ListenerRuntime:
             "message_id": str(message_id or "").strip(),
             "accepted": bool(accepted),
             "provider": str(tts_state.get("provider", "")),
+            "available": bool(tts_state.get("available", False)),
+            "last_error": str(tts_state.get("last_error", "")),
             "detail": str(detail or ""),
         }
         if auto_read_enabled is not None:

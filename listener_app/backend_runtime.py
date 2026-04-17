@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -131,6 +132,10 @@ RECOVERABLE_WORKER_STATES = {
     "window_query_failed",
 }
 DEGRADED_WORKER_STATES = {"worker_backoff", "stopped"}
+TTS_FAILED_LOG_RE = re.compile(
+    r"^tts failed backend=(?P<backend>\S+) error=(?P<error>.+?)(?: preview=.*)?$"
+)
+TTS_PLAYED_LOG_RE = re.compile(r"^tts played backend=(?P<backend>\S+)\b")
 
 
 @dataclass
@@ -434,9 +439,37 @@ class BackendRuntimeService:
         value = str(line or "").strip()
         if not value:
             return
+        self._sync_tts_runtime_from_log_line(value)
         if self.settings is not None:
             append_log_file(self.settings.log_file, value)
         self.runtime.publish_log(value)
+
+    def _sync_tts_runtime_from_log_line(self, value: str) -> None:
+        failed_match = TTS_FAILED_LOG_RE.match(value)
+        if failed_match:
+            detail = str(failed_match.group("error") or "").strip()
+            self.runtime.update_tts_state(last_error=detail)
+            self.runtime.publish_tts_event(
+                action="playback_result",
+                session_id="",
+                accepted=False,
+                detail=detail,
+            )
+            self.runtime.publish_error(
+                source="tts",
+                message="playback failed",
+                detail=detail,
+            )
+            return
+
+        if TTS_PLAYED_LOG_RE.match(value):
+            self.runtime.update_tts_state(last_error="")
+            self.runtime.publish_tts_event(
+                action="playback_result",
+                session_id="",
+                accepted=True,
+                detail="",
+            )
 
     def _launch_worker(self, reason: str) -> bool:
         assert self.settings is not None
@@ -813,7 +846,8 @@ class BackendRuntimeService:
             )
             self._log_line(f"tts failed: {exc}")
             return
-        self.runtime.update_tts_state(available=ok, last_error="" if ok else "tts rejected")
+        if not ok:
+            self.runtime.update_tts_state(last_error="tts rejected")
         self.runtime.publish_tts_event(
             action="autoplay",
             session_id=session_id,

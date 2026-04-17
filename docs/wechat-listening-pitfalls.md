@@ -38,6 +38,11 @@
 - 当前分支的微信窗口与会话读取已经切到 `wechat_auto/window.py` + `wechat_auto/controls.py` 的 mac-only 路径：
   - 不再依赖 `uiautomation`
   - 通过 `osascript -l JavaScript` + macOS Accessibility 读取 WeChat 进程、窗口和左侧 `session_list`
+  - 当 `System Events` 进程查询失效时，`/bin/ps` 回退只接受主进程可执行名 `WeChat / Weixin / 微信`，避免误选 helper / 扩展进程
+  - 进程 fallback 一旦拿到 `pid`，后续主窗口枚举会优先按 `pid` 查进程，不会再只靠 `byName` 把 attach 重新打回失败
+  - 当 `System Events.process.windows()` 返回空或偶发 `-1728` 时，会回退到 `AXMainWindow / AXFocusedWindow` 继续读取主窗口和 `session_list`
+  - `listen.focus_refresh=true` 时，最小化窗口恢复也会优先按 `pid` 找进程，不会因为 `byName` 失效把 `Restore()` 打回失败
+  - 左侧 `session_list` 在 mac 路径下按轮询重查，不复用旧 AX 快照缓存
   - 继续只交付左侧会话预览，不扩成右侧正文抓取
 - 当前窗口读取层会显式区分这些状态：
   - `waiting_wechat`：微信未启动，或进程存在但当前没有可读主窗口
@@ -86,6 +91,7 @@
   - 不抢焦点（除非 `listen.focus_refresh=true`）
   - 不置顶（除非用户手动开启“置顶”开关）
   - 当前“置顶”只改桌面壳主窗口的临时窗口状态，不回写 `listener.json`
+  - 初次 attach / reconnect 只建立只读连接，不应主动 `activate` 微信窗口
 
 ## 关键坑位与处理
 
@@ -122,6 +128,7 @@
 
 处理：
 - 配置项 `listen.focus_refresh=true` 时，worker 只会在“连续缺目标”或“未读快照长期不变”时触发一次 `SwitchToThisWindow`。
+- 只有 `SwitchToThisWindow()` / `Restore()` 真正返回成功时，才会记一次 focus refresh 成功并重置冷却；吞错后返回 `False` 的链路不能当成功。
 - 默认关闭该配置，避免抢焦点；仅在出现“预览不刷新”时开启。
 
 ### 4) 抢焦点副作用
@@ -394,6 +401,8 @@
 
 处理：
 - TTS runtime 日志统一回流到主进程事件队列，再写入状态栏与 `logging.file`。
+- 异步播放器真正打出 `tts failed ...` / `tts played ...` 时，backend 会同步回写 runtime 的 `tts.last_error`，并补发携带最新 `available / last_error` 快照的 `tts.updated`；不能只把 `speak_async()` 成功入队当成“朗读已成功”。
+- `tts.available` 只表示当前 provider/runtime 是否已建好；单次播放失败、远端 4xx/5xx 或 `afplay` 失败只写 `tts.last_error`，不能把短时播放失败永久打成 provider 不可用。
 - 当前至少会记录这些关键节点：
   - `tts body click queued/rejected`
   - `tts auto queued/skipped/rejected`

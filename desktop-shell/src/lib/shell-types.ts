@@ -50,6 +50,18 @@ export type BackendTTSState = {
   last_error: string
 }
 
+export type BackendTtsUpdatedPayload = {
+  action: string
+  session_id: string
+  message_id: string
+  accepted: boolean
+  provider: string
+  detail: string
+  auto_read_enabled?: boolean
+  available?: boolean
+  last_error?: string
+}
+
 export type BackendSession = {
   session_id: string
   session_name: string
@@ -89,5 +101,5 @@ export type BackendEvent =
   | { event: "session.list.updated"; payload: { items: BackendSession[] } }
   | { event: "message.created"; payload: BackendMessage }
   | { event: "translation.updated"; payload: BackendMessage }
-  | { event: "tts.updated"; payload: { action: string; session_id: string; message_id: string; accepted: boolean; provider: string; detail: string; auto_read_enabled?: boolean } }
+  | { event: "tts.updated"; payload: BackendTtsUpdatedPayload }
   | { event: "error.reported"; payload: { source: string; message: string; detail: string } }

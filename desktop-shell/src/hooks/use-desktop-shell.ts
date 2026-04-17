@@ -16,6 +16,7 @@ import type {
   BackendMessage,
   BackendRuntimeState,
   BackendTTSState,
+  BackendTtsUpdatedPayload,
   BackendTranslationState,
   ShellConnectionState,
   ShellMessage,
@@ -88,6 +89,26 @@ function upsertMessage(list: ShellMessage[], incoming: ShellMessage) {
   const next = [...list]
   next[existingIndex] = incoming
   return next
+}
+
+export function applyTtsUpdatedEvent(
+  current: BackendTTSState,
+  payload: BackendTtsUpdatedPayload,
+): BackendTTSState {
+  return {
+    ...current,
+    auto_read_enabled:
+      typeof payload.auto_read_enabled === "boolean"
+        ? payload.auto_read_enabled
+        : current.auto_read_enabled,
+    available: typeof payload.available === "boolean" ? payload.available : current.available,
+    last_error:
+      typeof payload.last_error === "string"
+        ? payload.last_error
+        : payload.accepted
+          ? ""
+          : payload.detail,
+  }
 }
 
 const DEFAULT_BACKEND_INFO: BackendConnectionInfo = {
@@ -266,14 +287,7 @@ export function useDesktopShell() {
       return
     }
     if (event.event === "tts.updated") {
-      setTtsState((current) => ({
-        ...current,
-        auto_read_enabled:
-          typeof event.payload.auto_read_enabled === "boolean"
-            ? event.payload.auto_read_enabled
-            : current.auto_read_enabled,
-        last_error: event.payload.accepted ? "" : event.payload.detail,
-      }))
+      setTtsState((current) => applyTtsUpdatedEvent(current, event.payload))
       return
     }
     if (event.event === "error.reported") {

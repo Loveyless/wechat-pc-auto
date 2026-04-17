@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import textwrap
 import time
@@ -9,7 +10,7 @@ from typing import Any, Callable
 
 from .logger import log
 
-WECHAT_PROCESS_CANDIDATES = ("WeChat", "Weixin")
+WECHAT_PROCESS_CANDIDATES = ("WeChat", "Weixin", "微信")
 JXA_TIMEOUT_SECONDS = 4.0
 POLL_RETRY_INTERVAL_SECONDS = 0.05
 POPUP_ROLE_TOKENS = ("menu", "popover", "sheet", "dialog")
@@ -183,9 +184,8 @@ class WeChatWindow:
             f"""
             const systemEvents = Application("System Events");
             const candidates = [{process_names}];
-            function readProcess(name) {{
+            function readProcessEntry(proc) {{
               try {{
-                const proc = systemEvents.processes.byName(name);
                 const pid = Number(proc.unixId());
                 const procName = String(proc.name() || "");
                 if (!procName || !pid) {{
@@ -196,24 +196,67 @@ class WeChatWindow:
                 return null;
               }}
             }}
+            function readProcessByName(name) {{
+              try {{
+                const proc = systemEvents.processes.byName(name);
+                return readProcessEntry(proc);
+              }} catch (error) {{
+                return null;
+              }}
+            }}
             let found = null;
             for (const name of candidates) {{
-              const current = readProcess(name);
+              const current = readProcessByName(name);
               if (current) {{
                 found = current;
                 break;
+              }}
+            }}
+            if (!found) {{
+              try {{
+                const processes = systemEvents.processes();
+                for (const proc of processes) {{
+                  const current = readProcessEntry(proc);
+                  if (current && candidates.includes(current.name)) {{
+                    found = current;
+                    break;
+                  }}
+                }}
+              }} catch (error) {{
+                // ignore and let Python-side fallback continue.
               }}
             }}
             JSON.stringify(found);
             """
         ).strip()
 
-    def _build_window_query_script(self, process_name: str) -> str:
+    def _build_window_query_script(self, process_name: str, pid: int) -> str:
         quoted_name = json.dumps(process_name)
         return textwrap.dedent(
             f"""
             const systemEvents = Application("System Events");
-            const proc = systemEvents.processes.byName({quoted_name});
+            const targetPid = {int(pid)};
+            function findProcessByPid() {{
+              try {{
+                const processes = systemEvents.processes();
+                for (const proc of processes) {{
+                  try {{
+                    if (Number(proc.unixId()) === targetPid) {{
+                      return proc;
+                    }}
+                  }} catch (error) {{
+                    // ignore and keep scanning sibling processes.
+                  }}
+                }}
+              }} catch (error) {{
+                // ignore and let byName fallback continue.
+              }}
+              return null;
+            }}
+            let proc = findProcessByPid();
+            if (!proc) {{
+              proc = systemEvents.processes.byName({quoted_name});
+            }}
             const windows = proc.windows();
             const items = windows.map(window => {{
               let position = null;
@@ -241,6 +284,173 @@ class WeChatWindow:
             """
         ).strip()
 
+    def _build_ax_window_query_script(self, pid: int) -> str:
+        return textwrap.dedent(
+            f"""
+            ObjC.import("Cocoa");
+            ObjC.bindFunction("AXUIElementCreateApplication", ["id", ["unsigned int"]]);
+            ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id*"]]);
+
+            function rawAttr(element, name) {{
+              const value = Ref();
+              const err = $.AXUIElementCopyAttributeValue(element, $(name), value);
+              if (Number(err) !== 0 || !value[0]) {{
+                return null;
+              }}
+              return value[0];
+            }}
+
+            function jsAttr(element, name) {{
+              const value = rawAttr(element, name);
+              if (!value) {{
+                return null;
+              }}
+              try {{
+                return value.js;
+              }} catch (error) {{
+                return null;
+              }}
+            }}
+
+            function stringAttr(element, name) {{
+              const value = jsAttr(element, name);
+              if (value === null || value === undefined) {{
+                return "";
+              }}
+              return String(value);
+            }}
+
+            function boolAttr(element, name) {{
+              const value = jsAttr(element, name);
+              return Boolean(value);
+            }}
+
+            function arrayAttr(element, name) {{
+              const value = jsAttr(element, name);
+              return Array.isArray(value) ? value : [];
+            }}
+
+            function pushCandidate(items, seen, window) {{
+              if (!window) {{
+                return;
+              }}
+              const title = stringAttr(window, "AXTitle");
+              const role = stringAttr(window, "AXRole");
+              const subrole = stringAttr(window, "AXSubrole");
+              const miniaturized = boolAttr(window, "AXMinimized");
+              const signature = [title, role, subrole, miniaturized ? "1" : "0"].join("|");
+              if (seen[signature]) {{
+                return;
+              }}
+              seen[signature] = true;
+              items.push({{
+                title: title,
+                role: role,
+                subrole: subrole,
+                miniaturized: miniaturized,
+                position: null,
+                size: null,
+              }});
+            }}
+
+            const app = $.AXUIElementCreateApplication({int(pid)});
+            const items = [];
+            const seen = Object.create(null);
+            for (const window of arrayAttr(app, "AXWindows")) {{
+              pushCandidate(items, seen, window);
+            }}
+            pushCandidate(items, seen, rawAttr(app, "AXMainWindow"));
+            pushCandidate(items, seen, rawAttr(app, "AXFocusedWindow"));
+            JSON.stringify(items);
+            """
+        ).strip()
+
+    def _build_popup_query_script(self, pid: int) -> str:
+        return textwrap.dedent(
+            f"""
+            ObjC.import("Cocoa");
+            ObjC.bindFunction("AXUIElementCreateApplication", ["id", ["unsigned int"]]);
+            ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id*"]]);
+
+            function attr(element, name) {{
+              const value = Ref();
+              const err = $.AXUIElementCopyAttributeValue(element, $(name), value);
+              if (Number(err) !== 0 || !value[0]) {{
+                return null;
+              }}
+              try {{
+                return value[0].js;
+              }} catch (error) {{
+                return null;
+              }}
+            }}
+
+            function stringAttr(element, name) {{
+              const value = attr(element, name);
+              if (value === null || value === undefined) {{
+                return "";
+              }}
+              return String(value);
+            }}
+
+            function arrayAttr(element, name) {{
+              const value = attr(element, name);
+              return Array.isArray(value) ? value : [];
+            }}
+
+            function isPopupNode(element) {{
+              const role = stringAttr(element, "AXRole").toLowerCase();
+              const subrole = stringAttr(element, "AXSubrole").toLowerCase();
+              const title = stringAttr(element, "AXTitle").toLowerCase();
+              return (
+                role === "axmenu" ||
+                role.includes("menu") ||
+                role.includes("popover") ||
+                role.includes("sheet") ||
+                role.includes("dialog") ||
+                subrole.includes("dialog") ||
+                subrole.includes("systemdialog") ||
+                subrole.includes("floating") ||
+                title.includes("popup") ||
+                title.includes("菜单") ||
+                title.includes("弹窗")
+              );
+            }}
+
+            function shouldSkipSubtree(element) {{
+              const role = stringAttr(element, "AXRole").toLowerCase();
+              return role === "axmenubar" || role === "axmenubaritem";
+            }}
+
+            function hasPopup(nodes, depth) {{
+              if (!Array.isArray(nodes) || depth > 4) {{
+                return false;
+              }}
+              for (const node of nodes) {{
+                if (!node) {{
+                  continue;
+                }}
+                if (shouldSkipSubtree(node)) {{
+                  continue;
+                }}
+                if (isPopupNode(node)) {{
+                  return true;
+                }}
+                if (hasPopup(arrayAttr(node, "AXChildren"), depth + 1)) {{
+                  return true;
+                }}
+              }}
+              return false;
+            }}
+
+            const app = $.AXUIElementCreateApplication({int(pid)});
+            const has_popup =
+              hasPopup(arrayAttr(app, "AXWindows"), 0) ||
+              hasPopup(arrayAttr(app, "AXChildren"), 0);
+            JSON.stringify({{ has_popup: has_popup }});
+            """
+        ).strip()
+
     def _build_activate_script(self, process_name: str) -> str:
         quoted_name = json.dumps(process_name)
         return textwrap.dedent(
@@ -251,18 +461,39 @@ class WeChatWindow:
             """
         ).strip()
 
-    def _build_restore_script(self, process_name: str) -> str:
+    def _build_restore_script(self, process_name: str, pid: int) -> str:
         quoted_name = json.dumps(process_name)
         return textwrap.dedent(
             f"""
             const systemEvents = Application("System Events");
-            const proc = systemEvents.processes.byName({quoted_name});
-            const windows = proc.windows();
-            if (windows.length > 0) {{
+            const targetPid = {int(pid)};
+            function findProcessByPid() {{
               try {{
-                windows[0].miniaturized = false;
+                const processes = systemEvents.processes();
+                for (const proc of processes) {{
+                  try {{
+                    if (Number(proc.unixId()) === targetPid) {{
+                      return proc;
+                    }}
+                  }} catch (error) {{
+                    // ignore and keep scanning sibling processes.
+                  }}
+                }}
               }} catch (error) {{
-                // 有些 WeChat 版本不暴露 miniaturized，可忽略并直接 activate。
+                // ignore and let byName fallback continue.
+              }}
+              return null;
+            }}
+            let proc = findProcessByPid();
+            if (!proc) {{
+              proc = systemEvents.processes.byName({quoted_name});
+            }}
+            const windows = proc.windows();
+            for (const window of windows) {{
+              try {{
+                window.miniaturized = false;
+              }} catch (error) {{
+                // 有些 WeChat 版本不暴露 miniaturized，可忽略并继续尝试其它窗口。
               }}
             }}
             const app = Application({quoted_name});
@@ -272,24 +503,106 @@ class WeChatWindow:
         ).strip()
 
     def _query_process_info(self) -> dict[str, Any] | None:
-        payload = self.run_jxa(self._build_process_query_script())
+        payload = None
+        try:
+            payload = self.run_jxa(self._build_process_query_script())
+        except JxaAutomationError:
+            payload = None
         if not isinstance(payload, dict):
-            return None
-        name = str(payload.get("name") or "").strip()
-        pid = int(payload.get("pid") or 0)
+            return self._query_process_info_from_ps()
+        try:
+            name = str(payload.get("name") or "").strip()
+            pid = int(payload.get("pid") or 0)
+        except Exception:
+            return self._query_process_info_from_ps()
         if not name or pid <= 0:
-            return None
+            return self._query_process_info_from_ps()
         return {"name": name, "pid": pid}
 
+    def _query_process_info_from_ps(self) -> dict[str, Any] | None:
+        try:
+            completed = subprocess.run(
+                ["/bin/ps", "-axo", "pid=,comm="],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+        except Exception:
+            return None
+        if completed.returncode != 0:
+            return None
+
+        candidate_set = {name.lower() for name in WECHAT_PROCESS_CANDIDATES}
+        for raw_line in str(completed.stdout or "").splitlines():
+            line = str(raw_line or "").strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            raw_pid, raw_command = parts
+            try:
+                pid = int(raw_pid)
+            except ValueError:
+                continue
+            command = str(raw_command or "").strip()
+            if not command:
+                continue
+            process_name = os.path.basename(command)
+            process_name = process_name.strip() or command
+            normalized_name = process_name.lower()
+            # `ps comm` 里可能先出现 WeChat helper；这里只接受主进程可执行名，避免误连辅助进程。
+            if normalized_name not in candidate_set:
+                continue
+            return {"name": process_name, "pid": pid}
+        return None
+
     def _query_window_candidates(self, process_name: str, pid: int) -> list[WindowCandidate]:
-        payload = self.run_jxa(self._build_window_query_script(process_name))
-        if not isinstance(payload, list):
+        system_events_error: JxaAutomationError | None = None
+
+        try:
+            payload = self.run_jxa(self._build_window_query_script(process_name, pid))
+        except JxaAutomationError as exc:
+            system_events_error = exc
+        else:
+            if isinstance(payload, list):
+                candidates = [
+                    WindowCandidate.from_payload(item, process_name=process_name, pid=pid)
+                    for item in payload
+                    if isinstance(item, dict)
+                ]
+                if candidates:
+                    return candidates
+
+        try:
+            ax_payload = self.run_jxa(self._build_ax_window_query_script(pid))
+        except JxaAutomationError:
+            if system_events_error is not None:
+                raise system_events_error
+            raise
+
+        if not isinstance(ax_payload, list):
+            if system_events_error is not None:
+                raise system_events_error
             return []
-        return [
+
+        candidates = [
             WindowCandidate.from_payload(item, process_name=process_name, pid=pid)
-            for item in payload
+            for item in ax_payload
             if isinstance(item, dict)
         ]
+        if candidates:
+            return candidates
+        if system_events_error is not None:
+            raise system_events_error
+        return []
+
+    def _query_ax_popup_state(self, pid: int) -> bool:
+        payload = self.run_jxa(self._build_popup_query_script(pid))
+        if not isinstance(payload, dict):
+            return False
+        return bool(payload.get("has_popup"))
 
     def _is_popup_candidate(self, candidate: WindowCandidate) -> bool:
         role = candidate.role.strip().lower()
@@ -334,10 +647,8 @@ class WeChatWindow:
         process = self._query_process_info()
         if not process:
             return False
-        process_name = str(process["name"])
         pid = int(process["pid"])
-        candidates = self._query_window_candidates(process_name, pid)
-        return any(self._is_popup_candidate(item) for item in candidates)
+        return self._query_ax_popup_state(pid)
 
     def activate_current_window(self) -> bool:
         process_name = self._last_process_name or ""
@@ -354,13 +665,15 @@ class WeChatWindow:
 
     def restore_current_window(self) -> bool:
         process_name = self._last_process_name or ""
-        if not process_name:
+        pid = int(self._last_pid or 0)
+        if not process_name or pid <= 0:
             process = self._query_process_info()
             if not process:
                 return False
             process_name = str(process["name"])
+            pid = int(process["pid"])
         try:
-            self.run_jxa(self._build_restore_script(process_name))
+            self.run_jxa(self._build_restore_script(process_name, pid))
             return True
         except JxaAutomationError:
             return False
@@ -399,8 +712,21 @@ class WeChatWindow:
             log("微信进程存在，但当前没有可读主窗口")
             return False
 
+        try:
+            popup_blocked = self._query_ax_popup_state(self._last_pid)
+        except AccessibilityPermissionError:
+            detail = "accessibility permission required for WeChat window inspection"
+            self._set_status("permission_required", detail)
+            log("缺少辅助功能权限，无法检查微信弹窗状态")
+            return False
+        except JxaAutomationError as exc:
+            detail = f"failed to inspect WeChat popup state: {exc}"
+            self._set_status("window_query_failed", detail)
+            log(f"检查微信弹窗状态失败：{exc}")
+            return False
+
         picked = self._pick_main_window(candidates)
-        if picked is None:
+        if picked is None or popup_blocked:
             detail = "wechat popup/menu/dialog blocks the main window"
             self._set_status("ui_paused", detail)
             log("检测到微信弹窗或菜单遮挡主窗口，暂不进入监听")
@@ -408,7 +734,6 @@ class WeChatWindow:
 
         self.window = MacWeChatWindow(self, picked)
         self._set_status("ready", f"connected to {self._last_process_name} pid={self._last_pid}")
-        self.activate_current_window()
         log(f"已连接微信主窗口 pid={self._last_pid} title={picked.title!r}")
         return True
 

@@ -102,6 +102,14 @@ describe("shell view model", () => {
         provider: "windows_system",
       }),
     ).toEqual({ label: "系统朗读 不可用", tone: "warning" })
+    expect(
+      resolveTtsSummary({
+        available: true,
+        auto_read_enabled: true,
+        last_error: "less_tts request failed status=403",
+        provider: "macos_system",
+      }),
+    ).toEqual({ label: "系统朗读 异常", tone: "warning" })
   })
 
   it("maps runtime fidelity and worker states into reusable tones", () => {
