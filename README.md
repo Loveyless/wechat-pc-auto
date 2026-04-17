@@ -25,6 +25,23 @@
 - 当前仓库里仍然存在不少 Windows 遗留实现和文档，后续会按阶段迁到 mac-only。
 - 详细范围、分阶段任务和验证口径见 [docs/apple-silicon-mac-adaptation-plan.md](./docs/apple-silicon-mac-adaptation-plan.md)。
 
+## 下载与发布
+
+- GitHub Releases 现在按平台拆成两条页面语义，不再把 Windows/mac 包混到同一个 tag 下面。
+- Windows 老分支：
+  - tag：`v0.x.y` / `v0.x.y-rc.n`
+  - release 标题：`WeChat Auto Shell Windows <version>`
+  - 公开资产：`wechat-auto-shell-<version>-windows-x64.msi`、`wechat-auto-shell-<version>-windows-x64-setup.exe`、`SHA256SUMS.txt`
+- 当前 Apple Silicon macOS 分支：
+  - tag：`mac-v0.x.y` / `mac-v0.x.y-rc.n`
+  - release 标题：`WeChat Auto Shell macOS Apple Silicon <version>`
+  - 公开资产：`wechat-auto-shell-<version>-macos-apple-silicon.zip`、`SHA256SUMS.txt`
+- Release 总入口：
+  - [GitHub Releases](https://github.com/Loveyless/wechat-pc-auto/releases)
+- 现在不会有“同一个 release 页面同时挂 win/mac 两套资产”的自动化；双 release 页面就是当前约定。
+- `DMG` 继续只保留为可选 GUI 专项验收产物，不是默认 GitHub Release 自动发布资产。
+- 这里的 `<version>` 以桌面壳真实 bundle 版本为准，取自 `desktop-shell/package.json` / `desktop-shell/src-tauri/tauri.conf.json`；stable 通常等于去掉 tag 前缀后的版本，而 RC 继续遵守仓库现有的桌面壳版本规则，例如 tag `mac-v0.1.0-rc.1` 对应公开资产版本 `0.1.0-1`。
+
 ## 它适合谁
 
 - 想低打扰跟踪微信群或私聊最新动静的人

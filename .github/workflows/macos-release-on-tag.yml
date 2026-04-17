@@ -1,0 +1,125 @@
+name: macos-release-on-tag
+
+on:
+  push:
+    tags:
+      - "mac-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    env:
+      DEEPLX_URL: http://127.0.0.1:1188/translate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: desktop-shell/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pyinstaller
+          python3 -m pip install -r requirements.txt
+
+      - name: Install desktop-shell dependencies
+        working-directory: desktop-shell
+        run: npm ci
+
+      - name: Build desktop-shell sidecars
+        run: python3 scripts/build_desktop_shell_sidecars.py --python python3
+
+      - name: Run desktop-shell frontend tests
+        working-directory: desktop-shell
+        run: npm test
+
+      - name: Build desktop-shell frontend dist
+        working-directory: desktop-shell
+        run: npm run build
+
+      - name: Run desktop-shell Rust tests
+        working-directory: desktop-shell
+        run: npm run test:rust
+
+      - name: Build desktop-shell macOS app release
+        working-directory: desktop-shell
+        run: npm run tauri -- build --bundles app
+
+      - name: Run desktop-shell release smoke
+        run: python3 scripts/smoke_desktop_shell_release.py --skip-build
+
+      - name: Prepare release metadata
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          desktop_version="$(python3 -c "import json; package_version=json.load(open('desktop-shell/package.json', encoding='utf-8'))['version']; tauri_version=json.load(open('desktop-shell/src-tauri/tauri.conf.json', encoding='utf-8'))['version']; assert package_version == tauri_version, f'version mismatch package={package_version} tauri={tauri_version}'; print(tauri_version)")"
+          if [[ -z "${desktop_version}" ]]; then
+            echo "failed to resolve desktop release version" >&2
+            exit 1
+          fi
+          release_name="WeChat Auto Shell macOS Apple Silicon ${desktop_version}"
+          echo "desktop_version=${desktop_version}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Package macOS release assets
+        shell: bash
+        env:
+          DESKTOP_VERSION: ${{ steps.release_meta.outputs.desktop_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          if [[ -z "${DESKTOP_VERSION}" ]]; then
+            echo "missing desktop release version" >&2
+            exit 1
+          fi
+          app_bundle="desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app"
+          if [[ ! -d "$app_bundle" ]]; then
+            echo "missing app bundle: $app_bundle" >&2
+            exit 1
+          fi
+          zip_path="release-assets/wechat-auto-shell-${DESKTOP_VERSION}-macos-apple-silicon.zip"
+          rm -f "$zip_path"
+          ditto -c -k --sequesterRsrc --keepParent "$app_bundle" "$zip_path"
+          checksum_path="release-assets/SHA256SUMS.txt"
+          hash="$(shasum -a 256 "$zip_path" | awk '{print $1}')"
+          printf '%s  %s\n' "$hash" "$(basename "$zip_path")" > "$checksum_path"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build-assets-${{ github.ref_name }}
+          if-no-files-found: error
+          path: |
+            release-assets/*.zip
+            release-assets/SHA256SUMS.txt
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.release_meta.outputs.release_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-rc.') }}
+          files: |
+            release-assets/*.zip
+            release-assets/SHA256SUMS.txt

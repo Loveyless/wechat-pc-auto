@@ -60,14 +60,27 @@ def ParseArgs() -> argparse.Namespace:
         type=int,
         help="Required when --channel rc. Must be between 1 and 65535.",
     )
+    parser.add_argument(
+        "--tag-prefix",
+        default="v",
+        help="Recommended tag prefix. Use `v` for the Windows release line and `mac-v` for the Apple Silicon macOS release line.",
+    )
     return parser.parse_args()
 
 
-def DeriveReleaseVersions(channel: str, baseVersion: str, rcNumber: int | None) -> ReleaseVersions:
+def DeriveReleaseVersions(
+    channel: str,
+    baseVersion: str,
+    rcNumber: int | None,
+    tagPrefix: str,
+) -> ReleaseVersions:
     if not BASE_VERSION_PATTERN.fullmatch(baseVersion):
         raise RuntimeError(
             "base version must use MAJOR.MINOR.PATCH form, for example 0.1.0"
         )
+    normalizedTagPrefix = tagPrefix.strip()
+    if not normalizedTagPrefix:
+        raise RuntimeError("tag prefix must not be empty")
     if channel == "stable":
         if rcNumber is not None:
             raise RuntimeError("stable release does not accept --rc-number")
@@ -76,7 +89,7 @@ def DeriveReleaseVersions(channel: str, baseVersion: str, rcNumber: int | None) 
             channel=channel,
             pythonVersion=baseVersion,
             desktopVersion=baseVersion,
-            recommendedTag=f"v{baseVersion}",
+            recommendedTag=f"{normalizedTagPrefix}{baseVersion}",
         )
     if rcNumber is None:
         raise RuntimeError("rc release requires --rc-number")
@@ -87,7 +100,7 @@ def DeriveReleaseVersions(channel: str, baseVersion: str, rcNumber: int | None) 
         channel=channel,
         pythonVersion=f"{baseVersion}rc{rcNumber}",
         desktopVersion=f"{baseVersion}-{rcNumber}",
-        recommendedTag=f"v{baseVersion}-rc.{rcNumber}",
+        recommendedTag=f"{normalizedTagPrefix}{baseVersion}-rc.{rcNumber}",
     )
 
 
@@ -197,7 +210,12 @@ def SyncVersions(repoRoot: Path, versions: ReleaseVersions) -> list[Path]:
 
 def Main() -> None:
     args = ParseArgs()
-    versions = DeriveReleaseVersions(args.channel, args.base_version, args.rc_number)
+    versions = DeriveReleaseVersions(
+        args.channel,
+        args.base_version,
+        args.rc_number,
+        args.tag_prefix,
+    )
     updatedFiles = SyncVersions(REPO_ROOT, versions)
     print(f"python_version={versions.pythonVersion}")
     print(f"desktop_version={versions.desktopVersion}")

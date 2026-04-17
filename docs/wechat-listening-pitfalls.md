@@ -588,6 +588,34 @@
 - `DMG` 验收另算：需要时再在可交互 Finder 会话里单独执行 `npm run tauri build`。
 - raw shell 和 sidecar 继续只是本地 build / 排障输出，不要把内部 sidecar 当最终用户下载面。
 
+### 28.065) 当前仓库已经拆成 Windows/mac 两条 tag release 线，mac 不要再打 `v*`
+现象：
+- 同一个仓库里同时保留 Windows 老分支和当前 Apple Silicon macOS 分支时，如果 mac 也继续打 `v0.1.0` 这类 tag，很容易误触 Windows release workflow。
+- 更隐蔽的问题是：mac stable tag 本身就带 `mac-` 前缀；如果 prerelease 还沿用“tag 里有 `-` 就算预发布”，那么 `mac-v0.1.0` 也会被错误标成 prerelease。
+
+根因：
+- `.github/workflows/windows-release-on-tag.yml` 仍只监听 `v*`，并上传 `msi` / `nsis setup.exe` 这类 Windows 资产。
+- 当前 mac release automation 已独立到 `.github/workflows/macos-release-on-tag.yml`，只监听 `mac-v*`，并按 `.app zip + SHA256SUMS.txt` 发布。
+- `scripts/sync_desktop_shell_release_version.py` 的推荐 tag 前缀如果不显式切到 `mac-v`，默认还是 Windows 旧语义。
+
+处理：
+- Windows 老分支继续使用：
+  - stable：`v0.1.0`
+  - rc：`v0.1.0-rc.1`
+- 当前 mac 分支固定使用：
+  - stable：`mac-v0.1.0`
+  - rc：`mac-v0.1.0-rc.1`
+- mac workflow 的 prerelease 判定只看 tag 是否包含 `-rc.`，不要用“contains('-')”。
+- 当前 mac GitHub Release 默认公开资产只承诺：
+  - `wechat-auto-shell-<version>-macos-apple-silicon.zip`
+  - `SHA256SUMS.txt`
+- `DMG` 继续保留为可选 GUI 专项验收产物，不要因为它没有进入默认自动化就误判成 mac release 线未完成。
+- 双 release 页面下的展示命名必须稳定：
+  - Windows：`WeChat Auto Shell Windows <version>`
+  - mac：`WeChat Auto Shell macOS Apple Silicon <version>`
+  - 不要让页面标题继续只显示裸 tag，否则用户很难在 Releases 列表里一眼区分平台线。
+- 这里的 `<version>` 不能直接从 tag 去前缀得出，必须跟随桌面壳真实 bundle 版本；当前 workflow 会读取 `desktop-shell/package.json` 与 `desktop-shell/src-tauri/tauri.conf.json` 并校验两者一致。
+
 ### 28.07) 图标链路不完整时，通常不是 Tauri 坏了，而是输入资源只接了一半
 现象：
 - Rust 单测或 release build 在 `tauri::generate_context!()` / bundle 阶段因为图标资源缺失直接失败。

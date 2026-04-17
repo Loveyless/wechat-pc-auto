@@ -19,4 +19,6 @@ build/
 dist/
 *.egg-info/
 desktop-shell/src-tauri/binaries/*.exe
+desktop-shell/src-tauri/binaries/wechat-auto-backend-*
+desktop-shell/src-tauri/binaries/group_listener_worker-*
 desktop-shell/src-tauri/gen/

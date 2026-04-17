@@ -19,6 +19,7 @@ description: 维护当前仓库 WeChat Auto Shell 的版本同步、tag 发布�
 - `desktop-shell/src-tauri/tauri.conf.json`
 - `scripts/sync_desktop_shell_release_version.py`
 - `.github/workflows/windows-release-on-tag.yml`
+- `.github/workflows/macos-release-on-tag.yml`
 - `references/release-facts.md`
 
 发版属于打包链和对外交付边界。别跳过坑位文档，也别跳过 workflow。
@@ -40,6 +41,14 @@ description: 维护当前仓库 WeChat Auto Shell 的版本同步、tag 发布�
   或：
   ```bash
   python scripts/sync_desktop_shell_release_version.py --channel rc --base-version 0.1.0 --rc-number 2
+  ```
+- 如果当前是在 Apple Silicon macOS release 线，tag 前缀要显式切到 `mac-v`：
+  ```bash
+  python scripts/sync_desktop_shell_release_version.py --channel stable --base-version 0.1.0 --tag-prefix mac-v
+  ```
+  或：
+  ```bash
+  python scripts/sync_desktop_shell_release_version.py --channel rc --base-version 0.1.0 --rc-number 2 --tag-prefix mac-v
   ```
 - Python 包版本入口：`pyproject.toml`
 - 桌面壳版本入口：
@@ -65,7 +74,7 @@ description: 维护当前仓库 WeChat Auto Shell 的版本同步、tag 发布�
 
 ### 4. 先跑完整发布闸口，再谈可发版
 
-最少执行：
+Windows 老分支最少执行：
 
 ```bash
 python -m build --sdist --wheel
@@ -81,6 +90,19 @@ cd ..
 python scripts/smoke_desktop_shell_release.py --skip-build
 ```
 
+Apple Silicon macOS release 线最少执行：
+
+```bash
+python3 scripts/build_desktop_shell_sidecars.py --python python3
+cd desktop-shell
+npm test
+npm run build
+npm run test:rust
+npm run tauri -- build --bundles app
+cd ..
+python3 scripts/smoke_desktop_shell_release.py --skip-build
+```
+
 判断标准：
 
 - Python 包能产出 sdist 和 wheel
@@ -90,9 +112,18 @@ python scripts/smoke_desktop_shell_release.py --skip-build
 
 ### 5. 再推 tag，让 workflow 发版
 
-- `v*` tag 会触发 `.github/workflows/windows-release-on-tag.yml`
-- workflow 会再次跑 sidecar build、前端测试/构建、Rust 测试、Tauri release build、release smoke，然后再上传资产
-- tag 名里包含 `-` 时，workflow 会把 GitHub Release 标成 prerelease
+- Windows 老分支：
+  - `v*` tag 会触发 `.github/workflows/windows-release-on-tag.yml`
+  - workflow 会发布 `wechat-auto-shell-<version>-windows-x64.msi`、`wechat-auto-shell-<version>-windows-x64-setup.exe` 和 `SHA256SUMS.txt`
+  - tag 名里包含 `-` 时，GitHub Release 会被标成 prerelease
+- Apple Silicon macOS release 线：
+  - `mac-v*` tag 会触发 `.github/workflows/macos-release-on-tag.yml`
+  - workflow 会发布 `wechat-auto-shell-<version>-macos-apple-silicon.zip` 和 `SHA256SUMS.txt`
+  - prerelease 只看 tag 是否包含 `-rc.`，不能用“contains('-')”
+- 两条 release 线的 GitHub Release 标题也要稳定：
+  - Windows：`WeChat Auto Shell Windows <version>`
+  - mac：`WeChat Auto Shell macOS Apple Silicon <version>`
+- 这里的 `<version>` 以桌面壳真实 bundle 版本为准，不直接拿 tag 去前缀后的文本；RC 仍跟随仓库现有 `desktopVersion=0.1.0-<rcNumber>` 语义。
 
 ### 6. 收尾时必须明确交付状态
 

@@ -22,6 +22,10 @@
 - 仓库跟踪的默认 bundle 配置现在以“fresh runtime root 首启可进入设置页”为目标：
   - `translate.enabled=false`
   - `tts.provider=macos_system`
+- GitHub Release 现在分成两条线：
+  - Windows 老分支继续使用 `.github/workflows/windows-release-on-tag.yml`，tag 规则保持 `v*`
+  - 当前 mac 分支使用 `.github/workflows/macos-release-on-tag.yml`，tag 规则是 `mac-v*`
+- mac tag 是否标记成 prerelease 只看是否包含 `-rc.`，不要再沿用“只要 tag 里有 `-` 就是 prerelease”的 Windows 旧判断。
 
 别把“密钥仍然外置”误读成“不是一体化”。  
 真正的边界只有一个：`.env.local` 不会被自动打进产物。
@@ -74,6 +78,59 @@ npm run tauri -- build --bundles app
 
 这条命令同样会先自动构建 sidecar，再产出 `WeChat Auto Shell.app`。  
 当前自动化发布闸口默认使用这条命令；`scripts/smoke_desktop_shell_release.py` 的默认 build 路径也已经切到这里，并优先启动 `desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app/Contents/MacOS/wechat-auto-shell` 做 smoke。
+
+### GitHub Release tag 约定
+
+当前仓库不要再把 mac 分支 tag 和 Windows 老分支混用：
+
+- Windows 老分支：
+  - stable tag：`v0.1.0`
+  - rc tag：`v0.1.0-rc.1`
+- 当前 mac 分支：
+  - stable tag：`mac-v0.1.0`
+  - rc tag：`mac-v0.1.0-rc.1`
+
+如果你要先同步版本入口，再拿推荐 tag，可以执行：
+
+```bash
+python3 scripts/sync_desktop_shell_release_version.py --channel stable --base-version 0.1.0 --tag-prefix mac-v
+python3 scripts/sync_desktop_shell_release_version.py --channel rc --base-version 0.1.0 --rc-number 1 --tag-prefix mac-v
+```
+
+当前 `macos-release-on-tag.yml` 会发布这些公开资产：
+
+- `wechat-auto-shell-<version>-macos-apple-silicon.zip`
+- `SHA256SUMS.txt`
+
+`DMG` 仍然只作为可选 GUI 专项验收产物，不在默认 mac GitHub Release 自动化里承诺。
+
+### GitHub Release 标题与公开资产命名
+
+为避免双 release 页面看起来像两套完全无关的产物，当前仓库固定使用下面这套展示命名：
+
+- Windows 老分支：
+  - release 标题：`WeChat Auto Shell Windows <version>`
+  - 公开资产：
+    - `wechat-auto-shell-<version>-windows-x64.msi`
+    - `wechat-auto-shell-<version>-windows-x64-setup.exe`
+    - `SHA256SUMS.txt`
+- 当前 mac 分支：
+  - release 标题：`WeChat Auto Shell macOS Apple Silicon <version>`
+  - 公开资产：
+    - `wechat-auto-shell-<version>-macos-apple-silicon.zip`
+    - `SHA256SUMS.txt`
+
+这里的 `<version>` 不直接按 tag 去前缀计算：
+
+- 以桌面壳真实 bundle 版本为准，读取来源是：
+  - `desktop-shell/package.json`
+  - `desktop-shell/src-tauri/tauri.conf.json`
+- stable 示例：
+  - `v0.1.0` -> `0.1.0`
+  - `mac-v0.1.0` -> `0.1.0`
+- RC 示例：
+  - `v0.1.0-rc.1` -> `0.1.0-1`
+  - `mac-v0.1.0-rc.1` -> `0.1.0-1`
 
 ### 可选：DMG 构建（GUI 专项验收）
 
