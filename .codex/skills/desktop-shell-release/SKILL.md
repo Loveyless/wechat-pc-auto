@@ -11,6 +11,7 @@ description: 维护当前仓库 WeChat Auto Shell 的版本同步、tag 发布�
 
 - `docs/wechat-listening-pitfalls.md`
 - `docs/desktop-shell-build.md`
+- `docs/release-maintenance.md`
 - `pyproject.toml`
 - `desktop-shell/package.json`
 - `desktop-shell/package-lock.json`
@@ -91,7 +92,10 @@ python scripts/smoke_desktop_shell_release.py --skip-build
 ### 5. 再推 tag，让 workflow 发版
 
 - `v*` tag 会触发 `.github/workflows/windows-release-on-tag.yml`
+- 当前分支不要推 `mac-v*`；Apple Silicon macOS release 线在 `spike/tauri-react-refactor-mac`
 - workflow 会再次跑 sidecar build、前端测试/构建、Rust 测试、Tauri release build、release smoke，然后再上传资产
+- GitHub Release 标题固定为 `WeChat Auto Shell Windows <version>`
+- 对外资产固定为 `wechat-auto-shell-<version>-windows-x64.msi`、`wechat-auto-shell-<version>-windows-x64-setup.exe` 和 `SHA256SUMS.txt`
 - tag 名里包含 `-` 时，workflow 会把 GitHub Release 标成 prerelease
 
 ### 6. 收尾时必须明确交付状态

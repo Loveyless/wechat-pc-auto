@@ -11,6 +11,7 @@
 
 ## 版本入口
 
+- 维护手册：`docs/release-maintenance.md`
 - 版本同步脚本：`scripts/sync_desktop_shell_release_version.py`
 - Python 包：`pyproject.toml`
 - 前端包：`desktop-shell/package.json`
@@ -48,10 +49,12 @@
 `.github/workflows/windows-release-on-tag.yml` 的事实：
 
 - 触发条件：`v*` tag
+- 当前分支不要推 `mac-v*`；mac release 线在 `spike/tauri-react-refactor-mac`
 - 会重复跑完整 Windows 发布闸口
+- GitHub Release 标题：`WeChat Auto Shell Windows <version>`
 - 会上传这些资产：
-  - `msi`
-  - `nsis setup.exe`
+  - `wechat-auto-shell-<version>-windows-x64.msi`
+  - `wechat-auto-shell-<version>-windows-x64-setup.exe`
   - `SHA256SUMS.txt`
 - `wechat-auto-shell.exe`、`wechat-auto-backend.exe`、`group_listener_worker.exe` 保留为本地 build 输出和 workflow artifact，不作为 GitHub Release 对外下载项
 - `github.ref_name` 包含 `-` 时，GitHub Release 会被标成 prerelease
