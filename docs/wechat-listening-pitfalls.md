@@ -316,6 +316,7 @@
 - `tts.provider=tencent_cloud` 时，走腾讯云基础语音合成 `TextToVoice`（官方 Python SDK）；当前播放链路支持 `codec=wav/mp3`，其中 `pcm` 仍未放开。
 - `less_tts` 配置当前只暴露 `endpoint` / `api_key`；`voice/speed/pitch/style` 固定走仓库默认值，不在设置页展开。
 - 设置页里的 secret 现在统一是“直接输入、直接保存、下次回显”；如果读到的是旧 `*_env` 配置，不会因为保存别的字段被顺手改写，只有在你输入新值或点击“清空配置”时才会落盘。
+- 兼容旧安装版时，保存和“测试翻译”也必须继续识别顶层 `translate.deeplx_url` / `translate.deeplx_url_env`；不能在临时校验前先把 legacy 字段抹掉，否则设置页会出现“能回显旧值，但保存/测试报未配置”的假失败。
 - 腾讯云默认音色当前固定成 `WeJames`，也就是 `VoiceType=501008`；`501008` 不是 `sample_rate`，采样率仍只接受 `8000 / 16000 / 24000`。
 - 豆包配置当前额外支持 `sample_rate` / `speech_rate` / `loudness_rate` / `use_cache`。
 - 腾讯云配置当前额外支持 `voice_type` / `sample_rate` / `speed` / `volume` / `primary_language` / `segment_rate` / `emotion_*` / `request_timeout_seconds`。

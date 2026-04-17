@@ -210,6 +210,8 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
         runtime_config.translate.target_lang,
         field_path="translate.target_lang",
     )
+    # 先保留 legacy 顶层 deeplx 字段，避免保存/测试时在校验前丢失兼容值。
+    current_deeplx_translate = _resolve_translate_provider_payload(next_translate, "deeplx")
     next_translate["enabled"] = translate_enabled
     next_translate["provider"] = translate_provider
     next_translate["source_lang"] = translate_source_lang
@@ -219,7 +221,7 @@ def save_config_snapshot(config_path: str, payload: dict[str, Any]) -> dict[str,
     next_translate.pop(DEEPLX_ENV_FIELD, None)
     translate_provider_payloads = _read_section(translate_payload, "providers")
     next_deeplx_translate = _build_next_deeplx_translate_payload(
-        base_payload=_resolve_translate_provider_payload(next_translate, "deeplx"),
+        base_payload=current_deeplx_translate,
         payload=_read_section(translate_provider_payloads, "deeplx"),
         secret_updates=_read_section(translate_secret_updates, "deeplx"),
     )

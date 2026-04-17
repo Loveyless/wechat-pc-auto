@@ -450,6 +450,63 @@ class RuntimeConfigStoreTest(unittest.TestCase):
         self.assertEqual(saved["translate"]["providers"]["deeplx"]["deeplx_url"]["source"], "env")
         self.assertEqual(saved["translate"]["providers"]["deeplx"]["deeplx_url"]["value"], "")
 
+    def test_save_config_snapshot_preserves_top_level_legacy_deeplx_env_when_secret_update_is_omitted(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+
+        listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
+        listener_raw["translate"] = {
+            "enabled": True,
+            "provider": "deeplx",
+            "deeplx_url_env": "DEEPLX_URL",
+            "source_lang": "auto",
+            "target_lang": "EN",
+            "timeout_seconds": 8.0,
+        }
+        self._write_json(listener_path, listener_raw)
+
+        with mock.patch.dict(os.environ, {"DEEPLX_URL": "https://env.deeplx.local"}, clear=False):
+            saved = save_config_snapshot(
+                str(listener_path),
+                {
+                    "translate": {
+                        "enabled": True,
+                        "provider": "deeplx",
+                        "source_lang": "auto",
+                        "target_lang": "EN",
+                        "providers": {
+                            "deeplx": {
+                                "timeout_seconds": 8.0,
+                            }
+                        },
+                    },
+                    "display": {
+                        "english_only": False,
+                        "tts_auto_read_active_chat": True,
+                        "on_translate_fail": "show_cn_with_reason",
+                    },
+                    "tts": {
+                        "provider": "windows_system",
+                        "providers": {},
+                    },
+                    "secret_updates": {
+                        "translate": {},
+                        "tts": {},
+                    },
+                },
+            )
+
+        listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
+        self.assertNotIn("deeplx_url_env", listener_raw["translate"])
+        self.assertNotIn("timeout_seconds", listener_raw["translate"])
+        self.assertEqual(listener_raw["translate"]["providers"]["deeplx"]["deeplx_url_env"], "DEEPLX_URL")
+        self.assertNotIn("deeplx_url", listener_raw["translate"]["providers"]["deeplx"])
+        self.assertEqual(saved["translate"]["providers"]["deeplx"]["deeplx_url"]["source"], "env")
+        self.assertEqual(
+            saved["translate"]["providers"]["deeplx"]["deeplx_url"]["value"],
+            "https://env.deeplx.local",
+        )
+
     def test_save_config_snapshot_supports_openai_compatible_provider(self):
         listener_path, _, temp_dir = self._create_runtime_files()
         self.addCleanup(temp_dir.cleanup)
@@ -706,6 +763,47 @@ class RuntimeConfigStoreTest(unittest.TestCase):
             self.assertEqual(runtime_config.translate.provider, "openai_compatible")
             self.assertEqual(runtime_config.translate.openai_model, "gpt-4o-mini")
             self.assertEqual(runtime_config.tts.provider, "windows_system")
+
+        self.assertEqual(listener_path.read_text(encoding="utf-8"), before_listener)
+
+    def test_prepare_translate_runtime_config_for_test_preserves_top_level_legacy_deeplx_env(self):
+        listener_path, _, temp_dir = self._create_runtime_files()
+        self.addCleanup(temp_dir.cleanup)
+
+        listener_raw = json.loads(listener_path.read_text(encoding="utf-8"))
+        listener_raw["translate"] = {
+            "enabled": True,
+            "provider": "deeplx",
+            "deeplx_url_env": "DEEPLX_URL",
+            "source_lang": "auto",
+            "target_lang": "EN",
+            "timeout_seconds": 8.0,
+        }
+        self._write_json(listener_path, listener_raw)
+        before_listener = listener_path.read_text(encoding="utf-8")
+
+        with mock.patch.dict(os.environ, {"DEEPLX_URL": "https://env.deeplx.local"}, clear=False):
+            with prepare_translate_runtime_config_for_test(
+                str(listener_path),
+                {
+                    "translate": {
+                        "enabled": True,
+                        "provider": "deeplx",
+                        "source_lang": "ZH",
+                        "target_lang": "EN",
+                        "providers": {
+                            "deeplx": {
+                                "timeout_seconds": 9.0,
+                            }
+                        },
+                    },
+                },
+            ) as runtime_config:
+                self.assertEqual(runtime_config.translate.provider, "deeplx")
+                self.assertEqual(runtime_config.translate.deeplx_url, "https://env.deeplx.local")
+                self.assertEqual(runtime_config.translate.source_lang, "ZH")
+                self.assertEqual(runtime_config.translate.timeout_seconds, 9.0)
+                self.assertEqual(runtime_config.tts.provider, "windows_system")
 
         self.assertEqual(listener_path.read_text(encoding="utf-8"), before_listener)
 
