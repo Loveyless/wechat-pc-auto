@@ -520,6 +520,52 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             },
         )
 
+    def test_build_less_tts_curl_command_uses_skill_defaults(self):
+        settings = sidebar.LessTTSSettings(
+            endpoint="https://less-tts.example/v1/audio/speech",
+            api_key="less-token-1",
+        )
+
+        command = sidebar.build_less_tts_curl_command(
+            settings,
+            "你好",
+            headers_output_path="/tmp/headers.txt",
+            body_output_path="/tmp/body.mp3",
+        )
+
+        self.assertEqual(
+            command,
+            [
+                "curl",
+                "-sS",
+                "-D",
+                "/tmp/headers.txt",
+                "-o",
+                "/tmp/body.mp3",
+                "-H",
+                "Content-Type: application/json",
+                "-H",
+                "x-api-key: less-token-1",
+                "-X",
+                "POST",
+                "--data-raw",
+                '{"input": "你好", "voice": "zh-CN-XiaoxiaoNeural", "speed": 1.0, "pitch": "0", "style": "general"}',
+                "https://less-tts.example/v1/audio/speech",
+            ],
+        )
+
+    def test_parse_less_tts_response_metadata_reads_last_status_and_content_type(self):
+        status_code, content_type = sidebar.parse_less_tts_response_metadata(
+            "HTTP/1.1 100 Continue\r\n\r\n"
+            "HTTP/1.1 200 OK\r\n"
+            "Date: Fri, 17 Apr 2026 19:43:45 GMT\r\n"
+            "Content-Type: audio/mpeg\r\n"
+            "Content-Length: 21024\r\n"
+        )
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(content_type, "audio/mpeg")
+
     def test_build_tencent_cloud_tts_request_payload(self):
         settings = sidebar.TencentCloudTTSSettings(
             secret_id="secret-id-1",
@@ -756,6 +802,10 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
             sidebar,
             "resolve_config_file_path",
             return_value="D:\\mock\\config\\less_tts.json",
+        ), mock.patch.object(
+            sidebar,
+            "probe_command_runtime",
+            return_value="",
         ):
             player, runtime_text = sidebar.create_tts_player(
                 {
@@ -769,6 +819,32 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertIn("backend=less_tts", runtime_text)
         self.assertIn("format=mp3", runtime_text)
         self.assertIn("voice=zh-CN-XiaoxiaoNeural", runtime_text)
+
+    def test_create_tts_player_less_tts_reports_missing_curl(self):
+        settings = sidebar.LessTTSSettings(
+            endpoint="https://less-tts.example/v1/audio/speech",
+            api_key="less-token-1",
+        )
+        with mock.patch.object(sidebar, "load_less_tts_settings", return_value=settings), mock.patch.object(
+            sidebar,
+            "resolve_config_file_path",
+            return_value="D:\\mock\\config\\less_tts.json",
+        ), mock.patch.object(
+            sidebar,
+            "probe_command_runtime",
+            return_value="missing command 'curl'",
+        ):
+            player, runtime_text = sidebar.create_tts_player(
+                {
+                    "provider": "less_tts",
+                    "config_path": "config/less_tts.json",
+                },
+                config_dir="D:\\mock",
+            )
+
+        self.assertIsNone(player)
+        self.assertIn("tts unavailable backend=less_tts", runtime_text)
+        self.assertIn("missing command 'curl'", runtime_text)
 
     def test_check_tts_dependency_packaging_reports_missing_websockets(self):
         with mock.patch.object(
@@ -794,11 +870,20 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertIn("tts dependency check failed backend=tencent_cloud", detail)
         self.assertIn("No module named 'tencentcloud'", detail)
 
-    def test_check_tts_dependency_packaging_accepts_less_tts_stdlib_path(self):
-        ok, detail = sidebar.check_tts_dependency_packaging({"provider": "less_tts"})
+    def test_check_tts_dependency_packaging_accepts_less_tts_curl_path(self):
+        with mock.patch.object(sidebar, "probe_command_runtime", return_value=""):
+            ok, detail = sidebar.check_tts_dependency_packaging({"provider": "less_tts"})
 
         self.assertTrue(ok)
-        self.assertIn("tts dependency check passed backend=less_tts", detail)
+        self.assertIn("tts dependency check passed backend=less_tts command=curl", detail)
+
+    def test_check_tts_dependency_packaging_reports_missing_less_tts_curl(self):
+        with mock.patch.object(sidebar, "probe_command_runtime", return_value="missing command 'curl'"):
+            ok, detail = sidebar.check_tts_dependency_packaging({"provider": "less_tts"})
+
+        self.assertFalse(ok)
+        self.assertIn("tts dependency check failed backend=less_tts", detail)
+        self.assertIn("missing command 'curl'", detail)
 
     def test_check_tts_dependency_packaging_accepts_macos_system(self):
         with mock.patch.object(sidebar, "probe_command_runtime", return_value=""):
@@ -920,6 +1005,34 @@ class RuntimeSharedHelpersTest(unittest.TestCase):
         self.assertFalse(player._run_speak_blocking("Hello world"))
         self.assertIn("boom", player._last_error)
         self.assertTrue(any("tts failed backend=less_tts" in line for line in logs))
+
+    def test_less_tts_synthesize_audio_uses_curl_skill_path(self):
+        settings = sidebar.LessTTSSettings(
+            endpoint="https://less-tts.example/v1/audio/speech",
+            api_key="less-token-1",
+        )
+        player = sidebar.LessTTSHttpPlayer(settings)
+
+        def fake_run(command, **kwargs):
+            headers_path = command[command.index("-D") + 1]
+            body_path = command[command.index("-o") + 1]
+            pathlib.Path(headers_path).write_text(
+                "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\n",
+                encoding="utf-8",
+            )
+            pathlib.Path(body_path).write_bytes(b"ID3\x04\x00\x00\x00")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        with mock.patch.object(sidebar.subprocess, "run", side_effect=fake_run) as mocked_run:
+            audio_data = player._synthesize_audio("Hello world")
+
+        self.assertEqual(audio_data, b"ID3\x04\x00\x00\x00")
+        mocked_run.assert_called_once()
+        command = mocked_run.call_args.args[0]
+        self.assertEqual(command[0], "curl")
+        self.assertIn("--data-raw", command)
+        self.assertIn("Content-Type: application/json", command)
+        self.assertIn("x-api-key: less-token-1", command)
 
     def test_less_tts_run_blocking_emits_success_log(self):
         settings = sidebar.LessTTSSettings(
