@@ -312,9 +312,10 @@
 - 仓库跟踪的 provider JSON 只应保留安全默认值；真实凭证通过设置页或当前 runtime root 里的 provider 配置直接写入，不应把仓库样例改成带真值的提交。
 - `tts.provider=windows_system` 时，仍走 Windows 系统 `System.Speech`，默认优先选 `Microsoft Zira Desktop`，不存在时再回退到其他英文 voice。
 - `tts.provider=doubao` 时，走豆包单向流式 WebSocket；当前播放链路支持 `audio_format=wav/mp3`，其中 `wav` 仍走头部修正 + `winsound`，`mp3` 走 Windows MCI 播放。
-- `tts.provider=less_tts` 时，走 HTTP `audio/mpeg` 合成接口；当前固定按 MP3 播放，不额外引入第三方 Python 依赖。
+- `tts.provider=less_tts` 时，走 HTTP `audio/mpeg` 合成接口；当前按 skill 约定在 Windows 上直接调用系统 `curl.exe` 请求 Worker，并固定按 MP3 播放，不额外引入第三方 Python 依赖。
 - `tts.provider=tencent_cloud` 时，走腾讯云基础语音合成 `TextToVoice`（官方 Python SDK）；当前播放链路支持 `codec=wav/mp3`，其中 `pcm` 仍未放开。
 - `less_tts` 配置当前只暴露 `endpoint` / `api_key`；`voice/speed/pitch/style` 固定走仓库默认值，不在设置页展开。
+- `less_tts` 如果返回 `403` 且 body 是 `error code: 1010`，优先怀疑 Cloudflare 对 Python 默认请求特征做风控；当前项目已经按 skill 收敛到 `curl.exe -H "Content-Type: application/json" -H "x-api-key: ..."` 这条调用路径，不要再回退成 Python `urllib` 直接发请求。
 - 设置页里的 secret 现在统一是“直接输入、直接保存、下次回显”；如果读到的是旧 `*_env` 配置，不会因为保存别的字段被顺手改写，只有在你输入新值或点击“清空配置”时才会落盘。
 - 兼容旧安装版时，保存和“测试翻译”也必须继续识别顶层 `translate.deeplx_url` / `translate.deeplx_url_env`；不能在临时校验前先把 legacy 字段抹掉，否则设置页会出现“能回显旧值，但保存/测试报未配置”的假失败。
 - 腾讯云默认音色当前固定成 `WeJames`，也就是 `VoiceType=501008`；`501008` 不是 `sample_rate`，采样率仍只接受 `8000 / 16000 / 24000`。

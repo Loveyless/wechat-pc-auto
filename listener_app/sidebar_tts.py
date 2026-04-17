@@ -14,8 +14,6 @@ import threading
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 if __package__:
@@ -424,6 +422,27 @@ def probe_tencent_cloud_tts_runtime() -> str:
     return ""
 
 
+def probe_less_tts_curl_runtime() -> str:
+    try:
+        completed = subprocess.run(
+            ["curl.exe", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        return f"missing executable 'curl.exe': {exc}"
+    except subprocess.TimeoutExpired:
+        return "curl.exe --version timed out"
+    if completed.returncode == 0:
+        return ""
+    detail = _truncate_less_tts_error_text(
+        completed.stderr or completed.stdout or f"exit code {completed.returncode}"
+    )
+    return f"curl.exe unavailable: {detail}"
+
+
 def play_wav_bytes_on_windows(audio_data: bytes) -> bool:
     import winsound
 
@@ -782,6 +801,56 @@ def build_less_tts_request_payload(settings: LessTTSSettings, text: str) -> byte
         },
         ensure_ascii=False,
     ).encode("utf-8")
+
+
+def build_less_tts_curl_command(
+    settings: LessTTSSettings,
+    text: str,
+    *,
+    headers_output_path: str,
+    body_output_path: str,
+) -> list[str]:
+    return [
+        "curl.exe",
+        "-sS",
+        "-D",
+        headers_output_path,
+        "-o",
+        body_output_path,
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        f"x-api-key: {settings.api_key}",
+        "-X",
+        "POST",
+        "--data-raw",
+        build_less_tts_request_payload(settings, text).decode("utf-8"),
+        settings.endpoint,
+    ]
+
+
+def parse_less_tts_response_metadata(headers_text: str) -> tuple[int, str]:
+    status_code = 0
+    content_type = ""
+    current_status = 0
+    current_content_type = ""
+    for raw_line in str(headers_text or "").replace("\r\n", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("HTTP/"):
+            parts = line.split()
+            current_status = int(parts[1]) if len(parts) >= 2 and parts[1].isdigit() else 0
+            current_content_type = ""
+            status_code = current_status
+            continue
+        if ":" not in raw_line:
+            continue
+        name, value = raw_line.split(":", 1)
+        if name.strip().lower() == "content-type":
+            current_content_type = value.strip().lower()
+            content_type = current_content_type
+    return status_code, content_type
 
 
 def build_less_tts_runtime_fields(settings: LessTTSSettings, config_path: str) -> str:
@@ -1331,32 +1400,52 @@ class LessTTSHttpPlayer:
         self._emit_log(
             f"tts synthesize start backend=less_tts endpoint={endpoint_host} chars={len(payload)} preview={preview}"
         )
-        request_payload = build_less_tts_request_payload(self.settings, payload)
-        request = urllib_request.Request(
-            self.settings.endpoint,
-            data=request_payload,
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": self.settings.api_key,
-            },
-            method="POST",
-        )
-        try:
-            with urllib_request.urlopen(
-                request,
-                timeout=self.settings.request_timeout_seconds,
-            ) as response:
-                content_type = str(response.headers.get("Content-Type") or "").strip().lower()
-                audio_data = response.read()
-        except urllib_error.HTTPError as exc:
-            content_type = str(exc.headers.get("Content-Type") or "").strip().lower()
-            detail = parse_less_tts_error_payload(exc.read(), content_type)
+        with tempfile.TemporaryDirectory(prefix="less-tts-") as temp_dir:
+            headers_path = os.path.join(temp_dir, "response.headers.txt")
+            body_path = os.path.join(temp_dir, "response.body.bin")
+            command = build_less_tts_curl_command(
+                self.settings,
+                payload,
+                headers_output_path=headers_path,
+                body_output_path=body_path,
+            )
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=max(1.0, float(self.settings.request_timeout_seconds) + 5.0),
+                    check=False,
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError(f"less_tts request failed reason={exc}") from exc
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError(
+                    f"less_tts request failed reason=curl.exe timed out after {self.settings.request_timeout_seconds:.1f}s"
+                ) from exc
+
+            headers_text = ""
+            if os.path.isfile(headers_path):
+                with open(headers_path, "r", encoding="utf-8", errors="ignore") as header_file:
+                    headers_text = header_file.read()
+            audio_data = b""
+            if os.path.isfile(body_path):
+                with open(body_path, "rb") as body_file:
+                    audio_data = body_file.read()
+
+        status_code, content_type = parse_less_tts_response_metadata(headers_text)
+        if completed.returncode != 0 and status_code <= 0:
+            detail = _truncate_less_tts_error_text(
+                completed.stderr or completed.stdout or f"exit code {completed.returncode}"
+            )
+            raise RuntimeError(f"less_tts request failed reason={detail}")
+        if status_code != 200:
+            detail = parse_less_tts_error_payload(audio_data, content_type)
+            if detail == "-" and (completed.stderr or completed.stdout):
+                detail = _truncate_less_tts_error_text(completed.stderr or completed.stdout)
             raise RuntimeError(
-                f"less_tts request failed status={exc.code} detail={detail}"
-            ) from exc
-        except urllib_error.URLError as exc:
-            reason = getattr(exc, "reason", exc)
-            raise RuntimeError(f"less_tts request failed reason={reason}") from exc
+                f"less_tts request failed status={status_code or '-'} detail={detail}"
+            )
 
         if "audio/mpeg" not in content_type:
             detail = parse_less_tts_error_payload(audio_data, content_type)
@@ -1443,6 +1532,9 @@ def create_tts_player(
         resolved_config_path = resolve_config_file_path(config_path, base_dir=config_dir)
         settings = load_less_tts_settings(config_path, base_dir=config_dir)
         runtime_fields = build_less_tts_runtime_fields(settings, resolved_config_path)
+        dependency_error = probe_less_tts_curl_runtime()
+        if dependency_error:
+            return None, f"tts unavailable {runtime_fields} reason={dependency_error}"
         player = LessTTSHttpPlayer(settings)
         return (
             player,
@@ -1475,7 +1567,10 @@ def check_tts_dependency_packaging(
             return False, f"tts dependency check failed backend=doubao reason={dependency_error}"
         return True, "tts dependency check passed backend=doubao module=websockets"
     if provider == "less_tts":
-        return True, "tts dependency check passed backend=less_tts module=stdlib"
+        dependency_error = probe_less_tts_curl_runtime()
+        if dependency_error:
+            return False, f"tts dependency check failed backend=less_tts reason={dependency_error}"
+        return True, "tts dependency check passed backend=less_tts module=curl.exe"
     dependency_error = probe_tencent_cloud_tts_runtime()
     if dependency_error:
         return False, f"tts dependency check failed backend=tencent_cloud reason={dependency_error}"
