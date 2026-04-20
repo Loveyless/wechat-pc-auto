@@ -26,6 +26,10 @@
   - Windows 老分支继续使用 `.github/workflows/windows-release-on-tag.yml`，tag 规则保持 `v*`
   - 当前 mac 分支使用 `.github/workflows/macos-release-on-tag.yml`，tag 规则是 `mac-v*`
 - mac tag 是否标记成 prerelease 只看是否包含 `-rc.`，不要再沿用“只要 tag 里有 `-` 就是 prerelease”的 Windows 旧判断。
+- 当前 mac GitHub Release 不再允许发布 unsigned / unnotarized `.app zip`：
+  - workflow 必须拿到 Apple 签名证书和公证凭据
+  - 构建后还会额外执行 `codesign --verify`、`spctl --assess`、`xcrun stapler validate`
+  - 这条链不过就直接失败，避免用户下载后被 Gatekeeper 报 “已损坏”
 - 具体的双分支维护、tag 操作顺序和 GitHub Release 核对清单，统一看 `docs/release-maintenance.md`。
 
 别把“密钥仍然外置”误读成“不是一体化”。  
@@ -37,6 +41,12 @@
 - 已安装 PyInstaller：`python3 -m pip install --user pyinstaller`
 - 已安装前端依赖：`cd desktop-shell && npm install`
 - 已安装 Rust toolchain：`cargo` / `rustc`
+- 如果要跑当前 mac GitHub Release workflow，还必须先在仓库 Secrets 里配置：
+  - 必填：`APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`
+  - 二选一：
+    - `APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`
+    - `APPLE_API_KEY`、`APPLE_API_ISSUER`、`APPLE_API_PRIVATE_KEY`
+  - 可选：`APPLE_SIGNING_IDENTITY`、`APPLE_PROVIDER_SHORT_NAME`
 
 如果终端里找不到 `cargo`、`rustc` 或 `python3 -m PyInstaller`，先修环境，不要把环境问题甩给仓库。
 
@@ -102,6 +112,13 @@ python3 scripts/sync_desktop_shell_release_version.py --channel rc --base-versio
 
 - `wechat-auto-shell-<version>-macos-apple-silicon.zip`
 - `SHA256SUMS.txt`
+
+这条 workflow 现在还会在发布前强制校验：
+
+- 签名证书和公证凭据已配置
+- `WeChat Auto Shell.app` 通过 `codesign --verify`
+- `WeChat Auto Shell.app` 通过 `spctl --assess`
+- `WeChat Auto Shell.app` 的 notarization ticket 通过 `xcrun stapler validate`
 
 `DMG` 仍然只作为可选 GUI 专项验收产物，不在默认 mac GitHub Release 自动化里承诺。
 

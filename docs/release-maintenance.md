@@ -53,12 +53,44 @@ python3 scripts/sync_desktop_shell_release_version.py --channel rc --base-versio
 - GitHub Release 标题和公开资产名里的 `<version>` 取自真实 desktop bundle 版本，不直接按 tag 去前缀计算。
 - RC 时最容易踩坑：tag 看起来是 `mac-v0.1.0-rc.1`，但公开资产版本仍是 `0.1.0-1`。
 
+## GitHub Secrets
+
+当前 mac release workflow 会在构建前先校验 Apple 签名 / 公证前提；缺失时直接失败，不再继续发布 unsigned / unnotarized `.app zip`。
+
+必填 secrets：
+
+- `APPLE_CERTIFICATE`
+- `APPLE_CERTIFICATE_PASSWORD`
+
+公证凭据二选一：
+
+- Apple ID 路线：
+  - `APPLE_ID`
+  - `APPLE_PASSWORD`
+  - `APPLE_TEAM_ID`
+- App Store Connect API key 路线：
+  - `APPLE_API_KEY`
+  - `APPLE_API_ISSUER`
+  - `APPLE_API_PRIVATE_KEY`
+
+可选 secrets：
+
+- `APPLE_SIGNING_IDENTITY`
+- `APPLE_PROVIDER_SHORT_NAME`
+
+当前 workflow 的发布前校验固定包含：
+
+- `codesign --verify --deep --strict --verbose=2`
+- `spctl --assess --type exec --verbose=4`
+- `xcrun stapler validate`
+
 ## 当前分支发版步骤
 
 1. 先同步远端，确认你在 `spike/tauri-react-refactor-mac` 且工作区干净。
 2. 用版本同步脚本更新版本入口。
 3. 把版本改动先提交到分支；不要先打 tag。
-4. 跑完整发布闸口：
+4. 先确认上面的 Apple secrets 已经配置完整。
+5. 跑完整发布闸口：
 
 ```bash
 python3 scripts/build_desktop_shell_sidecars.py --python python3
@@ -71,25 +103,26 @@ cd ..
 python3 scripts/smoke_desktop_shell_release.py --skip-build
 ```
 
-5. 只有上面全部通过，才允许打 annotated tag，例如：
+6. 只有上面全部通过，才允许打 annotated tag，例如：
 
 ```bash
 git tag -a mac-v0.1.0 -m "macOS release 0.1.0"
 git tag -a mac-v0.1.0-rc.1 -m "macOS rc 0.1.0-rc.1"
 ```
 
-6. 先 push 分支，再 push tag：
+7. 先 push 分支，再 push tag：
 
 ```bash
 git push origin spike/tauri-react-refactor-mac
 git push origin mac-v0.1.0
 ```
 
-7. 到 GitHub Release 页面确认：
+8. 到 GitHub Release 页面确认：
   - workflow runner 是 `macos-14`
   - release 标题是 `WeChat Auto Shell macOS Apple Silicon <version>`
   - 资产只有 `wechat-auto-shell-<version>-macos-apple-silicon.zip` 和 `SHA256SUMS.txt`
   - tag 包含 `-rc.` 时才会标成 prerelease
+  - workflow 日志里 `codesign` / `spctl` / `stapler` 校验都通过
 
 ## `DMG` 的边界
 
@@ -107,4 +140,7 @@ npm run tauri build
 - 版本入口没改全，导致 tag、bundle version 和公开资产版本对不上。
 - 误推了 `v*` tag，触发到 Windows 老分支语义。
 - 只看 `.app` / `DMG` 构建成功，没跑 `python3 scripts/smoke_desktop_shell_release.py --skip-build`。
+- Apple 签名证书或公证 secrets 没配全，workflow 在 build 前就该失败；不要手动绕过再发 unsigned zip。
+- workflow 的 `codesign` / `spctl` / `stapler` 校验失败，通常是证书、Team、notary 凭据或票据链不匹配。
+- 用户下载后提示 “WeChat Auto Shell.app” 已损坏，优先怀疑拿到的是修复前的旧 release 资产或公证链断了，不要先把锅甩给 runtime 业务逻辑。
 - 用旧 runtime root 验首发默认值，结果被 `~/Library/Application Support/com.wechatauto.shell` 里的历史配置污染。

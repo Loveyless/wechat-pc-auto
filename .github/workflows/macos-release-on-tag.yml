@@ -45,6 +45,60 @@ jobs:
         working-directory: desktop-shell
         run: npm ci
 
+      - name: Validate macOS signing inputs
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APPLE_CERTIFICATE}" || -z "${APPLE_CERTIFICATE_PASSWORD}" ]]; then
+            echo "Missing APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD GitHub secrets for macOS code signing." >&2
+            exit 1
+          fi
+
+          has_apple_id_creds=false
+          if [[ -n "${APPLE_ID}" || -n "${APPLE_PASSWORD}" || -n "${APPLE_TEAM_ID}" ]]; then
+            if [[ -z "${APPLE_ID}" || -z "${APPLE_PASSWORD}" || -z "${APPLE_TEAM_ID}" ]]; then
+              echo "APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID must be configured together." >&2
+              exit 1
+            fi
+            has_apple_id_creds=true
+          fi
+
+          has_api_key_creds=false
+          if [[ -n "${APPLE_API_KEY}" || -n "${APPLE_API_ISSUER}" || -n "${APPLE_API_PRIVATE_KEY}" ]]; then
+            if [[ -z "${APPLE_API_KEY}" || -z "${APPLE_API_ISSUER}" || -z "${APPLE_API_PRIVATE_KEY}" ]]; then
+              echo "APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_PRIVATE_KEY must be configured together." >&2
+              exit 1
+            fi
+            has_api_key_creds=true
+          fi
+
+          if [[ "${has_apple_id_creds}" != "true" && "${has_api_key_creds}" != "true" ]]; then
+            echo "Missing notarization credentials. Configure either Apple ID secrets or App Store Connect API key secrets." >&2
+            exit 1
+          fi
+
+      - name: Prepare App Store Connect API key
+        if: ${{ secrets.APPLE_API_KEY != '' }}
+        shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          api_key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s' "${APPLE_API_PRIVATE_KEY}" > "$api_key_path"
+          chmod 600 "$api_key_path"
+          echo "APPLE_API_KEY_PATH=$api_key_path" >> "$GITHUB_ENV"
+
       - name: Build desktop-shell sidecars
         run: python3 scripts/build_desktop_shell_sidecars.py --python python3
 
@@ -62,7 +116,31 @@ jobs:
 
       - name: Build desktop-shell macOS app release
         working-directory: desktop-shell
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
+          APPLE_PROVIDER_SHORT_NAME: ${{ secrets.APPLE_PROVIDER_SHORT_NAME }}
         run: npm run tauri -- build --bundles app
+
+      - name: Verify signed and notarized macOS app
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_bundle="desktop-shell/src-tauri/target/release/bundle/macos/WeChat Auto Shell.app"
+          if [[ ! -d "$app_bundle" ]]; then
+            echo "missing app bundle: $app_bundle" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app_bundle"
+          spctl --assess --type exec --verbose=4 "$app_bundle"
+          xcrun stapler validate "$app_bundle"
 
       - name: Run desktop-shell release smoke
         run: python3 scripts/smoke_desktop_shell_release.py --skip-build

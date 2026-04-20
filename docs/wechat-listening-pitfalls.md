@@ -618,6 +618,28 @@
 - 这里的 `<version>` 不能直接从 tag 去前缀得出，必须跟随桌面壳真实 bundle 版本；当前 workflow 会读取 `desktop-shell/package.json` 与 `desktop-shell/src-tauri/tauri.conf.json` 并校验两者一致。
 - 具体的双分支维护步骤、tag 命名和 GitHub Release 自查项，统一收口在 `docs/release-maintenance.md`；不要只靠 README 或这份 pitfalls 的零散段落操作。
 
+### 28.066) 当前 mac GitHub Release 不能再发 unsigned / unnotarized `.app zip`
+现象：
+- 用户从 GitHub Release 下载并解压后，macOS Gatekeeper 直接提示 “WeChat Auto Shell.app” 已损坏、建议移到废纸篓。
+- 更麻烦的是：CI 里的 `.app build + smoke` 可能都过了，但真正下载到另一台 Mac 上还是打不开。
+
+根因：
+- `npm run tauri -- build --bundles app` 只证明 Tauri 能打出 `.app`，不等于这个公开资产已经完成 Apple 签名和 notarization。
+- 对从互联网下载的 mac app 来说，没做签名 / 公证，或签名票据链没跟公开 zip 对上，Gatekeeper 很容易直接把它报成“已损坏”。
+
+处理：
+- 当前 mac release workflow 必须先校验：
+  - `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`
+  - 以及一组可用公证凭据：
+    - `APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`
+    - 或 `APPLE_API_KEY`、`APPLE_API_ISSUER`、`APPLE_API_PRIVATE_KEY`
+- 构建后还必须额外通过：
+  - `codesign --verify --deep --strict --verbose=2`
+  - `spctl --assess --type exec --verbose=4`
+  - `xcrun stapler validate`
+- 上面任一项不过，workflow 应直接失败，不允许继续发布 public zip。
+- 对已经发出去的旧未公证资产，本地临时排障可以手动去掉 quarantine（隔离）属性；但这只适用于你确认来源可信的自测包，不是公开 release 的解决方案。
+
 ### 28.07) 图标链路不完整时，通常不是 Tauri 坏了，而是输入资源只接了一半
 现象：
 - Rust 单测或 release build 在 `tauri::generate_context!()` / bundle 阶段因为图标资源缺失直接失败。

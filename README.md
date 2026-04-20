@@ -36,6 +36,7 @@
   - tag：`mac-v0.x.y` / `mac-v0.x.y-rc.n`
   - release 标题：`WeChat Auto Shell macOS Apple Silicon <version>`
   - 公开资产：`wechat-auto-shell-<version>-macos-apple-silicon.zip`、`SHA256SUMS.txt`
+- 当前 mac GitHub Release 公开资产应是已签名 + 已公证（notarized）的 `.app` 压缩包；如果你下载旧资产后看到 “WeChat Auto Shell.app” 已损坏，优先怀疑拿到的是修复前的未公证包，而不是业务功能回归。
 - Release 总入口：
   - [GitHub Releases](https://github.com/Loveyless/wechat-pc-auto/releases)
 - 现在不会有“同一个 release 页面同时挂 win/mac 两套资产”的自动化；双 release 页面就是当前约定。
