@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechat-pc-auto"                
-version = "0.1.4"
+version = "0.1.5"
 description = "Apple Silicon macOS WeChat session-preview listener with local runtime API"
 readme = "README.md"
 authors = [{name = "YourName", email = "your@email.com"}]
